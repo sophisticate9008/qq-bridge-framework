@@ -13,7 +13,7 @@ test('framework archives exclude private paths, stores, traversal and credential
 });
 
 test('the runtime archive uses compiled commands without changing the source manifest or dependencies', () => {
-  const original = { name: 'qq-bridge-framework', version: '1.7.2', private: true,
+  const original = { name: 'qq-bridge-framework', version: '1.7.3', private: true,
     scripts: { start: 'node scripts/cli.ts start', cli: 'node scripts/cli.ts', build: 'node scripts/build.ts' },
     bin: { 'qq-bridge-framework': 'scripts/cli.ts', 'qqbridge-framework': 'ops/qqbridge-framework' }, dependencies: { example: '1.0.0' } };
   const saved = structuredClone(original), runtime = frameworkRuntimeManifest(original);

@@ -26,12 +26,12 @@ git --version
 
 ## 2. 下载完整框架包并安装依赖
 
-从 [v1.7.2 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.2) 下载 `qq-bridge-framework-1.7.2.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
+从 [v1.7.3 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.3) 下载 `qq-bridge-framework-1.7.3.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
 
 ```sh
 sha256sum --ignore-missing --check SHA256SUMS
-tar -xzf qq-bridge-framework-1.7.2.tar.gz
-cd qq-bridge-framework-1.7.2
+tar -xzf qq-bridge-framework-1.7.3.tar.gz
+cd qq-bridge-framework-1.7.3
 npm ci --omit=dev
 ```
 
@@ -84,7 +84,7 @@ npm start
 
 ## 5. 准备 DSH 桥接插件
 
-按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.7.2.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
+按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.7.3.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
 
 确认独立 DSH web 已启动，并在控制台“连接设置”选择自动连接本机 DSH。本机自动鉴权要求 DSH 与框架由同一系统用户运行，凭据文件归该用户所有且权限为 `0600` 或 `0400`。默认无需手填地址、令牌和凭据路径。远程实例使用高级手动接入。
 
