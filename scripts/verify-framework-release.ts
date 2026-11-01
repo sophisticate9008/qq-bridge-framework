@@ -124,7 +124,7 @@ try {
   assert(token.length >= 24);
   const status = await run(process.execPath, [cli, 'status'], { cwd, env, timeout: 15000 });
   assert.match(status.stdout, /运行正常/);
-  await run(process.execPath, ['--input-type=module', '-e', `
+  await run(process.execPath, ['--input-type=module', '-e', String.raw`
     import assert from 'node:assert/strict';
     import sharp from 'sharp';
     import { createBuiltinMarkdownRenderer } from './dist/src/rendering/builtin-markdown.js';
