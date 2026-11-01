@@ -1034,7 +1034,19 @@ test('real local WS text passes through native host/DSH/policy/durable outbox to
   assert.deepEqual(fake.rpc.map(request => request.method), ['settings/describe', 'bridgePlugin/describe'])
   await assert.rejects(fake.runtime().adapterRuntime.disconnect!(), { code: 'NATIVE_CHAT_BUSY' })
   fake.message(1)
-  await until(() => fake.rpc.some(request => request.method === 'session/prompt'))
+  const promptBegan = Date.now()
+  try {
+    await awaitCondition(() => fake.rpc.some(request => request.method === 'session/prompt'), {
+      message: 'Native prompt did not reach DSH', timeoutMs: process.platform === 'win32' ? 15000 : 5000,
+      diagnostics: () => ({ rpc: fake.rpc.map(call => call.method), activity: fake.runtime().activity() })
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ nativePipelineFailure: { status: await fake.runtime().status(),
+      rpc: fake.rpc.map(call => call.method), activity: fake.runtime().activity(),
+      sessions: fake.runtime().host()?.sessions.list({ limit: 16 }), outbox: fake.runtime().host()?.outbox.list() } }))
+    throw error
+  }
+  if (process.platform === 'win32') console.log(JSON.stringify({ windowsFirstPromptMs: Date.now() - promptBegan }))
   assert.deepEqual(fake.rpc.find(request => request.method === 'session/create')?.request, { agentPreset: 'test-native-chat' })
   assert.equal(fake.rpc.find(request => request.method === 'session/selectModel')?.request.provider, 'external-provider')
   fake.agentEvent('assistant/message', { turn: 1, message: { id: 'prefix', content: [{ type: 'text', text: 'Tool narration.' }] } })
