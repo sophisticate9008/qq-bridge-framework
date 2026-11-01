@@ -68,6 +68,7 @@ test('sticker selection and collection attempts suppress repair for native and p
   for (const block of [
     { name: 'qbf_sticker_send', arguments: '{}' },
     { name: 'qbf_sticker_manage', arguments: '{"action":"add"}' },
+    { name: 'qbf_sticker_manage', arguments: '{"action":"add","assetIds":["first","second"]}' },
     { name: 'qbf_sticker_manage', arguments: { action: 'add' } },
     { name: 'qbf_sticker_manage', input: { action: 'add' } },
   ]) {

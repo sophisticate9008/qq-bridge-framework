@@ -16,7 +16,7 @@ function validate(input: JsonValue): { query: string; limit: number } {
   return { query: typeof input.query === 'string' ? input.query.trim() : '', limit: typeof input.limit === 'number' ? input.limit : 24 };
 }
 
-type ManageInput = { action: 'add'; assetId: string } | { action: 'delete'; stickerId: string }
+type ManageInput = { action: 'add'; assetIds: readonly string[] } | { action: 'delete'; stickerId: string }
   | { action: 'describe'; stickerId: string; description: string }
   | { action: 'annotate'; stickerKey: string; assetId: string; annotation: StickerAnnotation };
 function manageInput(input: JsonValue): ManageInput {
@@ -30,9 +30,12 @@ function manageInput(input: JsonValue): ManageInput {
       annotation: validateStickerAnnotation({ description: input.description, tags: input.tags, ...(input.avoid === undefined ? {} : { avoid: input.avoid }) }) };
   }
   if (input.action === 'add') {
-    assert(Object.keys(input).length === 2 && typeof input.assetId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,511}$/.test(input.assetId),
-      'INVALID_STICKER_INPUT', 'Adding a sticker requires one current image assetId.');
-    return { action: 'add', assetId: input.assetId };
+    const assetIds = input.assetId === undefined ? input.assetIds : [input.assetId];
+    assert(Object.keys(input).length === 2 && Object.keys(input).every(key => ['action', 'assetId', 'assetIds'].includes(key))
+      && Array.isArray(assetIds) && assetIds.length >= 1 && assetIds.length <= 8
+      && assetIds.every(id => typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,511}$/.test(id)),
+    'INVALID_STICKER_INPUT', 'Adding requires either one current image assetId or one assetIds array of 1 to 8 current images.');
+    return { action: 'add', assetIds: [...new Set(assetIds as string[])] };
   }
   assert((input.action === 'delete' || input.action === 'describe') && typeof input.stickerId === 'string'
     && input.stickerId.length >= 1 && input.stickerId.length <= 512 && !/[\x00-\x1f\x7f]/.test(input.stickerId)
@@ -56,9 +59,11 @@ export const NATIVE_STICKER_TOOLS: readonly NativeToolContribution[] = Object.fr
 }, {
   definition: { name: 'qbf_sticker_manage', capability: 'native.stickers.manage', featureId: 'framework-tools', timeoutMs: 60000,
     registrationSource: { origin: 'framework-builtin', ownerId: 'qq-bridge-framework', ownerName: '框架内置工具', transport: 'native' },
-    description: '表情管理：annotate为已看过的收藏写入本地语义缓存，传列表的stickerKey、已qbf_media_read的当前assetId、description、tags，可选avoid不适用场景。只记图像情绪和用途，不记人物身份或聊天内容，不改QQ备注。add将当前会话图片交给独立收藏机制筛选、去重和存储，任何聊天成员都可要求收藏；完成后静默结束本轮，不因回执补充发言；delete删除真实stickerId；describe修改QQ备注。先列表核对标识。协议写结果unknown不重试；annotate的cached不等于发出或新收藏。',
+    description: '表情管理：annotate为已看过的收藏写入本地语义缓存，传列表的stickerKey、已qbf_media_read的当前assetId、description、tags，可选avoid不适用场景。只记图像情绪和用途，不记人物身份或聊天内容，不改QQ备注。add将当前会话图片交给独立收藏机制筛选、去重和存储，任何聊天成员都可要求收藏；单图传assetId，多图用一次assetIds数组提交1至8张，两字段互斥。回执queued及外层confirmed仅表示请求受理，completed:false不是已收藏；不提前声称完成，不把历史queued当作当前收藏事实。调用后静默结束本轮，不因回执补充发言；delete删除真实stickerId；describe修改QQ备注。先列表核对标识。协议写结果unknown不重试；annotate的cached不等于发出或新收藏。',
     parameters: { type: 'object', additionalProperties: false, required: ['action'], properties: {
       action: { enum: ['add', 'delete', 'describe', 'annotate'] }, assetId: { type: 'string', minLength: 1, maxLength: 512 },
+      assetIds: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 512 },
+        description: '仅add使用；一次提交本轮明确指定的全部图片，重复资源去重，不能与assetId同时提供。' },
       stickerId: { type: 'string', minLength: 1, maxLength: 512 }, description: { type: 'string', maxLength: 255 },
       stickerKey: { type: 'string', pattern: '^[a-f0-9]{64}$' },
       tags: { type: 'array', maxItems: 12, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 24 } },
@@ -106,7 +111,38 @@ export function createNativeStickerService(options: {
     async execute(request): Promise<JsonValue> {
       const input = manageInput(request.input);
       const source = await guard(request);
-      if (input.action === 'add' && options.collect) return options.collect(request);
+      if (input.action === 'add' && options.collect) {
+        const store = options.store;
+        assert(store && options.selfId, 'STICKER_WRITE_UNAVAILABLE', 'Collection registration requires durable account storage.');
+        // Reject an invalid batch before any background job starts. The collector
+        // rechecks each image and authorization again at its own boundary.
+        for (const assetId of input.assetIds) {
+          const row = store.read('native-chat.media', assetId);
+          const media = row && isRecord(row.value) ? row.value : null;
+          assert(media && media.accountId === options.selfId && media.conversationId === request.scope.conversationId
+            && media.kind === 'image' && Number(media.expiresAt) > Date.now(),
+          'NATIVE_MEDIA_UNAVAILABLE', 'Every collection image must be current and belong to this account and conversation.');
+        }
+        const items: JsonValue[] = [];
+        let acceptedCount = 0, uncertain = false, rejected = false;
+        for (const assetId of input.assetIds) {
+          await guard(request);
+          let result: JsonValue;
+          try { result = await options.collect({ ...request, input: { action: 'add', assetId } }); }
+          catch {
+            request.signal.throwIfAborted();
+            result = { status: 'unknown', code: 'STICKER_COLLECTION_REGISTRATION_UNKNOWN', retry: false };
+          }
+          const registration = object(result);
+          if (registration.status === 'queued') acceptedCount++;
+          if (registration.status === 'unknown') uncertain = true;
+          if (registration.status === 'rejected') rejected = true;
+          items.push({ ...registration, assetId, completed: false, quiet: true });
+        }
+        // This acknowledges registration only; completion stays in the background.
+        return { status: uncertain ? 'unknown' : acceptedCount > 0 ? 'queued' : rejected ? 'rejected' : 'skipped',
+          requestedCount: input.assetIds.length, acceptedCount, completed: false, quiet: true, items };
+      }
       if (input.action === 'annotate') {
         assert(cache && options.selfId && options.store, 'STICKER_CACHE_UNAVAILABLE', 'Semantic annotations require account storage.');
         const listed = await options.port.list({ limit: 500, signal: request.signal });
@@ -141,10 +177,11 @@ export function createNativeStickerService(options: {
       // Prepare and validate before recording dispatch; only fixed protocol writes run after the durable record.
       let run: () => Promise<JsonValue>;
       if (input.action === 'add') {
+        if (input.assetIds.length !== 1) return { status: 'rejected', code: 'STICKER_BATCH_COLLECTION_UNAVAILABLE', completed: false, quiet: true };
         const add = options.port.add;
         const resolve = options.resolveAsset;
         if (!add || !resolve) return { status: 'rejected', code: 'STICKER_ADD_UNSUPPORTED' };
-        const resolution = await resolve({ assetId: input.assetId, type: 'image', conversationId: request.scope.conversationId,
+        const resolution = await resolve({ assetId: input.assetIds[0]!, type: 'image', conversationId: request.scope.conversationId,
           sessionId: request.scope.sessionId, generation: request.scope.generation, signal: request.signal });
         const file = typeof resolution === 'string' ? resolution : resolution.file;
         run = async () => json(await add({ file, signal: request.signal }));

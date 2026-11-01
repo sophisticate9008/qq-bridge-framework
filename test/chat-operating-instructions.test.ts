@@ -36,3 +36,13 @@ test('exact previous builtin paragraphs upgrade without replacing custom instruc
   const custom = previousSections[0] + '这段已经由用户自定义。'
   assert.equal(upgradeBuiltinChatOperatingInstructions(custom), custom)
 })
+
+
+test('collection registration never becomes a success claim and multiple images use one batch call', () => {
+  const collection = DAILY_CHAT_OPERATING_SECTIONS.find(section => section.startsWith('【表情的收藏与使用】'))!
+  assert.match(collection, /多图用一次 assetIds 数组提交本轮明确指定的全部图片/)
+  assert.match(collection, /外层 confirmed 只表示工具调用结清.*queued 和 completed:false 只表示后台受理，不证明收藏完成/)
+  assert.match(collection, /不能在后续招呼中补报收藏成功/)
+  assert.match(collection, /用户追问是否收藏时，先核对当前实际收藏记录/)
+  assert.match(collection, /调用后静默结束，不追加收藏回执话术/)
+})
