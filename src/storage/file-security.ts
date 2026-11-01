@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { chmodSync, lstatSync, realpathSync, type Stats } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { FrameworkError, isRecord } from '../core/values.ts';
@@ -9,7 +9,9 @@ const aclCache = new Map<string, { identity: string; trusted: boolean; private: 
 const aclScript = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$requests = ConvertFrom-Json ([Console]::In.ReadToEnd())
+while ($null -ne ($line = [Console]::In.ReadLine())) {
+try {
+$requests = ConvertFrom-Json $line
 $results = @(foreach ($r in $requests) {
 $p = [string]$r.path
 $item = Get-Item -LiteralPath $p -Force
@@ -47,16 +49,45 @@ foreach ($rule in $rules) {
 }
 @{trusted=[bool]$trusted; private=[bool]$private}
 })
-[Console]::Out.Write((ConvertTo-Json -InputObject $results -Compress))
+[Console]::Out.WriteLine((ConvertTo-Json -InputObject $results -Compress))
+} catch { [Console]::Out.WriteLine('{"error":true}') }
+}
 `;
 function identity(stat: Stats): string {
   return [stat.dev, stat.ino, stat.ctimeMs, stat.mtimeMs, stat.size, stat.nlink].join(':');
 }
-function readAcls(requests: readonly { path: string; protect: boolean }[]): unknown[] {
+let aclWorker: { worker: Worker; state: Int32Array<SharedArrayBuffer>; output: Uint8Array<SharedArrayBuffer> } | undefined;
+let workerUnavailable = false;
+function connection() {
+  if (workerUnavailable) throw new FrameworkError('FILE_SECURITY_UNAVAILABLE', 'The Windows ACL worker is unavailable.');
+  if (aclWorker) return aclWorker;
+  const state = new Int32Array(new SharedArrayBuffer(8)), output = new Uint8Array(new SharedArrayBuffer(65536));
   const executable = join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const result: unknown = JSON.parse(execFileSync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
-    Buffer.from(aclScript, 'utf16le').toString('base64')], { input: JSON.stringify(requests).replace(/[^\x00-\x7f]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, '0')}`),
-    encoding: 'utf8', timeout: 15000, maxBuffer: 65536, windowsHide: true }));
+  const worker = new Worker(new URL(import.meta.url.endsWith('.ts') ? './windows-acl-worker.ts' : './windows-acl-worker.js', import.meta.url), {
+    execArgv: [], resourceLimits: { maxOldGenerationSizeMb: 32, maxYoungGenerationSizeMb: 8 },
+    workerData: { executable, args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+      Buffer.from(aclScript, 'utf16le').toString('base64')], state: state.buffer, output: output.buffer }
+  });
+  worker.on('error', () => { workerUnavailable = true; });
+  worker.unref();
+  process.once('beforeExit', () => {
+    worker.ref(); worker.postMessage(null);
+    const timer = setTimeout(() => { void worker.terminate(); }, 2000);
+    timer.unref(); worker.once('exit', () => { clearTimeout(timer); });
+  });
+  aclWorker = { worker, state, output };
+  return aclWorker;
+}
+function readAcls(requests: readonly { path: string; protect: boolean }[]): unknown[] {
+  const { worker, state, output } = connection();
+  Atomics.store(state, 0, 0);
+  // ASCII JSON also works with Windows PowerShell's legacy console code page.
+  worker.postMessage(JSON.stringify(requests).replace(/[^\x00-\x7f]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, '0')}`));
+  if (Atomics.wait(state, 0, 0, 15000) === 'timed-out' || Atomics.load(state, 0) !== 1) {
+    workerUnavailable = true; void worker.terminate();
+    throw new FrameworkError('FILE_SECURITY_UNAVAILABLE', 'Windows file permissions could not be verified in time.');
+  }
+  const result: unknown = JSON.parse(Buffer.from(output.subarray(0, Atomics.load(state, 1))).toString('utf8'));
   if (!Array.isArray(result) || result.length !== requests.length)
     throw new FrameworkError('FILE_SECURITY_UNAVAILABLE', 'File permissions could not be verified.');
   return result;
