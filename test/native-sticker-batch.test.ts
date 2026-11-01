@@ -79,7 +79,7 @@ test('add input accepts one bounded image form and rejects ambiguous or oversize
 
 
 test('an explicit collection reports partial uncertainty and zero accepted requests without inventing submission', async t => {
-  const partial = fixture(t, async (_request, index) => index === 0
+  const partial = fixture(t, async (_request, index): Promise<JsonValue> => index === 0
     ? { status: 'queued', quiet: true } : { status: 'unknown', retry: false, quiet: true })
   partial.asset('first'); partial.asset('second')
   const result = await partial.execute({ action: 'add', assetIds: ['first', 'second'] })
