@@ -29,7 +29,7 @@ function fixture(t: TestContext, reply: (request: EffectRequest, index: number) 
 }
 
 test('one multi-image request registers each unique image without claiming collection completion', async t => {
-  const f = fixture(t, async (_request, index) => index === 0 ? { status: 'queued', quiet: true } : { status: 'skipped', reason: 'busy', quiet: true })
+  const f = fixture(t, async (_request, index): Promise<JsonValue> => index === 0 ? { status: 'queued', quiet: true } : { status: 'skipped', reason: 'busy', quiet: true })
   f.asset('first'); f.asset('second')
   const result = await f.execute({ action: 'add', assetIds: ['first', 'first', 'second'] })
   assert.deepEqual(f.calls.map(call => call.input), [{ action: 'add', assetId: 'first' }, { action: 'add', assetId: 'second' }])
