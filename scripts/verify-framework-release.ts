@@ -17,6 +17,9 @@ const source: unknown = JSON.parse(await readFile(join(root, 'package.json'), 'u
 assert(isRecord(source) && typeof source.version === 'string');
 const version = source.version, prefix = `qq-bridge-framework-${version}`;
 const artifact = join(root, 'runtime/releases', `v${version}`, `${prefix}.tar.gz`);
+// Git Bash's GNU tar treats a drive-letter path as a remote host. The Windows
+// system tar understands native absolute paths without changing archive checks.
+const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'tar.exe') : 'tar';
 const expectedSourceCommit = process.env.QQ_BRIDGE_FRAMEWORK_RELEASE_SOURCE_COMMIT ?? process.env.GITHUB_SHA;
 if (process.env.QQ_BRIDGE_FRAMEWORK_RELEASE_PLATFORM) assert.equal(process.platform, process.env.QQ_BRIDGE_FRAMEWORK_RELEASE_PLATFORM);
 if (process.env.QQ_BRIDGE_FRAMEWORK_RELEASE_ARCH) assert.equal(process.arch, process.env.QQ_BRIDGE_FRAMEWORK_RELEASE_ARCH);
@@ -58,16 +61,16 @@ try {
   const archiveChecksum = checksums.find(line => line.endsWith(`  ${prefix}.tar.gz`));
   assert(archiveChecksum && /^[a-f0-9]{64}  /.test(archiveChecksum));
   assert.equal(hash(await readFile(artifact)), archiveChecksum.slice(0, 64));
-  const listing = await run('tar', ['-tzf', artifact], { maxBuffer: 8 * 1024 * 1024 });
+  const listing = await run(tar, ['-tzf', artifact], { maxBuffer: 8 * 1024 * 1024 });
   const members = listing.stdout.trim().split(/\r?\n/);
   for (const member of members) {
     assert(member.startsWith(prefix + '/'));
     const filename = member.slice(prefix.length + 1).replace(/\/$/, '');
     if (filename) assertFrameworkReleasePath(filename);
   }
-  const verbose = await run('tar', ['-tvzf', artifact], { maxBuffer: 8 * 1024 * 1024 });
+  const verbose = await run(tar, ['-tvzf', artifact], { maxBuffer: 8 * 1024 * 1024 });
   assert(verbose.stdout.trim().split(/\r?\n/).every(line => line.startsWith('-') || line.startsWith('d')));
-  await run('tar', ['-xzf', artifact, '-C', directory]);
+  await run(tar, ['-xzf', artifact, '-C', directory]);
   const cwd = join(directory, prefix);
   const manifest: unknown = JSON.parse(await readFile(join(cwd, 'package.json'), 'utf8'));
   assert(isRecord(manifest) && isRecord(manifest.scripts));
