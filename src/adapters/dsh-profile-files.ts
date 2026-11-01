@@ -146,7 +146,7 @@ async function readProfile(target: DeploymentTarget): Promise<ProfileRead> {
 async function exclusiveWrite(filename: string, text: string): Promise<void> {
   const handle = await open(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
   try {
-    securePermissions(filename, 0o600)
+    if (process.platform === 'win32') securePermissions(filename, 0o600)
     await handle.writeFile(text, 'utf8')
     await handle.sync()
   } finally {

@@ -266,7 +266,7 @@ function preflightAbsent(files: readonly string[]): void {
 
 function privateDirectory(directory: string): void {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  securePermissions(directory, 0o700);
+  if (process.platform === 'win32') securePermissions(directory, 0o700);
   const metadata = lstatSync(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(directory, metadata, 0o700)) {
     throw new CliOperationError(`初始化目录必须是权限 0700 的真实目录：${directory}`);
@@ -277,7 +277,7 @@ function writePrivateFile(filename: string, content: string, createdFiles: strin
   writeFileSync(filename, content, { mode: 0o600, flag: 'wx' });
   createdFiles.push(filename);
   chmodSync(filename, 0o600);
-  securePermissions(filename, 0o600);
+  if (process.platform === 'win32') securePermissions(filename, 0o600);
   const metadata = lstatSync(filename);
   if (!metadata.isFile() || metadata.isSymbolicLink() || !privatePermissions(filename, metadata, 0o600)) {
     throw new CliOperationError(`初始化文件必须是权限 0600 的普通文件：${filename}`);

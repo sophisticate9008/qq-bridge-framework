@@ -143,7 +143,7 @@ function secureFile(filename: string): void {
     }
     descriptor = openSync(filename, 'a', 0o600);
     fchmodSync(descriptor, 0o600);
-    securePermissions(filename, 0o600);
+    if (process.platform === 'win32') securePermissions(filename, 0o600);
   } catch (error: unknown) {
     redact(error, 'STORE_OPEN_FAILED', 'Could not open durable store.');
   } finally {

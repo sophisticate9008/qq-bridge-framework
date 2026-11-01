@@ -30,7 +30,7 @@ export function createNativeMemoryRuntime(options: Omit<NativeMemoryOptions, 'st
         const parent = lstatSync(dirname(directory))
         if (!parent.isDirectory() || parent.isSymbolicLink() || !canonicalPathMatches(realpathSync(dirname(directory)), dirname(directory))
           || !trustedPermissions(dirname(directory), parent) || typeof process.getuid === 'function' && parent.uid !== process.getuid()) unsafe()
-        try { mkdirSync(directory, { mode: 0o700 }); securePermissions(directory, 0o700) }
+        try { mkdirSync(directory, { mode: 0o700 }); if (process.platform === 'win32') securePermissions(directory, 0o700) }
         catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error }
       }
       const metadata = lstatSync(directory)
