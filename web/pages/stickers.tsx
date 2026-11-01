@@ -5,7 +5,7 @@ import { parseStickerLibrarySnapshot, parseStickerLibraryDeleteResult, type Stic
 import { PackageConfigurationManager } from '../components/package-configuration-manager.tsx'
 import { ConnectPrompt, PageHeading, Section } from '../components/management.tsx'
 import { VirtualMasonry, type VirtualMasonryItemContext } from '../components/virtual-masonry.tsx'
-import { StickerCharacterEditor } from '../components/sticker-character-editor.tsx'
+import { StickerAnnotationEditor } from '../components/sticker-annotation-editor.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Input } from '../components/ui/input.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select.tsx'
@@ -48,6 +48,9 @@ function StickerMetadata({ item }: { readonly item: StickerLibraryItem }) {
     ['画风', visual?.styles.join(' · ')], ['可见元素', visual?.entities.join(' · ')],
   ].filter(([, value]) => Boolean(value))
   return <div className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+    <p>成功发送：{item.usage?.sentCount ?? 0} 次</p>
+    <p>最后发送：{item.usage?.lastSentAt != null ? new Date(item.usage.lastSentAt).toLocaleString('zh-CN', { hour12: false }) : '尚无记录'}</p>
+    <p>仅记录本功能启用后确认成功的发送。</p>
     <p className="break-words">角色：{identity?.character ?? '未识别'}{identity && <span className="ml-1 rounded bg-muted px-1 py-0.5">{identitySources[identity.source]}</span>}</p>
     {identity && identity.aliases.length > 0 && <p className="break-words">别名：{identity.aliases.join(' · ')}</p>}
     {rows.length > 0 && <dl className="grid gap-1">{rows.map(([label, value]) => <div key={label} className="flex min-w-0"><dt className="shrink-0">{label}：</dt><dd className="min-w-0 break-words">{value}</dd></div>)}</dl>}
@@ -63,8 +66,8 @@ const compact = (value: string, maximum: number): string => {
   const characters = Array.from(value)
   return characters.length > maximum ? `${characters.slice(0, maximum).join('')}…` : value
 }
-function StickerDetails({ item, open, onOpenChange, onEditRole, canEditRole }: { readonly item: StickerLibraryItem; readonly open: boolean;
-  readonly onOpenChange: (id: string, open: boolean) => void; readonly onEditRole: (item: StickerLibraryItem) => void; readonly canEditRole: boolean }) {
+function StickerDetails({ item, open, onOpenChange, onEdit, canEdit }: { readonly item: StickerLibraryItem; readonly open: boolean;
+  readonly onOpenChange: (id: string, open: boolean) => void; readonly onEdit: (item: StickerLibraryItem) => void; readonly canEdit: boolean }) {
   const triggerId = useId()
   const description = item.description || item.name || '尚未分类'
   return <Popover.Root open={open} onOpenChange={next => onOpenChange(item.id, next)} triggerId={triggerId} modal={false}>
@@ -88,7 +91,7 @@ function StickerDetails({ item, open, onOpenChange, onEditRole, canEditRole }: {
         {item.tags.length > 0 && <p className="break-words text-xs leading-relaxed">标签：{item.tags.join(' · ')}</p>}
         <StickerMetadata item={item} />
         {item.avoid && <p className="break-words text-xs text-muted-foreground">慎用：{item.avoid}</p>}
-        <div className="flex justify-end border-t pt-2"><Button type="button" size="sm" variant="outline" disabled={!canEditRole} onClick={() => onEditRole(item)}>标角色</Button></div>
+        <div className="flex justify-end border-t pt-2"><Button type="button" size="sm" variant="outline" disabled={!canEdit} onClick={() => onEdit(item)}>编辑标注</Button></div>
       </Popover.Popup>
     </Popover.Positioner></Popover.Portal>
   </Popover.Root>
@@ -163,17 +166,17 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
     if (open && (deleting || editing || dialogFrame.current !== null)) return
     setDetailsId(current => open ? id : current === id ? null : current)
   }, [deleting, editing])
-  const showItemDialog = useCallback((item: StickerLibraryItem, kind: 'identity' | 'delete') => {
+  const showItemDialog = useCallback((item: StickerLibraryItem, kind: 'annotation' | 'delete') => {
     if (busy || deleting || editing || dialogFrame.current !== null) return
     setDetailsId(null)
     // Let the nonmodal popup close before the modal dialog takes focus.
     dialogFrame.current = requestAnimationFrame(() => {
       dialogFrame.current = null
-      if (kind === 'identity') setEditing(item)
+      if (kind === 'annotation') setEditing(item)
       else setDeleting(item)
     })
   }, [busy, deleting, editing])
-  const editRole = useCallback((item: StickerLibraryItem) => showItemDialog(item, 'identity'), [showItemDialog])
+  const editAnnotation = useCallback((item: StickerLibraryItem) => showItemDialog(item, 'annotation'), [showItemDialog])
   useEffect(() => () => { request.current?.abort(); if (dialogFrame.current !== null) cancelAnimationFrame(dialogFrame.current) }, [])
   useEffect(() => {
     const snapshot = resource.snapshot
@@ -208,7 +211,7 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
     const lines = (text: string) => Math.max(1, Math.ceil(text.length / perLine))
     const textHeight = Math.min(2, lines(compact(item.description || item.name || '尚未分类', 56))) * 20
       + (item.identity ? 20 : 0) + (item.tags.length ? 20 : 0)
-    return contentWidth / previewRatio(item.dimensions ?? learnedDimensions.current.get(item.id)) + textHeight + 76
+    return contentWidth / previewRatio(item.dimensions ?? learnedDimensions.current.get(item.id)) + textHeight + 96
   }, [])
   const refresh = () => { setPreviewEpoch(value => value + 1); resource.refresh() }
   async function remove() {
@@ -262,12 +265,13 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
         pinnedKeys={[...(deleting ? [deleting.id] : []), ...(editing ? [editing.id] : []), ...(detailsId ? [detailsId] : [])]}>
         {(item, _index, context) => <article className="grid min-w-0 content-start gap-2 rounded-lg border p-3">
           <StickerPreview api={api} item={item} context={context} knownDimensions={learnedDimensions.current.get(item.id)} onDimensions={onDimensions} refreshEpoch={previewEpoch} />
-          <StickerDetails item={item} open={detailsId === item.id} onOpenChange={onDetailsChange} onEditRole={editRole}
-            canEditRole={item.state === 'ready' && !locks.has(item.id) && !busy && !resource.loading && resource.error === null} />
+          <StickerDetails item={item} open={detailsId === item.id} onOpenChange={onDetailsChange} onEdit={editAnnotation}
+            canEdit={item.state === 'ready' && !locks.has(item.id) && !busy && !resource.loading && resource.error === null} />
+          <p className="text-xs text-muted-foreground">发过 {item.usage?.sentCount ?? 0} 次</p>
           <div className="flex min-w-0 items-center justify-between gap-2">
             <span className="min-w-0 truncate text-xs text-muted-foreground">{item.state === 'unknown' || locks.has(item.id) ? '待核对' : item.storage === 'account' ? '账号收藏' : '额外存储'}</span>
             <div className="flex shrink-0 items-center gap-1">
-              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={item.state !== 'ready' || locks.has(item.id) || busy || resource.loading || resource.error !== null} onClick={() => editRole(item)}>标角色</Button>
+              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={item.state !== 'ready' || locks.has(item.id) || busy || resource.loading || resource.error !== null} onClick={() => editAnnotation(item)}>编辑标注</Button>
               <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!item.canDelete || locks.has(item.id) || busy || resource.loading || resource.error !== null} onClick={() => showItemDialog(item, 'delete')}>删除</Button>
             </div>
           </div>
@@ -275,8 +279,8 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
       </VirtualMasonry>
       {items.length === 0 && <p className="text-sm text-muted-foreground">{resource.loading ? '正在读取…' : '没有符合条件的表情。'}</p>}
     </Section>
-    <StickerCharacterEditor api={api} item={editing && (snapshot?.items.find(item => item.id === editing.id) ?? editing)}
-      onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setMessage('角色已保存为用户确认。'); resource.refresh() }} />
+    <StickerAnnotationEditor api={api} item={editing && (snapshot?.items.find(item => item.id === editing.id) ?? editing)}
+      onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setMessage('表情标注已保存。'); resource.refresh() }} />
     <Dialog open={deleting !== null} onOpenChange={open => { if (!open && !busy) setDeleting(null) }}><DialogContent><DialogHeader><DialogTitle>删除这张表情？</DialogTitle><DialogDescription>{deleting?.storage === 'account' ? '将从QQ账号收藏中删除，表情库也会同步移除。' : '将删除框架额外保存的图片。'} 删除后不会自动重新收藏。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setDeleting(null)}>取消</Button><Button variant="destructive" disabled={busy} onClick={() => void remove()}>{busy ? '正在删除…' : '删除'}</Button></DialogFooter></DialogContent></Dialog>
   </div>
 }
