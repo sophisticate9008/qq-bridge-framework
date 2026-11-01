@@ -1,3 +1,4 @@
+import { privatePermissions, canonicalPathMatches } from './file-security.ts';
 import { closeSync, constants, fstatSync, lstatSync, openSync, realpathSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -18,7 +19,7 @@ function fail(code = 'STORE_READONLY_UNAVAILABLE'): never {
 function privateMetadata(filename: string, directory = false): Stats {
   const metadata = lstatSync(filename);
   assert(!metadata.isSymbolicLink() && (directory ? metadata.isDirectory() : metadata.isFile() && metadata.nlink === 1)
-    && (metadata.mode & 0o777) === (directory ? 0o700 : 0o600)
+    && privatePermissions(filename, metadata, directory ? 0o700 : 0o600)
     && (typeof process.getuid !== 'function' || metadata.uid === process.getuid()),
   'STORE_READONLY_UNSAFE', 'History storage must remain private and non-linked.');
   return metadata;
@@ -37,7 +38,7 @@ export function createPrivateSqlitePathGuard(filename: string): () => void {
   const directoryMetadata = privateMetadata(directory, true);
   const fileMetadata = privateMetadata(filename);
   const validate = () => {
-    assert(realpathSync(directory) === directory && sameFile(directoryMetadata, privateMetadata(directory, true))
+    assert(canonicalPathMatches(realpathSync(directory), directory) && sameFile(directoryMetadata, privateMetadata(directory, true))
       && sameFile(fileMetadata, privateMetadata(filename)),
     'STORE_READONLY_UNSAFE', 'History storage identity changed.');
     for (const suffix of ['-wal', '-shm', '-journal']) {
@@ -99,7 +100,7 @@ export function openReadonlySqliteStore(filename: string): ReadonlySqliteStore {
   let directoryMetadata: Stats;
 
   function checkFiles() {
-    assert(realpathSync(directory) === directory && sameFile(directoryMetadata, privateMetadata(directory, true))
+    assert(canonicalPathMatches(realpathSync(directory), directory) && sameFile(directoryMetadata, privateMetadata(directory, true))
       && descriptor !== undefined && sameFile(fstatSync(descriptor), privateMetadata(filename)),
     'STORE_READONLY_UNSAFE', 'History storage identity changed.');
     for (const suffix of ['-wal', '-shm', '-journal']) {

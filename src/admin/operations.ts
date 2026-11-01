@@ -1,3 +1,4 @@
+import { privatePermissions } from '../storage/file-security.ts';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
@@ -20,7 +21,7 @@ export interface ManagementOperationsOptions {
 
 function privateConfiguration(filename: string): { text: string; value: Record<string, unknown>; revision: string } {
   const metadata = lstatSync(filename);
-  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0 || metadata.size > 1024 * 1024) {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !privatePermissions(filename, metadata) || metadata.size > 1024 * 1024) {
     throw new AdminRequestError(500, 'management_configuration_invalid');
   }
   const text = readFileSync(filename, 'utf8');

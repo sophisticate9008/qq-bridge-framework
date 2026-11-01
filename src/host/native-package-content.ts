@@ -1,3 +1,4 @@
+import { primePermissions, trustedPermissions } from '../storage/file-security.ts';
 import { createHash } from 'node:crypto'
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -14,12 +15,13 @@ export function createBuiltinPackageContent(moduleUrl: string, dependencies: rea
   const extension = moduleUrl.endsWith('.ts') ? '.ts' : '.js'
   const files = [moduleUrl, ...dependencies.map(path => new URL(`${path}${extension}`, moduleUrl).href)]
   function fingerprint() {
+    primePermissions(files.map(url => fileURLToPath(url)))
     const content = files.map((url, index) => {
       const filename = fileURLToPath(url)
       const handle = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
       try {
         const before = fstatSync(handle)
-        assert(before.isFile() && before.nlink === 1 && (before.mode & 0o022) === 0 && before.size <= 1048576
+        assert(before.isFile() && before.nlink === 1 && trustedPermissions(filename, before) && before.size <= 1048576
           && (typeof process.getuid !== 'function' || [0, process.getuid()].includes(before.uid)), 'NATIVE_PACKAGE_CONTENT_UNSAFE', 'Built-in package source files must be trusted and bounded.')
         const bytes = readFileSync(handle); const after = fstatSync(handle); const current = lstatSync(filename)
         assert(bytes.length === before.size && before.ino === after.ino && before.dev === after.dev && before.mtimeMs === after.mtimeMs

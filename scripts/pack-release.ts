@@ -51,6 +51,8 @@ for (const [directory, component] of [['framework-sdk', 'sdk'], ['dsh-bridge-plu
 }
 const framework = await packFrameworkRelease({ root, destination, version, components });
 checksums.push(`${createHash('sha256').update(await readFile(framework)).digest('hex')}  qq-bridge-framework-${version}.tar.gz`);
-console.log(`Framework runtime: qq-bridge-framework-${version}.tar.gz`);
+const windowsArchive = `qq-bridge-framework-${version}-windows-x64.zip`;
+checksums.push(`${createHash('sha256').update(await readFile(join(destination, windowsArchive))).digest('hex')}  ${windowsArchive}`);
+console.log(`Framework runtime: qq-bridge-framework-${version}.tar.gz; ${windowsArchive}`);
 await writeFile(join(destination, 'SHA256SUMS'), checksums.sort().join('\n') + '\n');
 console.log(`Release files: ${destination}`);

@@ -1,0 +1,89 @@
+name: Windows 启动包验证
+run-name: Windows 候选包 ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: 云端构建完整候选包
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix packages/dsh-bridge-plugin --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - run: npm run build:sdk
+      - run: npm --prefix packages/dsh-bridge-plugin run build
+      - run: npm run release:pack
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-candidate-packages
+          path: runtime/releases/
+          if-no-files-found: error
+          retention-days: 7
+  install:
+    name: 原生验收 ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: windows-2022, platform: win32, arch: x64}
+          - {runner: ubuntu-24.04, platform: linux, arch: x64}
+          - {runner: ubuntu-24.04-arm, platform: linux, arch: arm64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      QQ_BRIDGE_FRAMEWORK_RELEASE_PLATFORM: ${{ matrix.platform }}
+      QQ_BRIDGE_FRAMEWORK_RELEASE_ARCH: ${{ matrix.arch }}
+      QQ_BRIDGE_FRAMEWORK_RELEASE_SOURCE_COMMIT: ${{ github.sha }}
+      QQ_BRIDGE_FRAMEWORK_RELEASE_REPORT: platform-result.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-candidate-packages
+          path: runtime/releases
+      - name: 安装与启动同一候选包
+        run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
+      - name: 安装定向链路测试依赖
+        if: matrix.platform == 'win32'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Windows ACL 防护与真实聊天管道
+        if: matrix.platform == 'win32'
+        run: |
+          node --test test/windows-file-security.test.ts
+          node --test --test-name-pattern='real local WS text passes through native host' test/native-chat-runtime.test.ts
+      - name: 保存验收报告
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-candidate-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            platform-result.json
+            platform-verification.log
+          if-no-files-found: ignore
+          retention-days: 3

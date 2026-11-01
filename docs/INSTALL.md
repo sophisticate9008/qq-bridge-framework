@@ -23,6 +23,8 @@ v1.7.3 的同一全量包已在 GitHub 标准 runner 验证：
 | Windows Server 2022 x64 | 生产依赖与中文公式原生排版通过；初始化被内置文件信任检查拒绝，暂不支持原生运行 |
 | macOS | 尚未验收 |
 
+开发分支的 Windows ZIP 与控制台启动器正在独立验收，使用方法见 [Windows 候选包](WINDOWS.md)；它不会回填或修改 v1.7.3 正式附件。
+
 Windows 当前初始化失败为 `NATIVE_PACKAGE_CONTENT_UNSAFE`，相关可信文件和私有配置检查依赖 POSIX 文件权限，尚未实现 Windows 对应机制。手动指定 DSH 地址不能解决这一框架初始化限制。上述 CI 不包含真实 QQ 登录或 DSH 联调，不代表其他发行版、libc 或操作系统版本已验证；详细证据见 [验收记录](VALIDATION.md)。
 
 检查本机版本：

@@ -1,3 +1,4 @@
+import { privatePermissions, trustedPermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
@@ -232,13 +233,13 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     const paths = [...target.layerPaths ?? [], target.profilePath, target.credentialsPath]
     const checks: readonly string[][] = await Promise.all(paths.map(async filename => {
       signal.throwIfAborted()
-      if (await realpath(dirname(filename)) !== dirname(filename)) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
+      if (!canonicalPathMatches(await realpath(dirname(filename)), dirname(filename))) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
       const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
       try {
         const before = await handle.stat()
-        if (!before.isFile() || before.nlink !== 1 || before.size > 1_048_576 || (before.mode & 0o022) !== 0
+        if (!before.isFile() || before.nlink !== 1 || before.size > 1_048_576 || !trustedPermissions(filename, before)
           || typeof process.getuid === 'function' && before.uid !== process.getuid()
-          || filename === target.credentialsPath && (before.mode & 0o077) !== 0) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
+          || filename === target.credentialsPath && !privatePermissions(filename, before)) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
         const bytes = await handle.readFile()
         const after = await handle.stat()
         if (bytes.length !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs

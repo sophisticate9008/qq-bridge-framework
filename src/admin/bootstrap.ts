@@ -1,3 +1,4 @@
+import { privatePermissions, securePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { randomBytes } from 'node:crypto';
 import {
   closeSync,
@@ -68,11 +69,11 @@ function pathStatus(filename: string, code: string, message: string): Stats | un
 
 function privateDirectory(directory: string, create: boolean): void {
   try {
-    if (create) mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (create) { mkdirSync(directory, { recursive: true, mode: 0o700 }); if (process.platform === 'win32') securePermissions(directory, 0o700); }
     const information = lstatSync(directory, { throwIfNoEntry: false });
     if (information === undefined && !create) return;
     assert(information?.isDirectory() && !information.isSymbolicLink()
-      && (information.mode & 0o777) === 0o700 && realpathSync(directory) === directory,
+      && privatePermissions(directory, information, 0o700) && canonicalPathMatches(realpathSync(directory), directory),
     'ADMIN_BOOTSTRAP_DIRECTORY_SECURITY', 'A private canonical token directory is required.');
   } catch (error: unknown) {
     if (error instanceof FrameworkError) throw error;
@@ -84,13 +85,13 @@ function privateFile(filename: string, maxBytes: number, code: string, message: 
   const pathInformation = pathStatus(filename, code, message);
   if (pathInformation === undefined) return null;
   assert(pathInformation.isFile() && !pathInformation.isSymbolicLink() && pathInformation.nlink === 1
-    && (pathInformation.mode & 0o777) === 0o600 && pathInformation.size <= maxBytes,
+    && privatePermissions(filename, pathInformation, 0o600) && pathInformation.size <= maxBytes,
   code, message);
   let descriptor: number | undefined;
   try {
     descriptor = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const opened = fstatSync(descriptor);
-    assert(opened.isFile() && opened.nlink === 1 && (opened.mode & 0o777) === 0o600
+    assert(opened.isFile() && opened.nlink === 1 && privatePermissions(filename, opened, 0o600)
       && opened.size <= maxBytes && sameFile(opened, pathInformation), code, message);
     const content = readFileSync(descriptor);
     const completed = fstatSync(descriptor);
@@ -153,7 +154,7 @@ function writeExclusive(filename: string, content: Buffer, code: string, message
     fsyncSync(descriptor);
     const opened = fstatSync(descriptor);
     const current = lstatSync(filename);
-    assert(opened.isFile() && opened.nlink === 1 && (opened.mode & 0o777) === 0o600
+    assert(opened.isFile() && opened.nlink === 1 && privatePermissions(filename, opened, 0o600)
       && opened.size === content.byteLength && sameFile(opened, current), code, message);
     return true;
   } catch (error: unknown) {

@@ -90,6 +90,7 @@ export async function packFrameworkRelease(options: {
       version: options.version, sourceCommit, sourceModified, components, publicFiles: count }, null, 2) + '\n');
     const filename = join(options.destination, `${name}.tar.gz`);
     execFileSync('tar', ['-czf', filename, '-C', temporary, name], { stdio: 'pipe' });
+    execFileSync('zip', ['-q', '-r', join(options.destination, `${name}-windows-x64.zip`), name], { cwd: temporary, stdio: 'pipe' });
     return filename;
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }

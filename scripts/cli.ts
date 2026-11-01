@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { privatePermissions, securePermissions } from '../src/storage/file-security.ts';
 
 import { parseNativeConversationDiagnostics } from '../src/contracts/native-diagnostics.ts';
 import { spawn } from 'node:child_process';
@@ -265,8 +266,9 @@ function preflightAbsent(files: readonly string[]): void {
 
 function privateDirectory(directory: string): void {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+  securePermissions(directory, 0o700);
   const metadata = lstatSync(directory);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o700) {
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(directory, metadata, 0o700)) {
     throw new CliOperationError(`初始化目录必须是权限 0700 的真实目录：${directory}`);
   }
 }
@@ -275,8 +277,9 @@ function writePrivateFile(filename: string, content: string, createdFiles: strin
   writeFileSync(filename, content, { mode: 0o600, flag: 'wx' });
   createdFiles.push(filename);
   chmodSync(filename, 0o600);
+  securePermissions(filename, 0o600);
   const metadata = lstatSync(filename);
-  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o600) {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !privatePermissions(filename, metadata, 0o600)) {
     throw new CliOperationError(`初始化文件必须是权限 0600 的普通文件：${filename}`);
   }
 }
@@ -687,6 +690,9 @@ async function start(configurationFilename: string, adminOnly: boolean, output: 
     const handlers = new Map<NodeJS.Signals, () => void>();
     const cleanup = (): void => {
       for (const [signal, handler] of handlers) process.off(signal, handler);
+      process.off('message', onMessage);
+      process.off('disconnect', close);
+      if (process.connected) process.disconnect();
     };
     const close = (): void => {
       if (closing) return;
@@ -704,6 +710,11 @@ async function start(configurationFilename: string, adminOnly: boolean, output: 
         }
       })();
     };
+    const onMessage = (message: unknown): void => {
+      if (isRecord(message) && message.type === 'qqbridge.shutdown') close();
+    };
+    // Only an existing parent IPC channel can request shutdown; no management endpoint is added.
+    if (process.send) { process.on('message', onMessage); process.once('disconnect', close); }
     for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
       const handler = (): void => close();
       handlers.set(signal, handler);

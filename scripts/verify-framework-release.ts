@@ -44,7 +44,8 @@ async function stop(): Promise<void> {
   if (!child) return;
   const current = child;
   if (current.exitCode === null && current.signalCode === null) {
-    current.kill('SIGTERM');
+    if (process.platform === 'win32' && current.connected) current.send({ type: 'qqbridge.shutdown' });
+    else current.kill('SIGTERM');
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([childExit!, new Promise<never>((_resolve, reject) => {
@@ -70,7 +71,15 @@ try {
   }
   const verbose = await run(tar, ['-tvzf', artifact], { maxBuffer: 8 * 1024 * 1024 });
   assert(verbose.stdout.trim().split(/\r?\n/).every(line => line.startsWith('-') || line.startsWith('d')));
-  await run(tar, ['-xzf', artifact, '-C', directory]);
+  if (process.platform === 'win32' && checksums.some(line => line.endsWith(`  ${prefix}-windows-x64.zip`))) {
+    const windowsArchive = join(dirname(artifact), `${prefix}-windows-x64.zip`);
+    const checksum = checksums.find(line => line.endsWith(`  ${prefix}-windows-x64.zip`));
+    assert(checksum && /^[a-f0-9]{64}  /.test(checksum));
+    assert.equal(hash(await readFile(windowsArchive)), checksum.slice(0, 64));
+    const zipListing = await run(tar, ['-tf', windowsArchive], { maxBuffer: 8 * 1024 * 1024 });
+    assert.deepEqual(zipListing.stdout.trim().split(/\r?\n/).sort(), [...members].sort());
+    await run(tar, ['-xf', windowsArchive, '-C', directory]);
+  } else await run(tar, ['-xzf', artifact, '-C', directory]);
   const cwd = join(directory, prefix);
   const manifest: unknown = JSON.parse(await readFile(join(cwd, 'package.json'), 'utf8'));
   assert(isRecord(manifest) && isRecord(manifest.scripts));
@@ -114,7 +123,7 @@ try {
   const adminPort = await port();
   let gatewayPort = await port();
   while (gatewayPort === adminPort) gatewayPort = await port();
-  await run(process.execPath, [cli, 'init', '--port', String(adminPort)], { cwd, env, timeout: 30000 });
+  await run(process.execPath, [cli, 'init', '--port', String(adminPort)], { cwd, env, timeout: 90000 });
   evidence.initialized = true;
   const configuration = join(cwd, 'runtime/admin/config.json');
   const saved: unknown = JSON.parse(await readFile(configuration, 'utf8'));
@@ -128,11 +137,11 @@ try {
   assert.equal(await readFile(configuration, 'utf8'), original);
   const origin = `http://127.0.0.1:${adminPort}`;
   async function launch(): Promise<void> {
-    child = spawn(process.execPath, [cli, 'start'], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn(process.execPath, process.platform === 'win32' ? [join(cwd, 'dist/scripts/windows-launcher.js')] : [cli, 'start'], { cwd, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     childExit = once(child, 'exit');
     void childExit.catch(() => {});
     for (const stream of [child.stdout, child.stderr]) stream?.on('data', chunk => { diagnostics = (diagnostics + String(chunk)).slice(-16000); });
-    for (let attempt = 0; attempt < 150; attempt++) {
+    for (let attempt = 0; attempt < 450; attempt++) {
       assert(child.exitCode === null && child.signalCode === null, diagnostics.slice(-4000));
       try {
         const response = await fetch(origin + '/health', { signal: AbortSignal.timeout(1000) });

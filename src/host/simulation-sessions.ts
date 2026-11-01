@@ -1,3 +1,4 @@
+import { privatePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { constants } from 'node:fs'
 import { lstat, open, opendir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -17,8 +18,8 @@ function missing(error: unknown): boolean { return isRecord(error) && error.code
 
 async function privateDirectory(filename: string): Promise<void> {
   const info = await lstat(filename)
-  if (!isAbsolute(filename) || resolve(filename) !== filename || await realpath(filename) !== filename
-    || !info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o7777) !== 0o700
+  if (!isAbsolute(filename) || resolve(filename) !== filename || !canonicalPathMatches(await realpath(filename), filename)
+    || !info.isDirectory() || info.isSymbolicLink() || !privatePermissions(filename, info, 0o700)
     || process.getuid && info.uid !== process.getuid()) fail('SIMULATION_SESSIONS_SOURCE_UNSAFE')
 }
 
@@ -27,7 +28,7 @@ async function privateJson(filename: string, maximum: number, signal: AbortSigna
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   try {
     const before = await handle.stat()
-    if (!before.isFile() || before.nlink !== 1 || before.size > maximum || (before.mode & 0o7777) !== 0o600
+    if (!before.isFile() || before.nlink !== 1 || before.size > maximum || !privatePermissions(filename, before, 0o600)
       || process.getuid && before.uid !== process.getuid()) fail('SIMULATION_SESSIONS_SOURCE_UNSAFE')
     const bytes = Buffer.alloc(maximum + 1)
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)

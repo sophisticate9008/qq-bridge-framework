@@ -1,3 +1,4 @@
+import { privatePermissions } from '../storage/file-security.ts';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { readFileSync, lstatSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -29,7 +30,7 @@ export interface OneBotGatewayConfiguration {
 function privateText(filename: string, maxBytes: number): string {
   filename = resolveConfigurationPath(filename);
   const metadata = lstatSync(filename);
-  assert(metadata.isFile() && !metadata.isSymbolicLink() && (metadata.mode & 0o077) === 0
+  assert(metadata.isFile() && !metadata.isSymbolicLink() && privatePermissions(filename, metadata)
     && metadata.size <= maxBytes, 'GATEWAY_PRIVATE_FILE', 'A bounded private regular file is required.');
   return readFileSync(filename, 'utf8');
 }

@@ -1,3 +1,4 @@
+import { privatePermissions } from '../storage/file-security.ts';
 import { createConversationTaskRuntime, readConversationTasks, readConversationTaskHistory, type ConversationTaskExecutor } from './conversation-tasks.ts'
 import { createConversationTaskAgent } from './conversation-task-agent.ts'
 import { CONVERSATION_TASK_TOOLS, createConversationTaskEffects } from './conversation-task-tools.ts'
@@ -454,7 +455,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   function getControlCommands(): Promise<ReturnType<typeof createControlCommands>> {
     return preparingControl ??= (async () => {
       const directory = await lstat(options.directory)
-      if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o777) !== 0o700) failure('NATIVE_CHAT_STORAGE_INVALID')
+      if (!directory.isDirectory() || directory.isSymbolicLink() || !privatePermissions(options.directory, directory, 0o700)) failure('NATIVE_CHAT_STORAGE_INVALID')
       controlLifetime.signal.throwIfAborted()
       controlStore = createSqliteStore({ filename: join(options.directory, 'native-control.sqlite'), maxRecords: 16_384 })
       bindAccountStore(controlStore, accountScope)
@@ -856,8 +857,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         const directory = await lstat(options.directory)
         const filename = join(options.directory, 'native-chat.sqlite')
         const database = await lstat(filename)
-        if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o777) !== 0o700
-          || !database.isFile() || database.isSymbolicLink() || database.nlink !== 1 || (database.mode & 0o777) !== 0o600) {
+        if (!directory.isDirectory() || directory.isSymbolicLink() || !privatePermissions(options.directory, directory, 0o700)
+          || !database.isFile() || database.isSymbolicLink() || database.nlink !== 1 || !privatePermissions(filename, database, 0o600)) {
           failure('NATIVE_CHAT_STORAGE_INVALID')
         }
         await acquireLease()
@@ -945,7 +946,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         const configuration = selected.configuration
         const definition = selected.definition
         const metadata = await lstat(options.directory)
-        if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o700) failure('NATIVE_CHAT_STORAGE_INVALID')
+        if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(options.directory, metadata, 0o700)) failure('NATIVE_CHAT_STORAGE_INVALID')
         await acquireLease()
         ownsResources = true
         const filename = join(options.directory, 'native-chat.sqlite')
@@ -954,7 +955,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           throw error
         })
         if (database && (!database.isFile() || database.isSymbolicLink() || database.nlink !== 1
-          || (database.mode & 0o777) !== 0o600)) failure('NATIVE_CHAT_STORAGE_INVALID')
+          || !privatePermissions(filename, database, 0o600))) failure('NATIVE_CHAT_STORAGE_INVALID')
         if (!database && (await nativeAuthorizationFallback(options.directory)).source === 'missing-with-history') failure('NATIVE_CHAT_STORAGE_INVALID')
         if (database) storePathGuard ??= createPrivateSqlitePathGuard(filename)
         store ??= createSqliteStore({ filename })

@@ -1,3 +1,4 @@
+import { privatePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, readdir, realpath, unlink } from 'node:fs/promises'
@@ -62,12 +63,12 @@ export function createNativeMarkdownService(options: {
     return { sessionId, generation }
   }
   async function read(assetId: string, size: number, hash: string): Promise<Buffer> {
-    assert(await realpath(directory) === directory, 'NATIVE_MARKDOWN_DIRECTORY_INVALID', 'A canonical image directory is required.')
+    assert(canonicalPathMatches(await realpath(directory), directory), 'NATIVE_MARKDOWN_DIRECTORY_INVALID', 'A canonical image directory is required.')
     const filename = join(directory, assetId)
     const file = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     try {
       const before = await file.stat()
-      assert(before.isFile() && before.nlink === 1 && (before.mode & 0o777) === 0o600 && before.size === size && size <= maxBytes,
+      assert(before.isFile() && before.nlink === 1 && privatePermissions(filename, before, 0o600) && before.size === size && size <= maxBytes,
         'NATIVE_MARKDOWN_ASSET_INVALID', 'The rendered PNG file is unavailable.')
       const bytes = await file.readFile(); const after = await file.stat(); const path = await lstat(filename)
       assert(before.ino === path.ino && before.dev === path.dev && path.nlink === 1 && before.size === after.size
@@ -78,14 +79,14 @@ export function createNativeMarkdownService(options: {
   }
   async function capacity(additionalBytes: number) {
     await ensurePrivateDirectory(directory)
-    assert(await realpath(directory) === directory, 'NATIVE_MARKDOWN_DIRECTORY_INVALID', 'A canonical image directory is required.')
+    assert(canonicalPathMatches(await realpath(directory), directory), 'NATIVE_MARKDOWN_DIRECTORY_INVALID', 'A canonical image directory is required.')
     const files = await readdir(directory)
     assert(files.length <= 256, 'NATIVE_MARKDOWN_BACKPRESSURE', 'The rendered image directory is full.')
     let count = 0; let bytes = 0
     for (const assetId of files) {
       assert(/^markdown-asset-[a-f0-9]{64}$/.test(assetId), 'NATIVE_MARKDOWN_DIRECTORY_INVALID', 'The image directory contains an unknown entry.')
       const metadata = await lstat(join(directory, assetId))
-      assert(metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 1 && (metadata.mode & 0o777) === 0o600,
+      assert(metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 1 && privatePermissions(join(directory, assetId), metadata, 0o600),
         'NATIVE_MARKDOWN_DIRECTORY_INVALID', 'The image directory contains an invalid file.')
       const record = options.store.read(namespace, assetId)
       const expired = record ? Number(object(record.value).expiresAt) <= clock() : metadata.mtimeMs + ttlMs <= clock()

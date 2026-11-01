@@ -1,3 +1,4 @@
+import { privatePermissions, trustedPermissions, securePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { lstatSync, mkdirSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { FrameworkError } from '../core/values.ts'
@@ -27,18 +28,18 @@ export function createNativeMemoryRuntime(options: Omit<NativeMemoryOptions, 'st
       try { lstatSync(directory) } catch (error) {
         if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
         const parent = lstatSync(dirname(directory))
-        if (!parent.isDirectory() || parent.isSymbolicLink() || realpathSync(dirname(directory)) !== dirname(directory)
-          || (parent.mode & 0o022) !== 0 || typeof process.getuid === 'function' && parent.uid !== process.getuid()) unsafe()
-        try { mkdirSync(directory, { mode: 0o700 }) }
+        if (!parent.isDirectory() || parent.isSymbolicLink() || !canonicalPathMatches(realpathSync(dirname(directory)), dirname(directory))
+          || !trustedPermissions(dirname(directory), parent) || typeof process.getuid === 'function' && parent.uid !== process.getuid()) unsafe()
+        try { mkdirSync(directory, { mode: 0o700 }); securePermissions(directory, 0o700) }
         catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error }
       }
       const metadata = lstatSync(directory)
-      if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(directory) !== directory || (metadata.mode & 0o777) !== 0o700
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || !canonicalPathMatches(realpathSync(directory), directory) || !privatePermissions(directory, metadata, 0o700)
         || typeof process.getuid === 'function' && metadata.uid !== process.getuid()) unsafe()
       for (const suffix of ['', '-wal', '-shm', '-journal']) {
         try {
           const file = lstatSync(filename + suffix)
-          if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1 || (file.mode & 0o777) !== 0o600
+          if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1 || !privatePermissions(filename + suffix, file, 0o600)
             || typeof process.getuid === 'function' && file.uid !== process.getuid()) unsafe()
         } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error }
       }

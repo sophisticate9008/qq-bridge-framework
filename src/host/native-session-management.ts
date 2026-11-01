@@ -1,3 +1,4 @@
+import { privatePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, lstatSync, realpathSync } from 'node:fs'
 import { lstat, open, unlink } from 'node:fs/promises'
@@ -97,14 +98,14 @@ export function readNativeSessionManagement(options: {
 }
 
 function privateFiles(directory: string): void {
-  if (!isAbsolute(directory) || resolve(directory) !== directory || realpathSync(directory) !== directory) fail('SESSION_MANAGEMENT_STORAGE_UNSAFE')
+  if (!isAbsolute(directory) || resolve(directory) !== directory || !canonicalPathMatches(realpathSync(directory), directory)) fail('SESSION_MANAGEMENT_STORAGE_UNSAFE')
   const folder = lstatSync(directory)
-  if (!folder.isDirectory() || folder.isSymbolicLink() || (folder.mode & 0o7777) !== 0o700
+  if (!folder.isDirectory() || folder.isSymbolicLink() || !privatePermissions(directory, folder, 0o700)
     || typeof process.getuid === 'function' && folder.uid !== process.getuid()) fail('SESSION_MANAGEMENT_STORAGE_UNSAFE')
   for (const suffix of ['', '-wal', '-shm', '-journal']) {
     try {
       const metadata = lstatSync(join(directory, `native-chat.sqlite${suffix}`))
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || (metadata.mode & 0o7777) !== 0o600
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || !privatePermissions(join(directory, `native-chat.sqlite${suffix}`), metadata, 0o600)
         || typeof process.getuid === 'function' && metadata.uid !== process.getuid()) fail('SESSION_MANAGEMENT_STORAGE_UNSAFE')
     } catch (error) { if (suffix !== '' && missing(error)) continue; throw error }
   }

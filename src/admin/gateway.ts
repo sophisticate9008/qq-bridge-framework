@@ -1,3 +1,4 @@
+import { privatePermissions } from '../storage/file-security.ts';
 import { openReadonlySqliteStore } from '../storage/sqlite-readonly.ts';
 import { resetNativeSessionContext } from '../host/native-session-management.ts';
 import { createSqliteStore } from '../storage/sqlite.ts';
@@ -90,7 +91,7 @@ class GatewayProbeError extends Error {
 function privateText(filename: string, maxBytes: number): string {
   filename = resolveConfigurationPath(filename);
   const metadata = lstatSync(filename);
-  assert(metadata.isFile() && !metadata.isSymbolicLink() && (metadata.mode & 0o077) === 0
+  assert(metadata.isFile() && !metadata.isSymbolicLink() && privatePermissions(filename, metadata)
     && metadata.size <= maxBytes, 'GATEWAY_ADMIN_PRIVATE_FILE', 'A bounded private regular file is required.');
   return readFileSync(filename, 'utf8');
 }

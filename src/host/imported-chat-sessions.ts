@@ -1,3 +1,4 @@
+import { privatePermissions } from '../storage/file-security.ts';
 import { createHash } from 'node:crypto'
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { join } from 'node:path'
@@ -30,7 +31,7 @@ export function readImportedChatSessions(directory: string): ImportedChatSession
     const filename = join(directory, 'imported-chat-sessions.json')
     descriptor = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     const before = fstatSync(descriptor)
-    if (!before.isFile() || before.nlink !== 1 || (before.mode & 0o777) !== 0o600
+    if (!before.isFile() || before.nlink !== 1 || !privatePermissions(filename, before, 0o600)
       || before.size < 1 || before.size > MAX_DOCUMENT_BYTES) return null
     const buffer = Buffer.alloc(before.size + 1)
     let length = 0

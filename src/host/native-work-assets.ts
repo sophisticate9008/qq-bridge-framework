@@ -1,3 +1,4 @@
+import { privatePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, readdir, lstat, realpath, unlink } from 'node:fs/promises';
@@ -37,7 +38,7 @@ export function createNativeWorkAssets(options: {
   }
   async function capacity(additionalBytes = 0) {
     await ensurePrivateDirectory(directory);
-    assert(await realpath(directory) === directory, 'WORK_ASSET_DIRECTORY_INVALID', 'A canonical private work asset directory is required.');
+    assert(canonicalPathMatches(await realpath(directory), directory), 'WORK_ASSET_DIRECTORY_INVALID', 'A canonical private work asset directory is required.');
     const files = await readdir(directory);
     assert(files.length <= 1024, 'WORK_ASSET_BACKPRESSURE', 'The work asset directory exceeds its maintenance bound.');
     let count = 0; let total = 0;
@@ -46,7 +47,7 @@ export function createNativeWorkAssets(options: {
       assert(/^work-asset-[a-f0-9]{64}$/.test(name), 'WORK_ASSET_DIRECTORY_INVALID', 'The work asset directory contains an unknown entry.');
       const filename = join(directory, name);
       const info = await lstat(filename);
-      assert(info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && (info.mode & 0o777) === 0o600,
+      assert(info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && privatePermissions(join(directory, name), info, 0o600),
         'WORK_ASSET_DIRECTORY_INVALID', 'The work asset directory contains an invalid file.');
       const row = options.store.read(namespace, name);
       const value = row ? object(row.value) : null;
@@ -78,7 +79,7 @@ export function createNativeWorkAssets(options: {
     const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const stat = await handle.stat();
-      assert(stat.isFile() && stat.nlink === 1 && (stat.mode & 0o777) === 0o600 && stat.size === size && size <= 8 * 1024 * 1024,
+      assert(stat.isFile() && stat.nlink === 1 && privatePermissions(filename, stat, 0o600) && stat.size === size && size <= 8 * 1024 * 1024,
         'WORK_ASSET_INVALID', 'The registered attachment file is invalid.');
       const value = await handle.readFile();
       assert(createHash('sha256').update(value).digest('hex') === hash, 'WORK_ASSET_CHANGED', 'The registered attachment bytes changed.');

@@ -1,3 +1,4 @@
+import { privatePermissions, securePermissions } from './file-security.ts';
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
@@ -54,9 +55,9 @@ export async function ensurePrivateDirectory(directory: string): Promise<void> {
     })
     if (before !== null && !before.isDirectory()) requestError(500, 'chat_storage_invalid')
     if (before === null) await mkdir(directory, { recursive: true, mode: 0o700 })
-    await chmod(directory, 0o700)
+    securePermissions(directory, 0o700)
     const after = await lstat(directory)
-    if (!after.isDirectory() || after.isSymbolicLink() || (after.mode & 0o777) !== 0o700) {
+    if (!after.isDirectory() || after.isSymbolicLink() || !privatePermissions(directory, after, 0o700)) {
       requestError(500, 'chat_storage_invalid')
     }
   } catch (error: unknown) {
@@ -94,8 +95,7 @@ export async function readPrivateJson<Value>(filename: string, options: PrivateJ
     // Atomic replacement may unlink the opened old inode before this stat. It is a read conflict,
     // while multiple links remain an invalid storage layout.
     if (options.requireSingleLink === true && before.nlink === 0) requestError(409, options.conflictCode)
-    const unsafeMode = options.exactMode === undefined ? (before.mode & 0o077) !== 0
-      : (before.mode & 0o777) !== options.exactMode
+    const unsafeMode = !privatePermissions(filename, before, options.exactMode)
     if (!before.isFile() || unsafeMode || options.requireSingleLink === true && before.nlink !== 1
       || before.size > options.maxBytes) requestError(500, options.invalidCode)
     const content = await handle.readFile()
@@ -151,7 +151,7 @@ export async function acquireDirectoryLock(directory: string, lockFilename = LOC
     await handle.sync()
     const opened = await handle.stat()
     const current = await lstat(filename)
-    if (!opened.isFile() || opened.nlink !== 1 || (opened.mode & 0o777) !== 0o600
+    if (!opened.isFile() || opened.nlink !== 1 || !privatePermissions(filename, opened, 0o600)
       || !sameFile(opened, current)) requestError(500, 'chat_storage_invalid')
     return async () => {
       await handle?.close().catch(() => undefined)
@@ -214,7 +214,7 @@ export async function replacePrivateJson<Saved extends { readonly revision: stri
     await handle.sync()
     if (options.verifyTemporaryMetadata === true) {
       const metadata = await handle.stat()
-      if (!metadata.isFile() || metadata.nlink !== 1 || (metadata.mode & 0o777) !== 0o600
+      if (!metadata.isFile() || metadata.nlink !== 1 || !privatePermissions(options.temporary, metadata, 0o600)
         || metadata.size !== options.content.byteLength) requestError(500, options.writeFailedCode)
     }
     await handle.close()
@@ -224,10 +224,12 @@ export async function replacePrivateJson<Saved extends { readonly revision: stri
     if (latest.revision !== options.expectedRevision) requestError(409, options.conflictCode)
     await rename(options.temporary, options.filename)
     renamed = true
-    const directoryHandle = await open(options.directory, options.directoryOpenFlags ?? constants.O_RDONLY)
-    try { await directoryHandle.sync() } finally {
-      if (options.ignoreDirectoryCloseErrors === true) await directoryHandle.close().catch(() => undefined)
-      else await directoryHandle.close()
+    if (process.platform !== 'win32') {
+      const directoryHandle = await open(options.directory, options.directoryOpenFlags ?? constants.O_RDONLY)
+      try { await directoryHandle.sync() } finally {
+        if (options.ignoreDirectoryCloseErrors === true) await directoryHandle.close().catch(() => undefined)
+        else await directoryHandle.close()
+      }
     }
     const saved = await options.read()
     if (saved.revision !== revision(options.content)) requestError(500, options.writeUnknownCode)

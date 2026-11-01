@@ -1,3 +1,4 @@
+import { privatePermissions, securePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash } from 'node:crypto';
 import { constants, closeSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readSync,
   readdirSync, realpathSync, unlinkSync, type Stats } from 'node:fs';
@@ -87,7 +88,14 @@ function descriptorPath(descriptor: number): string {
   return `${process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd'}/${descriptor}`;
 }
 
-function directoryHandle(directory: string, expected?: Stats): number {
+function directoryHandle(directory: string, expected?: Stats): number | undefined {
+  if (process.platform === 'win32') {
+    if (!expected) securePermissions(directory, 0o700);
+    const info = lstatSync(directory);
+    assert(info.isDirectory() && !info.isSymbolicLink() && privatePermissions(directory, info, 0o700)
+      && (!expected || sameFile(info, expected)), 'RENDERED_ASSET_DIRECTORY', 'The private directory identity changed.');
+    return undefined;
+  }
   let descriptor: number | undefined;
   try {
     assert(realpathSync(directory) === directory, 'RENDERED_ASSET_DIRECTORY', 'A canonical directory is required.');
@@ -111,7 +119,7 @@ function verifyFile(filename: string, png: Buffer, maxFileBytes: number) {
   try {
     descriptor = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const information = fstatSync(descriptor);
-    assert(information.isFile() && information.nlink === 1 && (information.mode & 0o777) === 0o600
+    assert(information.isFile() && information.nlink === 1 && privatePermissions(filename, information, 0o600)
       && information.size === png.length && information.size <= maxFileBytes,
     'RENDERED_ASSET_FILE', 'A private, bounded regular PNG file is required.');
     const output = Buffer.alloc(png.length);
@@ -144,15 +152,15 @@ export function createRenderedAssetPublisher({ registry, directory, maxFiles = 2
     && Number.isSafeInteger(maxPending) && maxPending >= 1 && maxPending <= 256,
   'RENDERED_ASSET_INVALID', 'A trusted registry, canonical directory, and bounded limits are required.');
   try {
-    assert(realpathSync(dirname(directory)) === dirname(directory), 'RENDERED_ASSET_DIRECTORY', 'A canonical parent directory is required.');
+    assert(canonicalPathMatches(realpathSync(dirname(directory)), dirname(directory)), 'RENDERED_ASSET_DIRECTORY', 'A canonical parent directory is required.');
     mkdirSync(directory, { mode: 0o700 });
   }
   catch (error) {
     if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') fail('RENDERED_ASSET_DIRECTORY');
   }
   const initialDescriptor = directoryHandle(directory);
-  const initialDirectory = fstatSync(initialDescriptor);
-  closeSync(initialDescriptor);
+  const initialDirectory = initialDescriptor === undefined ? lstatSync(directory) : fstatSync(initialDescriptor);
+  if (initialDescriptor !== undefined) closeSync(initialDescriptor);
   let pending = 0;
 
   return Object.freeze({
@@ -193,7 +201,7 @@ export function createRenderedAssetPublisher({ registry, directory, maxFiles = 2
         if (previous) await previous;
         cancelled(signal);
         descriptor = directoryHandle(directory, initialDirectory);
-        ioDirectory = descriptorPath(descriptor);
+        ioDirectory = descriptor === undefined ? directory : descriptorPath(descriptor);
         try {
           lock = openSync(join(ioDirectory, lockName), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
         } catch { fail('RENDERED_ASSET_BUSY'); }
@@ -226,7 +234,7 @@ export function createRenderedAssetPublisher({ registry, directory, maxFiles = 2
         cancelled(signal);
         verifyFile(filename, png, maxFileBytes);
         const checkedDirectory = directoryHandle(directory, initialDirectory);
-        closeSync(checkedDirectory);
+        if (checkedDirectory !== undefined) closeSync(checkedDirectory);
         cancelled(signal);
         if (!existing) {
           registry.register({ id: assetId, type: 'image', scope: conversationId, persona, version,
@@ -240,7 +248,7 @@ export function createRenderedAssetPublisher({ registry, directory, maxFiles = 2
         assert(registry.resolve(selection) === sourcePath, 'RENDERED_ASSET_CONFLICT', 'The rendered resource location conflicts.');
         verifyFile(filename, png, maxFileBytes);
         const finalDirectory = directoryHandle(directory, initialDirectory);
-        closeSync(finalDirectory);
+        if (finalDirectory !== undefined) closeSync(finalDirectory);
         cancelled(signal);
         return assetId;
       } catch (error) {
@@ -255,9 +263,12 @@ export function createRenderedAssetPublisher({ registry, directory, maxFiles = 2
       } finally {
         if (lock !== undefined && ioDirectory) {
           try {
-            if (sameFile(fstatSync(lock), lstatSync(join(ioDirectory, lockName)))) unlinkSync(join(ioDirectory, lockName));
+            if (sameFile(fstatSync(lock), lstatSync(join(ioDirectory, lockName)))) {
+              if (process.platform === 'win32') { closeSync(lock); lock = undefined; }
+              unlinkSync(join(ioDirectory, lockName));
+            }
           } catch {}
-          closeSync(lock);
+          if (lock !== undefined) closeSync(lock);
         }
         if (descriptor !== undefined) closeSync(descriptor);
         release?.();

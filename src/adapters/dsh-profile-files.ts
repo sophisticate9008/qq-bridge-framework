@@ -1,3 +1,4 @@
+import { privatePermissions, trustedPermissions, securePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash, randomUUID } from 'node:crypto'
 import { isUtf8 } from 'node:buffer'
 import { constants } from 'node:fs'
@@ -64,16 +65,16 @@ function dynamic(value: JsonValue): boolean {
 
 async function safePath(filename: string, allowMissing: boolean): Promise<boolean> {
   if (!isAbsolute(filename) || resolve(filename) !== filename || filename.includes('\0')) fail('explicit_dsh_path_required')
-  if (await realpath(dirname(filename)) !== dirname(filename)) fail('dsh_symlink_path_rejected')
+  if (!canonicalPathMatches(await realpath(dirname(filename)), dirname(filename))) fail('dsh_symlink_path_rejected')
   const parent = await lstat(dirname(filename))
-  if (!parent.isDirectory() || (parent.mode & 0o022) !== 0) fail('dsh_directory_permissions_unsafe')
+  if (!parent.isDirectory() || !trustedPermissions(dirname(filename), parent)) fail('dsh_directory_permissions_unsafe')
   const stat = await lstat(filename).catch(error => {
     if (allowMissing && record(error) && error.code === 'ENOENT') return undefined
     throw error
   })
   if (!stat) return false
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 1_048_576
-    || (stat.mode & 0o022) !== 0
+    || !trustedPermissions(filename, stat)
     || typeof process.getuid === 'function' && stat.uid !== process.getuid()) fail('dsh_file_unsafe')
   return true
 }
@@ -83,7 +84,7 @@ async function readFile(filename: string, secret = false, allowMissing = false):
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const before = await handle.stat()
-    if (!before.isFile() || before.size > 1_048_576 || secret && (before.mode & 0o077) !== 0) fail('dsh_file_permissions_unsafe')
+    if (!before.isFile() || before.size > 1_048_576 || secret && !privatePermissions(filename, before)) fail('dsh_file_permissions_unsafe')
     const buffer = Buffer.alloc(before.size + 1)
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
     const after = await handle.stat()
@@ -145,6 +146,7 @@ async function readProfile(target: DeploymentTarget): Promise<ProfileRead> {
 async function exclusiveWrite(filename: string, text: string): Promise<void> {
   const handle = await open(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
   try {
+    securePermissions(filename, 0o600)
     await handle.writeFile(text, 'utf8')
     await handle.sync()
   } finally {
@@ -157,8 +159,10 @@ async function replace(filename: string, text: string): Promise<void> {
   try {
     await exclusiveWrite(temporary, text)
     await rename(temporary, filename)
-    const parent = await open(dirname(filename), constants.O_RDONLY | constants.O_DIRECTORY)
-    try { await parent.sync() } finally { await parent.close() }
+    if (process.platform !== 'win32') {
+      const parent = await open(dirname(filename), constants.O_RDONLY | constants.O_DIRECTORY)
+      try { await parent.sync() } finally { await parent.close() }
+    }
   } finally {
     await unlink(temporary).catch(() => undefined)
   }

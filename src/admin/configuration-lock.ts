@@ -1,3 +1,4 @@
+import { privatePermissions } from '../storage/file-security.ts';
 import { constants } from 'node:fs'
 import { lstat, open, realpath, unlink } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -28,7 +29,7 @@ export async function withConfigurationWriteLock<Value>(filename: string, operat
     const opened = await handle.stat()
     identity = opened
     const current = await lstat(lockfile)
-    if (!opened.isFile() || opened.nlink !== 1 || (opened.mode & 0o777) !== 0o600
+    if (!opened.isFile() || opened.nlink !== 1 || !privatePermissions(lockfile, opened, 0o600)
       || opened.dev !== current.dev || opened.ino !== current.ino) {
       throw new AdminRequestError(500, 'configuration_lock_failed')
     }

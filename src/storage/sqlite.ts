@@ -1,3 +1,4 @@
+import { privatePermissions, securePermissions } from './file-security.ts';
 import { closeSync, constants, fchmodSync, fstatSync, lstatSync, openSync } from 'node:fs';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { Buffer } from 'node:buffer';
@@ -136,6 +137,7 @@ function secureFile(filename: string): void {
   try {
     descriptor = openSync(filename, 'a', 0o600);
     fchmodSync(descriptor, 0o600);
+    securePermissions(filename, 0o600);
   } catch (error: unknown) {
     redact(error, 'STORE_OPEN_FAILED', 'Could not open durable store.');
   } finally {
@@ -234,7 +236,7 @@ export function createSqliteStore(options: SqliteStoreOptions): SqliteStore {
     if (existingDescriptor === undefined) return;
     const opened = fstatSync(existingDescriptor);
     const current = lstatSync(filename);
-    if (!current.isFile() || current.nlink !== 1 || (current.mode & 0o777) !== 0o600
+    if (!current.isFile() || current.nlink !== 1 || !privatePermissions(filename, current, 0o600)
       || typeof process.getuid === 'function' && current.uid !== process.getuid()
       || current.dev !== opened.dev || current.ino !== opened.ino) fail('STORE_READONLY_UNSAFE', 'Existing storage identity changed.');
   }

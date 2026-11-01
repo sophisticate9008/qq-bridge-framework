@@ -1,3 +1,4 @@
+import { privatePermissions } from './file-security.ts';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
@@ -10,16 +11,16 @@ export async function readPrivateBlob(filename: string, expected: { readonly byt
   signal.throwIfAborted();
   if (!Number.isSafeInteger(expected.maximumBytes) || expected.maximumBytes < 1 || !Number.isSafeInteger(expected.bytes) || expected.bytes < 1 || expected.bytes > expected.maximumBytes || !/^[a-f0-9]{64}$/.test(expected.sha256)) fail();
   const directory = dirname(filename); const beforeDirectory = await lstat(directory);
-  if (!beforeDirectory.isDirectory() || beforeDirectory.isSymbolicLink() || (beforeDirectory.mode & 0o777) !== 0o700) fail();
+  if (!beforeDirectory.isDirectory() || beforeDirectory.isSymbolicLink() || !privatePermissions(directory, beforeDirectory, 0o700)) fail();
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await handle.stat();
-    if (!before.isFile() || before.nlink !== 1 || (before.mode & 0o777) !== 0o600 || before.size !== expected.bytes) fail();
+    if (!before.isFile() || before.nlink !== 1 || !privatePermissions(filename, before, 0o600) || before.size !== expected.bytes) fail();
     const buffer = Buffer.alloc(expected.bytes + 1); let size = 0;
     while (size < buffer.length) { signal.throwIfAborted(); const result = await handle.read(buffer, size, buffer.length - size, size); if (result.bytesRead === 0) break; size += result.bytesRead; }
     const after = await handle.stat(); const path = await lstat(filename); const afterDirectory = await lstat(directory);
-    if (size !== expected.bytes || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || after.nlink !== 1 || (after.mode & 0o777) !== 0o600
-      || path.dev !== before.dev || path.ino !== before.ino || path.isSymbolicLink() || afterDirectory.ino !== beforeDirectory.ino || afterDirectory.dev !== beforeDirectory.dev || afterDirectory.isSymbolicLink() || (afterDirectory.mode & 0o777) !== 0o700
+    if (size !== expected.bytes || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || after.nlink !== 1 || !privatePermissions(filename, after, 0o600)
+      || path.dev !== before.dev || path.ino !== before.ino || path.isSymbolicLink() || afterDirectory.ino !== beforeDirectory.ino || afterDirectory.dev !== beforeDirectory.dev || afterDirectory.isSymbolicLink() || !privatePermissions(directory, afterDirectory, 0o700)
       || createHash('sha256').update(buffer.subarray(0, size)).digest('hex') !== expected.sha256) fail();
     signal.throwIfAborted(); return buffer.subarray(0, size);
   } finally { await handle.close(); }
@@ -34,9 +35,11 @@ export async function writePrivateBlob(directory: string, name: string, bytes: B
     if (error instanceof Error && 'code' in error && error.code === 'EEXIST') { await readPrivateBlob(filename, { bytes: bytes.length, maximumBytes: bytes.length, sha256 }, signal); return; }
     throw error;
   }
-  try { await handle.writeFile(bytes); await handle.sync(); const stat = await handle.stat(); if (stat.nlink !== 1 || (stat.mode & 0o777) !== 0o600 || stat.size !== bytes.length) fail(); }
+  try { await handle.writeFile(bytes); await handle.sync(); const stat = await handle.stat(); if (stat.nlink !== 1 || !privatePermissions(filename, stat, 0o600) || stat.size !== bytes.length) fail(); }
   finally { await handle.close(); }
-  const directoryHandle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+  if (process.platform !== 'win32') {
+    const directoryHandle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+  }
   signal.throwIfAborted();
 }
