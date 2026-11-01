@@ -136,6 +136,7 @@ import { createOneBotStickerPort } from '../adapters/onebot-stickers.ts'
 import { createNativeStickerService, NATIVE_STICKER_TOOLS } from './native-sticker-tools.ts'
 import { createStickerPackages } from './sticker-packages.ts'
 import { createStickerLibrary } from './sticker-library.ts'
+import { createStickerUsage } from './sticker-usage.ts'
 import { createNativeStickerSendEffect, NATIVE_STICKER_SEND_TOOLS } from './native-sticker-send.ts'
 import { validateStickerLibraryConfiguration } from '../contracts/sticker-library.ts'
 import { validateStickerSendingConfiguration } from '../contracts/sticker-sending.ts'
@@ -1125,6 +1126,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           authorize: (conversationId, signal) => guard(conversationId, signal, true, 'resource') })
         const stickerModel = { provider: selected.deployment.presetBindings.find(b => b.externalProvider)?.externalProvider ?? definition.model.provider,
           model: definition.model.name, reasoningEffort: definition.model.reasoningEffort, contextWindow: 128_000 }
+        const stickerUsageStore = store
+        const stickerUsage = createStickerUsage({ store: stickerUsageStore, accountId: selfId })
         // Selection only chooses a numbered, already-labelled candidate. Use the
         // declared non-thinking mode within its short deadline; image labelling
         // and main-chat reasoning retain their configured settings.
@@ -1248,6 +1251,19 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
                 content: json(request.content) }, request.signal)
               await guard(request.conversationId, request.signal, false, 'delivery')
               const receipt = await sourceTransport.send(request)
+              if (receipt.status === 'confirmed') {
+                // A statistics failure must never reclassify a delivered QQ
+                // message as failed or invite a duplicate protocol send.
+                try {
+                  const images = new Set(request.content.flatMap(part => {
+                    if (part.type !== 'image') return []
+                    const media = stickerUsageStore.read('native-chat.media', part.assetId)?.value
+                    return isRecord(media) && media.accountId === selfId && media.conversationId === request.conversationId
+                      && typeof media.libraryImageId === 'string' ? [media.libraryImageId] : []
+                  }))
+                  for (const id of images) stickerUsage.record({ id, idempotencyKey: request.idempotencyKey })
+                } catch { activity.record('error', request.conversationId, undefined, {}, 'STICKER_USAGE_RECORD_FAILED') }
+              }
               await checkpoint('send.after', { conversationId: request.conversationId, status: receipt.status,
                 idempotencyKey: request.idempotencyKey }, request.signal).catch(() => {})
               activity.record(receipt.status === 'confirmed' ? 'send_confirmed'
@@ -1308,6 +1324,12 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           contentReader: mediaReader,
           authorize: (conversationId, signal) => guard(conversationId, signal, true, 'resource') })
         stickerLibrary = createStickerLibrary({ directory: options.directory, store, accountId: selfId, port: stickerPort, reader: mediaReader,
+          async observationVersion(signal) {
+            signal.throwIfAborted()
+            const saved = await packageConfigurationRegistry.read('media')
+            signal.throwIfAborted()
+            return validateNativeMediaConfiguration(saved.configuration).observationVersion
+          },
           async reconcile(owner, name, conversationId, signal) {
             const existing = pluginModels?.listBindings(owner).find(binding => binding.name === name && binding.conversationId === conversationId)
             if (existing?.state === 'unknown' && !existing.busy) await pluginModels!.reconcile(owner, { name, conversationId, expectedRevision: existing.revision }, signal)
