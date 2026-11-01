@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createStickerLibraryRoutes } from '../src/admin/sticker-library.ts'
 import { AdminRequestError, createAdminServer } from '../src/admin/server.ts'
-import { parseStickerLibrarySnapshot } from '../src/contracts/sticker-library.ts'
+import { parseStickerLibrarySnapshot, type StickerLibraryAnnotationUpdate } from '../src/contracts/sticker-library.ts'
 import { FrameworkError } from '../src/core/values.ts'
 
 const id = 'a'.repeat(64)
@@ -21,11 +21,14 @@ function fixture() {
     async annotateIdentity(stickerId: string, revision: number, identity: { readonly character: string; readonly aliases: readonly string[] }, signal: AbortSignal) {
       calls.push({ stickerId, revision, identity }); signal.throwIfAborted(); if (failure) throw failure; return result
     },
+    async annotate(input: StickerLibraryAnnotationUpdate, signal: AbortSignal) {
+      calls.push(input); signal.throwIfAborted(); if (failure) throw failure; return result
+    },
   }
   const routes = createStickerLibraryRoutes({ stickerLibrary: () => connected ? manager : undefined })
   return { calls, routes, setList(value: unknown) { list = value }, setPreview(value: unknown) { preview = value },
     setResult(value: unknown) { result = value }, setFailure(value: unknown) { failure = value }, disconnect() { connected = false },
-    invoke(path: 'library' | 'preview' | 'delete' | 'identity', body: Record<string, unknown> | null = null, query = new URLSearchParams(), signal = new AbortController().signal) {
+    invoke(path: 'library' | 'preview' | 'delete' | 'identity' | 'annotation', body: Record<string, unknown> | null = null, query = new URLSearchParams(), signal = new AbortController().signal) {
       const route = routes.find(route => route.pathname === `/api/chat/stickers/${path}`)
       assert(route); return Promise.resolve().then(() => route.handle({ query, body, signal }))
     } }
@@ -121,4 +124,22 @@ test('sticker routes register with the real admin server and bound large UTF-8 s
   const preview = await fetch(`http://127.0.0.1:${address.port}/api/chat/stickers/preview?id=${id}`, { headers })
   assert.equal(preview.status, 200)
   assert.deepEqual(await preview.json(), { image: 'data:image/jpeg;base64,/9j/' })
+})
+
+test('full annotation routes admit explicit empty fields and preserve role clearing with CAS', async () => {
+  const f = fixture()
+  const annotation = { description: '', tags: [], avoid: '',
+    facets: { emotions: [], actions: [], intents: [], scenes: [], visibleText: '' }, visual: { colors: [], styles: [], entities: [] } }
+  const body = { id, revision: 1, annotation, identity: null }
+  f.setResult({ status: 'confirmed', id, revision: 2, annotation, identity: null, privatePath: '/private' })
+  assert.deepEqual(await f.invoke('annotation', body), { status: 'confirmed', id, revision: 2, annotation, identity: null })
+  assert.deepEqual(f.calls, [body])
+  for (const invalid of [{ ...body, annotation: { ...annotation, identity: { character: '伪造', source: 'web' } } },
+    { ...body, identity: { character: '角色', aliases: [], source: 'web' } }, { ...body, annotation: { ...annotation, visual: {} } }]) {
+    await rejected(f.invoke('annotation', invalid), 400, 'invalid_sticker_annotation')
+  }
+  f.setFailure(new FrameworkError('STICKER_ANNOTATION_CONFLICT', 'Private revision details'))
+  await rejected(f.invoke('annotation', body), 409, 'sticker_annotation_conflict')
+  f.setFailure(undefined); f.setResult({ status: 'confirmed', id, revision: 1, annotation, identity: null })
+  await rejected(f.invoke('annotation', body), 503, 'sticker_annotation_result_unknown')
 })

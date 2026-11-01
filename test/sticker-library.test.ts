@@ -346,3 +346,70 @@ test('manual aliases upgrade the running content hash reservation while keeping 
     if (!suitable) assert.equal(result.reason, 'filtered', 'manual promotion never bypasses actual image filtering')
   }
 })
+
+test('manual full-dimensional labels can clear fields and survive model cache writes and role inference', async t => {
+  const f = await fixture(t); f.seed()
+  const initial = (await f.library.snapshot(signal())).items[0]!
+  createStickerCharacterRecognition(f.store, '999').remember({ character: '推断角色', aliases: [], entities: ['白猫'], evidence: '外观规则' })
+  const manual = { description: '', tags: ['愤怒'], avoid: '',
+    facets: { emotions: ['生气'], actions: [], intents: ['抗议'], scenes: [], visibleText: '' },
+    visual: { colors: ['白色'], styles: [], entities: ['白猫'] } }
+  const saved = await f.library.annotate({ id: initial.id, revision: initial.revision, annotation: manual, identity: null }, signal())
+  assert.equal(saved.identity, null); assert.deepEqual(saved.annotation, manual)
+  const first = (await f.library.snapshot(signal())).items[0]!
+  assert.equal(first.revision, saved.revision); assert.equal(first.description, ''); assert.deepEqual(first.tags, manual.tags)
+  assert.deepEqual(first.facets, manual.facets); assert.deepEqual(first.visual, manual.visual); assert.equal(first.identity, undefined)
+  assert.deepEqual(first.usage, { sentCount: 0, lastSentAt: null })
+  const account = { id: 'known', stickerId: 'known', md5: createHash('md5').update(f.bytes).digest('hex'), url: 'https://media.example/image' }
+  const cache = createStickerSemanticCache(f.store, '999')
+  cache.remember(account, { description: '新模型描述', tags: ['开心'], avoid: '争执', identity: { character: '模型角色', aliases: [], source: 'model' } })
+  assert.deepEqual(cache.read(account), manual, 'independent model annotations cannot overwrite the manual cache overlay')
+  assert.equal(createStickerSemanticCache(f.store, 'other').read(account), null)
+  assert.equal(await f.library.choose('生气', 'group:123', signal(), Infinity), `media-${initial.id}`)
+  await assert.rejects(f.library.annotate({ id: initial.id, revision: initial.revision, annotation: manual }, signal()), { code: 'STICKER_ANNOTATION_CONFLICT' })
+  const empty = { description: '', tags: [], avoid: '', facets: { emotions: [], actions: [], intents: [], scenes: [], visibleText: '' },
+    visual: { colors: [], styles: [], entities: [] } }
+  await f.library.annotate({ id: initial.id, revision: saved.revision, annotation: empty }, signal())
+  assert.deepEqual(cache.read(account), empty)
+  assert.equal((await f.library.snapshot(signal())).items[0]!.identity, undefined, 'omitting identity preserves its explicit cleared state')
+  assert.equal(await f.library.choose('开心', 'group:123', signal(), Infinity), null)
+})
+
+test('background tagging that started earlier cannot replace a later manual annotation', async t => {
+  const f = await fixture(t); f.seed()
+  const initial = (await f.library.snapshot(signal())).items[0]!
+  let entered!: () => void, release!: () => void
+  const classifying = new Promise<void>(resolve => { entered = resolve }), proceed = new Promise<void>(resolve => { release = resolve })
+  f.setClassifier(async () => { entered(); await proceed; return JSON.stringify({ isSticker: true, safeToShare: true, ...annotation,
+    visual: { colors: ['蓝色'], styles: [], entities: ['蓝猫'] } }) })
+  f.library.warm('group:123'); await classifying
+  const manual = { description: '手动纠正', tags: ['无语'], avoid: '安慰',
+    facets: { emotions: ['无语'], actions: [], intents: [], scenes: [], visibleText: '' }, visual: { colors: [], styles: [], entities: [] } }
+  try { await f.library.annotate({ id: initial.id, revision: initial.revision, annotation: manual,
+    identity: { character: '人工角色', aliases: ['小角色'] } }, signal()) } finally { release() }
+  for (let attempt = 0; attempt < 100 && f.library.pending(); attempt++) await new Promise(resolve => setTimeout(resolve, 5))
+  const item = (await f.library.snapshot(signal())).items[0]!
+  assert.equal(item.description, manual.description); assert.deepEqual(item.tags, manual.tags); assert.deepEqual(item.visual, manual.visual)
+  assert.equal(item.identity?.character, '人工角色'); assert.equal(item.identity?.source, 'user')
+  assert.deepEqual(item.identity?.aliases, ['小角色']); assert.equal(f.calls.length, 1)
+  assert.deepEqual(f.writes, [], 'manual annotation does not add or send an image')
+})
+
+test('omitting the role during a full manual edit preserves its inferred source even when visual fields are cleared', async t => {
+  const f = await fixture(t); f.seed()
+  const initial = (await f.library.snapshot(signal())).items[0]!
+  const row = f.store.read('native-chat.sticker-library', initial.id)!
+  assert(isRecord(row.value)); assert(isRecord(row.value.annotation))
+  f.store.write(row.namespace, row.key, { ...row.value, annotation: { ...row.value.annotation,
+    visual: { colors: ['白色'], styles: [], entities: ['白猫'] } } }, { expectedRevision: row.revision })
+  createStickerCharacterRecognition(f.store, '999').remember({ character: '规则角色', aliases: ['规则别名'], entities: ['白猫'], evidence: '已有账号规则' })
+  const before = (await f.library.snapshot(signal())).items[0]!
+  assert.equal(before.identity?.source, 'model')
+  const empty = { description: '', tags: [], avoid: '', facets: { emotions: [], actions: [], intents: [], scenes: [], visibleText: '' },
+    visual: { colors: [], styles: [], entities: [] } }
+  const result = await f.library.annotate({ id: before.id, revision: before.revision, annotation: empty }, signal())
+  assert.deepEqual(result.identity, before.identity)
+  const after = (await f.library.snapshot(signal())).items[0]!
+  assert.deepEqual(after.identity, before.identity); assert.equal(after.description, ''); assert.deepEqual(after.visual, empty.visual)
+  assert.equal(f.calls.length, 0, 'manual edits do not call a model or upgrade its source to user')
+})

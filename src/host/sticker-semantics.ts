@@ -1,5 +1,7 @@
 import type { OneBotSticker } from '../adapters/onebot-stickers.ts'
 import type { JsonValue } from '../core/types.ts'
+import { parseStickerLibraryAnnotation, type StickerLibraryAnnotation } from '../contracts/sticker-library.ts'
+import type { DurableCasMutation } from '../contracts/ports.ts'
 import { assert, isRecord } from '../core/values.ts'
 import type { DurableStore } from './types.ts'
 import { digest, json } from './data.ts'
@@ -72,6 +74,7 @@ export interface StickerAnnotation {
   readonly identity?: StickerCharacterIdentity
   readonly visual?: StickerVisualFeatures
 }
+interface ManualAnnotation { readonly annotation?: StickerLibraryAnnotation; readonly identity?: StickerCharacterIdentity | null }
 
 /** Shared by the independent classifier; annotations are image metadata, never chat replies. */
 export const STICKER_ANNOTATION_GUIDANCE = `按图像事实与可能用途分层标注，不把物体识别当作情绪识别。
@@ -222,11 +225,51 @@ export function stickerSemanticScore(query: string, name: string, annotation: St
 /** Per-account durable annotations are separate from short-lived, per-conversation assets. */
 export function createStickerSemanticCache(store: DurableStore, selfId: string) {
   const namespace = 'native-chat.sticker-semantics'
+  const manualNamespace = 'native-chat.sticker-manual-semantics'
+  function manual(item: OneBotSticker): ManualAnnotation | null {
+    const value = store.read(manualNamespace, stickerSemanticKey(selfId, item))?.value
+    if (!isRecord(value) || value.schema !== 1 || value.accountId !== selfId) return null
+    const annotation = value.annotation === undefined ? undefined : parseStickerLibraryAnnotation(value.annotation)
+    if (annotation === null) return null
+    try {
+      const identity = value.identity === undefined || value.identity === null ? value.identity : validateStickerCharacterIdentity(value.identity)
+      if (identity && identity.source !== 'user') return null
+      return { ...(annotation === undefined ? {} : { annotation }), ...(identity === undefined ? {} : { identity }) }
+    } catch { return null }
+  }
+  function prepareManual(item: OneBotSticker, input: ManualAnnotation): DurableCasMutation {
+    const annotation = input.annotation === undefined ? undefined : parseStickerLibraryAnnotation(input.annotation)
+    assert(annotation !== null, 'INVALID_STICKER_ANNOTATION', 'Use complete bounded manual image labels.')
+    const identity = input.identity === undefined || input.identity === null ? input.identity : validateStickerCharacterIdentity(input.identity)
+    assert(!identity || identity.source === 'user', 'INVALID_STICKER_ANNOTATION', 'Manual identity labels need user provenance.')
+    const key = stickerSemanticKey(selfId, item), previous = store.read(manualNamespace, key)
+    const value = json({ schema: 1, accountId: selfId, ...(manual(item) ?? {}),
+      ...(annotation === undefined ? {} : { annotation }), ...(identity === undefined ? {} : { identity }) })
+    return previous && digest(previous.value) === digest(value)
+      ? { kind: 'check', namespace: manualNamespace, key, expectedRevision: previous.revision }
+      : { kind: 'write', namespace: manualNamespace, key, value, expectedRevision: previous?.revision ?? null }
+  }
+  function readModel(item: OneBotSticker): StickerAnnotation | null {
+    const record = store.read(namespace, stickerSemanticKey(selfId, item))
+    if (!record || !isRecord(record.value) || record.value.schema !== 1 || record.value.accountId !== selfId) return null
+    try { return validateStickerAnnotation(record.value.annotation) } catch { return null }
+  }
   return Object.freeze({
+    readModel,
+    readManual: manual,
     read(item: OneBotSticker): StickerAnnotation | null {
-      const record = store.read(namespace, stickerSemanticKey(selfId, item))
-      if (!record || !isRecord(record.value) || record.value.schema !== 1 || record.value.accountId !== selfId) return null
-      try { return validateStickerAnnotation(record.value.annotation) } catch { return null }
+      const annotation = readModel(item)
+      const override = manual(item)
+      const base = override?.annotation ?? annotation
+      if (!base) return null
+      const identity = override?.identity === undefined ? annotation?.identity : override.identity
+      const { identity: _identity, ...semantics } = base as StickerAnnotation
+      return { ...semantics, ...(identity ? { identity } : {}) }
+    },
+    prepareManual,
+    rememberManual(item: OneBotSticker, input: ManualAnnotation): void {
+      const mutation = prepareManual(item, input)
+      if (mutation.kind === 'write') store.write(mutation.namespace, mutation.key, mutation.value, { expectedRevision: mutation.expectedRevision })
     },
     remember(item: OneBotSticker, annotation: StickerAnnotation): void {
       const normalized = validateStickerAnnotation(annotation)
@@ -235,8 +278,11 @@ export function createStickerSemanticCache(store: DurableStore, selfId: string) 
         { expectedRevision: previous?.revision ?? null, expiresAt: Date.now() + 180 * 24 * 60 * 60 * 1000 })
     },
     forget(item: OneBotSticker): void {
-      const key = stickerSemanticKey(selfId, item), previous = store.read(namespace, key)
-      if (previous) store.delete(namespace, key, previous.revision)
+      const key = stickerSemanticKey(selfId, item)
+      for (const source of [namespace, manualNamespace]) {
+        const previous = store.read(source, key)
+        if (previous) store.delete(source, key, previous.revision)
+      }
     },
     preview(items: readonly OneBotSticker[]): JsonValue {
       return items.slice(0, 8).map(item => {

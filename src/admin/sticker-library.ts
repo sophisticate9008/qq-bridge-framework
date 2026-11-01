@@ -1,5 +1,6 @@
 import { parseStickerLibrarySnapshot, parseStickerLibraryThumbnail, parseStickerLibraryDeleteResult,
-  parseStickerLibraryIdentityUpdate, parseStickerLibraryIdentityUpdateResult, type StickerLibrarySnapshot } from '../contracts/sticker-library.ts'
+  parseStickerLibraryIdentityUpdate, parseStickerLibraryIdentityUpdateResult, parseStickerLibraryAnnotationUpdate,
+  parseStickerLibraryAnnotationUpdateResult, type StickerLibraryAnnotationUpdate, type StickerLibrarySnapshot } from '../contracts/sticker-library.ts'
 import { isRecord, errorCode } from '../core/values.ts'
 import { AdminRequestError, type AdminRoute } from './server.ts'
 
@@ -8,6 +9,7 @@ interface StickerLibraryManager {
   thumbnail(id: string, signal: AbortSignal): Promise<unknown>
   remove(id: string, revision: number, operationId: string, signal: AbortSignal): Promise<unknown>
   annotateIdentity(id: string, revision: number, identity: { readonly character: string; readonly aliases: readonly string[] }, signal: AbortSignal): Promise<unknown>
+  annotate(input: StickerLibraryAnnotationUpdate, signal: AbortSignal): Promise<unknown>
 }
 const MAX_LIBRARY_RESPONSE_BYTES = 4 * 1024 * 1024
 function boundSnapshot(value: StickerLibrarySnapshot): StickerLibrarySnapshot {
@@ -66,6 +68,21 @@ export function createStickerLibraryRoutes(runtime: { stickerLibrary(): StickerL
       try {
         const value = parseStickerLibraryIdentityUpdateResult(await service().annotateIdentity(request.id, request.revision, request.identity, signal))
         if (!value || value.id !== request.id || value.revision <= request.revision) throw new AdminRequestError(503, 'sticker_identity_result_unknown')
+        return value
+      } catch (error) { failed(error) }
+    } },
+  { method: 'POST', pathname: '/api/chat/stickers/annotation', maxRequestBytes: 16384, maxResponseBytes: 16384,
+    async handle({ query, body, signal }) {
+      const request = parseStickerLibraryAnnotationUpdate(body)
+      if (query.size || !request) throw new AdminRequestError(400, 'invalid_sticker_annotation')
+      try {
+        const value = parseStickerLibraryAnnotationUpdateResult(await service().annotate(request, signal))
+        if (!value || value.id !== request.id || value.revision <= request.revision
+          || JSON.stringify(value.annotation) !== JSON.stringify(request.annotation)
+          || request.identity === null && value.identity !== null
+          || request.identity && (!value.identity || value.identity.source !== 'user'
+            || value.identity.character !== request.identity.character || JSON.stringify(value.identity.aliases) !== JSON.stringify(request.identity.aliases)))
+          throw new AdminRequestError(503, 'sticker_annotation_result_unknown')
         return value
       } catch (error) { failed(error) }
     } }]

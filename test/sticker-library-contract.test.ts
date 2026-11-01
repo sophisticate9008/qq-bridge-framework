@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { DEFAULT_STICKER_LIBRARY_CONFIGURATION, parseStickerLibraryDeleteResult, parseStickerLibrarySnapshot,
   parseStickerLibraryThumbnail, parseStickerLibraryIdentityUpdate, parseStickerLibraryIdentityUpdateResult,
+  parseStickerLibraryAnnotationUpdate, parseStickerLibraryAnnotationUpdateResult,
   validateStickerLibraryConfiguration } from '../src/contracts/sticker-library.ts'
 
 const item = { id: 'a'.repeat(64), revision: 1, name: '招手', description: '开心招手', tags: ['开心', '问候'], avoid: '',
@@ -19,6 +20,33 @@ test('sticker settings use two separate 15 percent defaults and accept fractiona
     ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, triggerProbabilityPercent: invalid }))
   assert.throws(() => validateStickerLibraryConfiguration({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, accountNearFullAt: 1.5 }))
   assert.throws(() => validateStickerLibraryConfiguration({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, ownerOnly: true }))
+})
+
+test('complete manual annotations distinguish preserved, cleared and user-authored roles without inventing provenance', () => {
+  const annotation = { description: '', tags: [], avoid: '',
+    facets: { emotions: [], actions: [], intents: [], scenes: [], visibleText: '' }, visual: { colors: [], styles: [], entities: [] } }
+  const input = { id: item.id, revision: 1, annotation }
+  assert.deepEqual(parseStickerLibraryAnnotationUpdate(input), input)
+  assert.deepEqual(parseStickerLibraryAnnotationUpdate({ ...input, identity: null }), { ...input, identity: null })
+  assert.deepEqual(parseStickerLibraryAnnotationUpdate({ ...input, identity: { character: ' 角色甲 ', aliases: ['甲', '甲'] } })?.identity,
+    { character: '角色甲', aliases: ['甲'] })
+  for (const invalid of [{ ...input, annotation: { ...annotation, tags: ['重复', '重复'] } },
+    { ...input, identity: { character: '角色甲', aliases: [], source: 'user' } },
+    { ...input, annotation: { ...annotation, facets: { ...annotation.facets, emotions: ['1', '2', '3', '4', '5'] } } },
+    { ...input, annotation: { ...annotation, description: 'a'.repeat(241) } }]) assert.equal(parseStickerLibraryAnnotationUpdate(invalid), null)
+  assert.deepEqual(parseStickerLibraryAnnotationUpdateResult({ status: 'confirmed', id: item.id, revision: 2, annotation, identity: null }),
+    { status: 'confirmed', id: item.id, revision: 2, annotation, identity: null })
+  assert.equal(parseStickerLibraryAnnotationUpdateResult({ status: 'confirmed', id: item.id, revision: 2, annotation }), null)
+})
+
+test('optional sticker delivery statistics remain bounded and do not affect legacy snapshots', () => {
+  const usage = { sentCount: 3, lastSentAt: 1000 }
+  assert.deepEqual(parseStickerLibrarySnapshot({ ...snapshot, items: [{ ...item, usage }] })?.items[0]?.usage, usage)
+  assert.deepEqual(parseStickerLibrarySnapshot({ ...snapshot, items: [{ ...item, usage: { sentCount: 0, lastSentAt: null } }] })?.items[0]?.usage,
+    { sentCount: 0, lastSentAt: null })
+  for (const invalid of [{ sentCount: -1, lastSentAt: null }, { sentCount: 1.5, lastSentAt: 1 },
+    { sentCount: 1, lastSentAt: -1 }, { sentCount: Number.MAX_SAFE_INTEGER + 1, lastSentAt: 1 }])
+    assert.equal(parseStickerLibrarySnapshot({ ...snapshot, items: [{ ...item, usage: invalid }] }), null)
 })
 
 test('sticker snapshot strips private fields and refuses ambiguous identifiers or deletion state', () => {

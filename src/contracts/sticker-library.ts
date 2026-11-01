@@ -39,6 +39,14 @@ export interface StickerLibraryVisualFeatures {
   readonly styles: readonly string[]
   readonly entities: readonly string[]
 }
+/** Complete user-editable image semantics; empty fields explicitly clear previous labels. */
+export interface StickerLibraryAnnotation {
+  readonly description: string
+  readonly tags: readonly string[]
+  readonly avoid: string
+  readonly facets: StickerLibraryFacets
+  readonly visual: StickerLibraryVisualFeatures
+}
 export interface StickerImageDimensions { readonly width: number; readonly height: number }
 export function parseStickerImageDimensions(value: unknown): StickerImageDimensions | null {
   if (!isRecord(value) || Object.keys(value).length !== 2 || !Number.isSafeInteger(value.width) || !Number.isSafeInteger(value.height)
@@ -87,6 +95,23 @@ export function parseStickerLibraryVisualFeatures(value: unknown): StickerLibrar
   if (!isRecord(value) || !facetLabels(value.colors, 8) || !facetLabels(value.styles, 4) || !facetLabels(value.entities, 8)) return null
   return { colors: [...value.colors], styles: [...value.styles], entities: [...value.entities] }
 }
+export function parseStickerLibraryAnnotation(value: unknown): StickerLibraryAnnotation | null {
+  if (!isRecord(value) || Object.keys(value).length !== 5
+    || !Object.keys(value).every(key => ['description', 'tags', 'avoid', 'facets', 'visual'].includes(key))
+    || !facetText(value.description, 240, true) || !facetLabels(value.tags, 12) || !facetText(value.avoid, 128, true)
+    || !isRecord(value.facets) || Object.keys(value.facets).length !== 5
+    || !Object.keys(value.facets).every(key => ['emotions', 'actions', 'intents', 'scenes', 'visibleText'].includes(key))
+    || !isRecord(value.visual) || Object.keys(value.visual).length !== 3
+    || !Object.keys(value.visual).every(key => ['colors', 'styles', 'entities'].includes(key))) return null
+  const facets = parseStickerLibraryFacets(value.facets), visual = parseStickerLibraryVisualFeatures(value.visual)
+  return facets && visual ? { description: value.description, tags: [...value.tags], avoid: value.avoid, facets, visual } : null
+}
+export interface StickerLibraryUsage { readonly sentCount: number; readonly lastSentAt: number | null }
+export function parseStickerLibraryUsage(value: unknown): StickerLibraryUsage | null {
+  if (!isRecord(value) || !Number.isSafeInteger(value.sentCount) || Number(value.sentCount) < 0
+    || value.lastSentAt !== null && (!Number.isSafeInteger(value.lastSentAt) || Number(value.lastSentAt) < 0)) return null
+  return { sentCount: Number(value.sentCount), lastSentAt: value.lastSentAt === null ? null : Number(value.lastSentAt) }
+}
 export interface StickerLibraryItem {
   readonly id: string
   readonly revision: number
@@ -102,6 +127,7 @@ export interface StickerLibraryItem {
   readonly state: 'ready' | 'unknown'
   readonly canDelete: boolean
   readonly createdAt: number
+  readonly usage?: StickerLibraryUsage
 }
 export interface StickerLibrarySnapshot {
   readonly schema: 1
@@ -123,6 +149,7 @@ export function parseStickerLibrarySnapshot(value: unknown): StickerLibrarySnaps
     const identity = isRecord(item) && item.identity !== undefined ? parseStickerLibraryIdentity(item.identity) : undefined
     const visual = isRecord(item) && item.visual !== undefined ? parseStickerLibraryVisualFeatures(item.visual) : undefined
     const dimensions = isRecord(item) && item.dimensions !== undefined ? parseStickerImageDimensions(item.dimensions) : undefined
+    const usage = isRecord(item) && item.usage !== undefined ? parseStickerLibraryUsage(item.usage) : undefined
     if (!isRecord(item) || typeof item.id !== 'string' || !/^[a-f0-9]{64}$/.test(item.id) || !Number.isSafeInteger(item.revision)
       || Number(item.revision) < 1 || typeof item.name !== 'string' || item.name.length > 255
       || typeof item.description !== 'string' || item.description.length > 240 || typeof item.avoid !== 'string' || item.avoid.length > 128
@@ -131,10 +158,11 @@ export function parseStickerLibrarySnapshot(value: unknown): StickerLibrarySnaps
       || item.storage !== 'account' && item.storage !== 'extra' || item.state !== 'ready' && item.state !== 'unknown'
       || typeof item.canDelete !== 'boolean' || item.state === 'unknown' && item.canDelete
       || typeof item.createdAt !== 'number' || !Number.isSafeInteger(item.createdAt) || item.createdAt < 0
-      || facets === null || identity === null || visual === null || dimensions === null) return null
+      || facets === null || identity === null || visual === null || dimensions === null || usage === null) return null
     items.push({ id: item.id, revision: Number(item.revision), name: item.name, description: item.description, tags: item.tags as string[],
       avoid: item.avoid, ...(facets ? { facets } : {}), ...(identity ? { identity } : {}), ...(visual ? { visual } : {}),
       ...(dimensions ? { dimensions } : {}),
+      ...(usage ? { usage } : {}),
       storage: item.storage, state: item.state, canDelete: item.canDelete, createdAt: item.createdAt })
   }
   if (new Set(items.map(item => item.id)).size !== items.length) return null
@@ -190,6 +218,37 @@ export function parseStickerLibraryIdentityUpdateResult(value: unknown): Sticker
   const identity = parseStickerLibraryIdentity(value.identity)
   if (!identity || identity.source !== 'user') return null
   return { status: 'confirmed', id: value.id, revision: Number(value.revision), identity }
+}
+export interface StickerLibraryAnnotationUpdate {
+  readonly id: string
+  readonly revision: number
+  readonly annotation: StickerLibraryAnnotation
+  /** Omitted preserves the identity, null explicitly removes it from this image. */
+  readonly identity?: StickerLibraryIdentityUpdate['identity'] | null
+}
+export function parseStickerLibraryAnnotationUpdate(value: unknown): StickerLibraryAnnotationUpdate | null {
+  if (!isRecord(value) || !Object.keys(value).every(key => ['id', 'revision', 'annotation', 'identity'].includes(key))
+    || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(value.id) || !Number.isSafeInteger(value.revision) || Number(value.revision) < 1) return null
+  const annotation = parseStickerLibraryAnnotation(value.annotation)
+  if (!annotation) return null
+  const identity = value.identity === undefined || value.identity === null ? value.identity
+    : parseStickerLibraryIdentityUpdate({ id: value.id, revision: value.revision, identity: value.identity })?.identity
+  if (value.identity !== undefined && value.identity !== null && identity === undefined) return null
+  return { id: value.id, revision: Number(value.revision), annotation, ...(identity === undefined ? {} : { identity }) }
+}
+export interface StickerLibraryAnnotationUpdateResult {
+  readonly status: 'confirmed'
+  readonly id: string
+  readonly revision: number
+  readonly annotation: StickerLibraryAnnotation
+  readonly identity: StickerLibraryIdentity | null
+}
+export function parseStickerLibraryAnnotationUpdateResult(value: unknown): StickerLibraryAnnotationUpdateResult | null {
+  if (!isRecord(value) || value.status !== 'confirmed' || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(value.id)
+    || !Number.isSafeInteger(value.revision) || Number(value.revision) < 1) return null
+  const annotation = parseStickerLibraryAnnotation(value.annotation), identity = value.identity === null ? null : parseStickerLibraryIdentity(value.identity)
+  if (!annotation || value.identity !== null && !identity) return null
+  return { status: 'confirmed', id: value.id, revision: Number(value.revision), annotation, identity }
 }
 export function parseStickerLibraryDeleteResult(value: unknown): StickerLibraryDeleteResult | null {
   if (!isRecord(value) || value.status !== 'confirmed' && value.status !== 'rejected' && value.status !== 'unknown'
