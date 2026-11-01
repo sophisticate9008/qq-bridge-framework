@@ -137,6 +137,9 @@ try {
   await launch();
   assert.equal((await readFile(resolve(dirname(configuration), saved.tokenFile), 'utf8')).trim(), token);
   await stop();
+  await rm(join(cwd, 'dist/admin-web/app.js'));
+  await assert.rejects(run(process.execPath, [cli, 'start'], { cwd, env, timeout: 15000 }),
+    error => error instanceof Error && 'stderr' in error && String(error.stderr).includes('发行包网页资源缺失'));
   console.log(JSON.stringify({ version, archiveMembers: members.length, webAssetsVerified: assets.length,
     productionInstall: true, compiledBackendWithoutSources: true, initializationAndRestart: true,
     nativeRenderingAndFonts: true, actualQqMessagesSent: 0 }));

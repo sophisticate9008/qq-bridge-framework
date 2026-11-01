@@ -63,6 +63,8 @@ export async function packFrameworkRelease(options: {
     for (const directory of ['dist/src', 'dist/scripts', 'dist/admin-web', 'dist/assets']) await built(directory);
     for (const required of ['dist/scripts/cli.js', 'dist/src/admin/server.js', 'dist/admin-web/index.html',
       'dist/admin-web/app.js', 'dist/assets/fonts/wqy-microhei.ttc']) assert((await lstat(join(stage, required))).isFile());
+    assert((await readFile(join(stage, 'dist/src/admin/gateway.js'), 'utf8'))
+      .includes(`const FRAMEWORK_VERSION = '${options.version}'`), 'Build the matching framework before packing');
     const manifest = frameworkRuntimeManifest(JSON.parse(await readFile(join(stage, 'package.json'), 'utf8')));
     assert.equal(manifest.version, options.version);
     await writeFile(join(stage, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');

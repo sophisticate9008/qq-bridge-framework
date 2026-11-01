@@ -665,7 +665,7 @@ async function start(configurationFilename: string, adminOnly: boolean, output: 
   bootstrapFilename?: string): Promise<void> {
   const configuration = loadGatewayAdminConfiguration(configurationFilename);
   const bootstrap = await loadSelectedNativeBootstrap(configurationFilename, bootstrapFilename);
-  await build(true);
+  await prepareStartupAssets();
   let gateway: PreparedGateway | undefined;
   let service: Awaited<ReturnType<typeof startGatewayAdmin>>;
   try {
@@ -710,6 +710,38 @@ async function start(configurationFilename: string, adminOnly: boolean, output: 
       process.once(signal, handler);
     }
   });
+}
+
+async function prepareStartupAssets(): Promise<void> {
+  const filename = resolve(PROJECT_ROOT, 'distribution.json');
+  if (import.meta.url.endsWith('.js') && existsSync(filename)) {
+    const metadata = lstatSync(filename);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 65536) {
+      throw new CliOperationError('发行包标识无效，请重新解压完整框架包。');
+    }
+    let distribution: unknown;
+    let manifest: unknown;
+    try {
+      distribution = JSON.parse(readFileSync(filename, 'utf8'));
+      manifest = JSON.parse(readFileSync(resolve(PROJECT_ROOT, 'package.json'), 'utf8'));
+    }
+    catch { throw new CliOperationError('发行包标识无效，请重新解压完整框架包。'); }
+    if (!isRecord(distribution) || distribution.schema !== 1 || distribution.kind !== 'framework-runtime'
+      || typeof distribution.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(distribution.version)) {
+      throw new CliOperationError('发行包标识无效，请重新解压完整框架包。');
+    }
+    if (!isRecord(manifest) || manifest.version !== distribution.version) {
+      throw new CliOperationError('发行包版本不一致，请重新解压完整框架包。');
+    }
+    for (const name of ['index.html', 'app.js']) {
+      const asset = resolve(PROJECT_ROOT, 'dist/admin-web', name);
+      if (!existsSync(asset) || !lstatSync(asset).isFile() || lstatSync(asset).isSymbolicLink()) {
+        throw new CliOperationError('发行包网页资源缺失，请重新解压完整框架包。');
+      }
+    }
+    return;
+  }
+  await build(true);
 }
 
 export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAULT_IO): Promise<number> {
