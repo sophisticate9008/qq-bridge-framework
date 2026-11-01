@@ -57,7 +57,7 @@ jobs:
         run: |
           node --input-type=module -e 'if (!/^v\d+\.\d+\.\d+$/.test(process.env.RELEASE_TAG ?? "")) throw new Error("Invalid release tag")'
           mkdir -p "runtime/releases/$RELEASE_TAG"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'qq-bridge-framework-*.tar.gz' --pattern SHA256SUMS --dir "runtime/releases/$RELEASE_TAG"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'qq-bridge-framework-*' --pattern SHA256SUMS --dir "runtime/releases/$RELEASE_TAG"
           echo "QQ_BRIDGE_FRAMEWORK_RELEASE_SOURCE_COMMIT=$(git rev-parse "$RELEASE_TAG^{commit}")" >> "$GITHUB_ENV"
       - name: 原生安装、排版、初始化、WebUI 与重启
         run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log

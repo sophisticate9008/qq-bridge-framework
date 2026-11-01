@@ -2,6 +2,7 @@ import { privatePermissions, securePermissions } from './file-security.ts';
 import { closeSync, constants, fchmodSync, fstatSync, lstatSync, openSync } from 'node:fs';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { Buffer } from 'node:buffer';
+import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import type { Clock, JsonValue } from '../core/types.ts';
@@ -135,6 +136,11 @@ function secureFile(filename: string): void {
   if (filename === ':memory:') return;
   let descriptor: number | null = null;
   try {
+    if (process.platform === 'win32') {
+      const parent = dirname(filename), metadata = lstatSync(parent);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(parent, metadata, 0o700))
+        fail('STORE_OPEN_FAILED', 'A private database directory is required for Windows SQLite sidecars.');
+    }
     descriptor = openSync(filename, 'a', 0o600);
     fchmodSync(descriptor, 0o600);
     securePermissions(filename, 0o600);

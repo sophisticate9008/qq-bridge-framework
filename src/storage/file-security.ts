@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, lstatSync, realpathSync, type Stats } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { FrameworkError, isRecord } from '../core/values.ts';
 
 const windows = process.platform === 'win32';
@@ -8,6 +8,7 @@ const aclCache = new Map<string, { identity: string; trusted: boolean; private: 
 // Paths are JSON on stdin, never interpolated into a command or PowerShell code.
 const aclScript = String.raw`
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $requests = ConvertFrom-Json ([Console]::In.ReadToEnd())
 $results = @(foreach ($r in $requests) {
 $p = [string]$r.path
@@ -54,7 +55,7 @@ function identity(stat: Stats): string {
 function readAcls(requests: readonly { path: string; protect: boolean }[]): unknown[] {
   const executable = join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
   const result: unknown = JSON.parse(execFileSync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
-    Buffer.from(aclScript, 'utf16le').toString('base64')], { input: JSON.stringify(requests),
+    Buffer.from(aclScript, 'utf16le').toString('base64')], { input: JSON.stringify(requests).replace(/[^\x00-\x7f]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, '0')}`),
     encoding: 'utf8', timeout: 15000, maxBuffer: 65536, windowsHide: true }));
   if (!Array.isArray(result) || result.length !== requests.length)
     throw new FrameworkError('FILE_SECURITY_UNAVAILABLE', 'File permissions could not be verified.');
@@ -113,5 +114,14 @@ export function securePermissions(filename: string, mode: number): void {
 /** Drive casing and Windows short-name aliases are permitted only for the same actual path. */
 export function canonicalPathMatches(actual: string, expected: string): boolean {
   if (!windows) return actual === expected;
-  try { return realpathSync.native(actual).toLowerCase() === realpathSync.native(expected).toLowerCase(); } catch { return false; }
+  try {
+    let current = resolve(expected);
+    for (let depth = 0; depth < 128; depth++) {
+      if (lstatSync(current).isSymbolicLink()) return false;
+      const parent = dirname(current);
+      if (parent === current) return realpathSync.native(actual).toLowerCase() === realpathSync.native(expected).toLowerCase();
+      current = parent;
+    }
+    return false;
+  } catch { return false; }
 }

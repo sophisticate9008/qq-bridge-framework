@@ -95,10 +95,9 @@ try {
   }
   checkpoint('production-dependencies');
   const npmArguments = ['ci', '--omit=dev', '--no-audit', '--no-fund'];
-  // Windows command scripts cannot be launched directly by execFile. Use the
-  // npm CLI shipped beside the selected Node executable, without a shell.
+  // On Windows validate the launcher's first-install path once, then its reuse path on startup.
   await run(process.platform === 'win32' ? process.execPath : 'npm', process.platform === 'win32'
-    ? [join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), ...npmArguments] : npmArguments,
+    ? [join(cwd, 'dist/scripts/windows-launcher.js'), '--install-dependencies'] : npmArguments,
   { cwd, env, timeout: 240000, maxBuffer: 2 * 1024 * 1024 });
   evidence.productionInstall = true;
   assert((await lstat(join(cwd, 'node_modules'))).isDirectory());

@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isRecord } from '../src/core/values.ts';
 
+const installOnly = process.argv.length === 3 && process.argv[2] === '--install-dependencies';
+if (process.argv.length > 2 && !installOnly) throw new Error('用法：windows-launcher [--install-dependencies]');
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const cli = join(root, 'dist/scripts/cli.js');
 const configuration = join(root, 'runtime/admin/config.json');
@@ -46,8 +48,8 @@ try {
     await run([join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), 'ci', '--omit=dev', '--no-audit', '--no-fund']);
     if (!stopping) { const { writeFileSync } = await import('node:fs'); writeFileSync(marker, JSON.stringify({ key })); }
   }
-  if (!existsSync(configuration)) await run([cli, 'init']);
-  if (!stopping) {
+  if (!installOnly && !existsSync(configuration)) await run([cli, 'init']);
+  if (!installOnly && !stopping) {
     console.log('启动后请打开日志中的本机网页地址；按 Ctrl+C 正常退出。');
     await run([cli, 'start'], true);
   }
