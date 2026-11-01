@@ -12,7 +12,7 @@ AI许愿生成的，目前自用
 
 ## 安装与开始使用
 
-需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Linux 支持本机 DSH 自动发现；Windows/macOS 需要按高级接入方式配置，当前未提供同等运行验收保证。
+需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Linux 支持本机 DSH 自动发现；v1.7.3 全量包已通过 Ubuntu 24.04 x64 与 ARM64 的安装、WebUI、原生排版和重启验收。原生 Windows 未通过初始化，暂不列为支持平台；macOS 尚未验收。详见 [平台验证记录](docs/VALIDATION.md)。
 
 从 [v1.7.3 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.3) 下载 `qq-bridge-framework-1.7.3.tar.gz`，其中已包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包。
 

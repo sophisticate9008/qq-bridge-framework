@@ -12,7 +12,18 @@
 | DSH | 独立运行的 DSH web 实例，桥接插件当前匹配 SDK `0.2.1-rc.2`、Cordis `4.0.5` |
 | 可选组件 | 视频观察需要 FFmpeg 和 FFprobe；语音转写、生图、搜索等按已安装扩展提供 |
 
-优先在 Linux 上部署；本机 DSH 发现依赖同用户进程及 `/proc`。Windows/macOS 可使用手动高级接入，服务管理器的 screen 运维面向 Linux。普通安装、构建和运行无需 Playwright。
+当前在 Linux 上部署；本机 DSH 发现依赖同用户进程及 `/proc`，服务管理器的 screen 运维也面向 Linux。普通安装、构建和运行无需 Playwright。
+
+v1.7.3 的同一全量包已在 GitHub 标准 runner 验证：
+
+| 环境 | 实际结果 |
+| --- | --- |
+| Ubuntu 24.04 x64（amd64／x86_64） | 生产依赖安装、编译后端、62 个网页资源、中文公式原生排版、初始化和重启通过 |
+| Ubuntu 24.04 ARM64 | 同上，使用真实 ARM64 runner |
+| Windows Server 2022 x64 | 生产依赖与中文公式原生排版通过；初始化被内置文件信任检查拒绝，暂不支持原生运行 |
+| macOS | 尚未验收 |
+
+Windows 当前初始化失败为 `NATIVE_PACKAGE_CONTENT_UNSAFE`，相关可信文件和私有配置检查依赖 POSIX 文件权限，尚未实现 Windows 对应机制。手动指定 DSH 地址不能解决这一框架初始化限制。上述 CI 不包含真实 QQ 登录或 DSH 联调，不代表其他发行版、libc 或操作系统版本已验证；详细证据见 [验收记录](VALIDATION.md)。
 
 检查本机版本：
 

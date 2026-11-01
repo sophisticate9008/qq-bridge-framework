@@ -1,5 +1,16 @@
 # 本轮验收记录
 
+## 2026-11-01 正式全量包跨平台验收
+
+本轮仅新增云端诊断与验证脚本，没有升版、重新发布或部署。三种环境从 GitHub 下载同一 v1.7.3 正式包，先核对 SHA-256、同版组件摘要与标签原提交 `6ad38d235311ae7c3a3bd0ea0b6d23e4a9dc0879`，再原生安装；没有复用本机依赖、使用模拟架构或发送 QQ 消息。
+
+- [Ubuntu x64](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41299152113/job/124826286482) 与 [Ubuntu ARM64](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41299152113/job/124826286587) 均完成生产依赖安装、移除原 TypeScript 源码后的编译后端启动、62 个网页资源摘要核对、中文公式原生 PNG 排版、令牌初始化保留、重启及缺失网页资源拒绝检查。均为 Ubuntu 24.04、Node.js 24.12.0。
+- Windows Server 2022 x64 第一轮停在 Git Bash GNU tar 对盘符路径的误解读；验证器改用 Windows 系统 tar，并通过 Node 直接启动同安装目录的 npm CLI，不引入 shell。随后[仅复核 Windows](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41299340314/job/124826842123)：生产依赖和原生中文公式 PNG 排版通过，但编译 CLI 初始化失败，返回 `NATIVE_PACKAGE_CONTENT_UNSAFE`，栈位于 `native-package-content` 的可信内置文件检查。该检查与后续私有目录／文件校验依赖 POSIX mode，原生 Windows 权限适配尚未完成。本次不削弱检查、不继续扩展 Windows 支持；初始化、后端、WebUI 与重启均不计通过。
+- 验证器与工作流提交 `b52fd1c`、Windows 工具修正 `8f57610` 的普通框架 CI 均通过类型检查、快速测试与凭据扫描。跨平台整体结果保留 Windows 失败，不将已安装依赖或渲染成功表述为完整支持。macOS、其他 Windows／Linux 版本和真实 QQ／DSH 接入未在本轮验证。
+
+正式发行构建和完整安装验收默认留在 GitHub 托管 CI，本机只做必要的定向与真实部署核对。本轮本机未重新构建或安装依赖，仅保存小型报告；云端报告保留三天，安装目录随 runner 回收，不上传 node_modules。
+
+
 ## 2026-11-01 长间隔唤醒的时间语境
 
 v1.7.3 将未读背景上限提高到 32 条，扩展背景字符预算并在总字节／内容块超限时优先保留当前消息。输入包括当前日期、宿主时区、UTC 与本地消息／引用时间、上次明确受理时间和间隔。受理时间随单调读取位置持久保存，群聊被动入站、重复位置、拒绝或未知结果不刷新；旧记录、未知引用时间和时钟回拨不补造时间。
