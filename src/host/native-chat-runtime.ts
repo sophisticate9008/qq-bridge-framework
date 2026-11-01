@@ -1217,6 +1217,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
                 content: normalizeContent(event.data.content) }, visibleHistory, execution.signal)
               inbound.preparedReadCursor(digest([event.conversationId, event.id, 'prompt']), through)
               return prepareNativeChatInput(event, visibleHistory, { owner, selfId, partial: historyPartial, unsentReplyMessageIds,
+                previousInputAcceptedAt: unread.lastReadAt,
                 sentWhileQueued: history.messages.filter(item => item.actor === 'assistant' && item.sequence > through).slice(-4),
                 attachImages: active.deployment.modelSettings?.inputModalities?.includes('image') !== false,
                 unread: { ids: unread.messages.filter(item => item.sequence <= through && item.actor !== 'assistant' && item.actor !== 'system').map(item => item.id), readThrough: unread.readThrough,

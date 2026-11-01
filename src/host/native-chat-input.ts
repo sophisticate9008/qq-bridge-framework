@@ -72,12 +72,21 @@ function contentText(content: readonly MessageContent[], attachedImages: Readonl
   }).join('\n');
 }
 
+/** Zero is the legacy sentinel for an unavailable quoted-message timestamp. */
+function messageTime(value: number | null | undefined): string | null {
+  return value !== undefined && value !== null && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15
+    ? new Date(value).toISOString() : null;
+}
+
 export function prepareNativeChatInput(event: FrameworkEvent, history: readonly HistoryMessage[], options: {
   readonly owner: string | null;
   readonly selfId?: string;
   readonly partial: boolean;
   readonly attachImages?: boolean;
   readonly maxHistoryCharacters?: number;
+  readonly now?: number;
+  readonly timeZone?: string;
+  readonly previousInputAcceptedAt?: number | null;
   readonly participation?: NativeParticipationReason;
   readonly groupWake?: readonly { readonly messageId: string; readonly actor: string; readonly reason: NativeParticipationReason }[];
   readonly unsentReplyMessageIds?: readonly string[];
@@ -89,9 +98,22 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   readonly tools?: { readonly available: boolean; readonly tools: readonly { readonly name: string; readonly description: string }[]; readonly reason: string | null };
   readonly output?: { readonly protocol: 'qbf.output/1'; readonly forwardAuthorized?: boolean; readonly bubbles: boolean; readonly longTextAsForward: boolean; readonly longTextThreshold: number; readonly maxDeliveries: number };
 }): readonly MessageContent[] {
-  const budget = options.maxHistoryCharacters ?? 5_000;
-  assert(Number.isSafeInteger(budget) && budget >= 0 && budget <= 6_000,
+  const budget = options.maxHistoryCharacters ?? 12_000;
+  assert(Number.isSafeInteger(budget) && budget >= 0 && budget <= 16_000,
     'INVALID_INPUT_BUDGET', 'Context budget must be bounded.');
+  const now = options.now ?? Date.now();
+  assert(messageTime(now) !== null, 'INVALID_INPUT_TIME', 'Input preparation needs a valid current time.');
+  const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const previousInputAcceptedAt = options.previousInputAcceptedAt;
+  const previousTime = messageTime(previousInputAcceptedAt);
+  const time = {
+    now: messageTime(now), timeZone,
+    localNow: new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'long', hourCycle: 'h23' }).format(now),
+    currentMessageAt: messageTime(history.find(message => message.id === event.id)?.receivedAt),
+    previousInputAcceptedAt: previousTime,
+    elapsedSincePreviousInputMs: previousTime !== null && typeof previousInputAcceptedAt === 'number' && now >= previousInputAcceptedAt
+      ? now - previousInputAcceptedAt : null,
+  };
   const original = normalizeContent(event.data.content);
   const wakeKind = nativeChatWakeKind(event.id, original, options.selfId);
   const participation = options.participation ?? (event.data.directed === true ? 'direct' : 'ambient');
@@ -122,7 +144,7 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     receivedMessagesInTwoMinutes: recentWindow.filter(message => message.actor !== 'assistant' && message.actor !== 'system').length,
     speakersInTwoMinutes: new Set(recentWindow.filter(message => message.actor !== 'assistant' && message.actor !== 'system').map(message => message.actor)).size
   } : undefined;
-  const recent: { id: string; actor: string; text: string; truncated: boolean; unread: boolean; addressing?: NativeMessageAddressing }[] = [];
+  const recent: { id: string; actor: string; at: string | null; text: string; truncated: boolean; unread: boolean; addressing?: NativeMessageAddressing }[] = [];
   let size = 0;
   let historyTruncated = options.partial;
   // DSH owns the continuous conversation. Only forward messages it has not seen.
@@ -135,18 +157,18 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     ? [event.id, ...history.filter(entry => nativeChatWakeKind(entry.id, entry.content, options.selfId) !== null).map(entry => entry.id)] : []);
   for (const entry of unreadMessages.slice().reverse()) {
     const full = contentText(entry.content);
-    const item = { id: entry.id, actor: entry.actor, text: full.slice(0, 800), truncated: full.length > 800,
+    const item = { id: entry.id, actor: entry.actor, at: messageTime(entry.receivedAt), text: full.slice(0, 800), truncated: full.length > 800,
       unread: options.unread?.ids.includes(entry.id) ?? false,
       ...(group && entry.content.some(part => part.type === 'reply' || part.type === 'mention') ? { addressing: addressing(entry.content, entry.id) } : {}) };
     const length = JSON.stringify(item).length;
-    if (size + length > budget || recent.length >= 16) { historyTruncated = true; break; }
+    if (size + length > budget || recent.length >= 32) { historyTruncated = true; break; }
     recent.unshift(item); size += length;
   }
   const quoted = original.filter(part => part.type === 'reply').slice(0, 4).map(part => {
     const entry = history.find(candidate => candidate.id === part.messageId)
       ?? options.quotedMessages?.find(candidate => candidate.id === part.messageId);
     const full = entry ? contentText(entry.content) : '';
-    return { id: part.messageId, available: entry !== undefined, actor: entry?.actor ?? null,
+    return { id: part.messageId, available: entry !== undefined, actor: entry?.actor ?? null, at: messageTime(entry?.receivedAt),
       text: full.slice(0, 300), truncated: full.length > 300 };
   });
   // Names are scoped observations, never lookup keys or authorization facts. Include each relevant
@@ -166,14 +188,14 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     ...(options.groupWake?.map(item => item.actor) ?? [])])]
     .filter((actor): actor is string => typeof actor === 'string' && actor !== 'assistant' && actor !== 'system' && actor !== options.selfId);
   const participants = relevantActors.slice(0, 32).map(userId => ({ userId, displayName: displayNames.get(userId) ?? null }));
-  const envelope = (currentTruncated: boolean) => JSON.stringify({ schema: 1, conversationId: event.conversationId, messageId: event.id,
+  const envelope = (currentTruncated: boolean) => JSON.stringify({ schema: 1, conversationId: event.conversationId, messageId: event.id, time,
     ...(options.sentWhileQueued?.length ? { replyTiming: {
-      sentAfterCurrentMessage: options.sentWhileQueued.slice(-4).map(message => ({ id: message.id, text: contentText(message.content).slice(0, 200) })),
+      sentAfterCurrentMessage: options.sentWhileQueued.slice(-4).map(message => ({ id: message.id, at: messageTime(message.receivedAt), text: contentText(message.content).slice(0, 200) })),
       note: '当前消息先到达，以上回复随后才发送。模型处理顺序不等于群聊发言顺序，不能把当前消息当成对这些回复的反馈。'
     } } : {}),
     ...(options.unsentReplyMessageIds?.length ? { replyDelivery: { unsentFor: options.unsentReplyMessageIds,
       requests: history.filter(item => options.unsentReplyMessageIds?.includes(item.id)).slice(-4)
-        .map(item => ({ id: item.id, actor: item.actor, text: contentText(item.content).slice(0, 400) })),
+        .map(item => ({ id: item.id, actor: item.actor, at: messageTime(item.receivedAt), text: contentText(item.content).slice(0, 400) })),
       note: '这些旧消息的模型回复尚未发送，因为会话有新消息需要结合理解。先合并原请求与后续纠正，保留数量等未被修改的要求；其他人的顺嘴闲聊不是新的答复任务。此前模型回复未送达，不能把其中新编的玩笑、称呼、约定或事实当成双方共同语境，也不能把后续消息当作对这些草稿的回应。重新依据真实用户消息与已确认发送的内容判断；已执行的其他工具动作仍以真实结果为准，不重复执行。' } } : {}),
     senderId: event.userId ?? null, senderIsConfiguredOwner: options.owner !== null && event.userId === options.owner,
     participants, ...(relevantActors.length > participants.length ? { participantsLimited: true } : {}),
@@ -209,8 +231,12 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   let parts = build(length);
   const imageParts = images.map(assetId => ({ type: 'image' as const, assetId }));
   while (Buffer.byteLength(JSON.stringify([...parts, ...imageParts]), 'utf8') > 60 * 1024 || parts.length + imageParts.length > 8) {
-    assert(length > 0, 'INVALID_INPUT_BUDGET', 'Context metadata exceeds the input budget.');
-    length = Math.floor(length * 0.8);
+    if (recent.length > 0) {
+      recent.shift(); historyTruncated = true;
+    } else {
+      assert(length > 0, 'INVALID_INPUT_BUDGET', 'Context metadata exceeds the input budget.');
+      length = Math.floor(length * 0.8);
+    }
     parts = build(length);
   }
   return normalizeContent([...parts, ...imageParts]);

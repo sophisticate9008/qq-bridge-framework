@@ -1,6 +1,14 @@
 # 公共契约与修改约束
 
 框架、工具和协议使用当前命名，1.4.1 需要配套更新框架、SDK、DSH 桥接插件及调用方；迁移说明见 [命名统一与升级](RENAMING.md)。
+
+## 聊天时间与有界补读
+
+原生聊天输入继续使用 `schema: 1`，附加 `time: { now, timeZone, localNow, currentMessageAt, previousInputAcceptedAt, elapsedSincePreviousInputMs }`。时间戳为 UTC ISO 字符串，`timeZone` 为宿主时区，`localNow` 为该时区的可读日期与时间；缺失消息时间、旧版缺少受理时间或时钟回拨导致间隔无法比较时，相应值为 `null`，不猜测、不生成负间隔。`recent`、`quoted` 及排队／未送达回复的消息事实增加 `at`，同样允许未知。消息时间只说明该条消息何时发生，不代表当前仍有同样的状态。
+
+未读背景按历史序列取最新最多 32 条，按原顺序提交，另附当前消息；每条正文最多 800 字符，默认背景 JSON 字符预算 12000、内部可选预算最高 16000，整体继续限制为 60 KiB 和八个内容块。达到限制时优先保留当前消息，删去较早背景并标记 `historyTruncated`／`unread.partial`，不把有界补读说成完整覆盖。连续 DSH 历史、已确认记忆、会话绑定及未完成任务保留；不定时调用模型维持清醒。
+
+历史快照增加 `lastReadAt: number | null`，`markRead(conversationId, throughSequence, acceptedAt?)` 可在读取位置前进时一同保存确认受理时间。原生入站只在当前宿主和生命周期仍匹配且模型请求明确 accepted 后写入；被动消息、重复读取位置、准备输入、拒绝与未知结果不刷新。记录独立于保留消息，正文被裁剪后、重启后仍可比较；旧记录缺省为未知，旧调用方不传时间仍保持原读取用法。
 公共接口的类型和校验集中在 [src/contracts](../src/contracts)、[src/core](../src/core) 与 SDK 导出。HTTP、协议响应和持久文件均在边界校验；TypeScript 类型不能替代运行时解码。扩展 API 用法见 [扩展开发](EXTENDING.md)，操作恢复见 [恢复手册](RECOVERY.md)。
 
 契约的运行时校验仅依赖同层纯函数；通用对象和引用校验位于 `src/contracts/values.ts`，核心原有导出继续兼容。契约层不运行时导入核心实现，也不引入 Node.js 专用模块，供浏览器共同使用。

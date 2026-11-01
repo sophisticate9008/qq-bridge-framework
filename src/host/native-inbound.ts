@@ -307,7 +307,7 @@ export function createNativeInboundController(options: {
       accepted = receipt.status === 'accepted'
       if (receipt.status === 'accepted' && readCursor !== undefined && current === runtime.host && runtime.lifetime === generation) {
         const prior = current.history.snapshot(message.conversationId)
-        current.history.markRead(message.conversationId, Math.max(prior.readThrough, readCursor))
+        current.history.markRead(message.conversationId, Math.max(prior.readThrough, readCursor), Date.now())
       }
       if (receipt.status === 'rejected') rejected++
       if (receipt.status === 'unknown') unknown++

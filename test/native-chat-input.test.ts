@@ -127,6 +127,59 @@ test('unread metadata distinguishes retained context from newly consumed bounded
   assert.doesNotMatch(text, /"id":"answer"/, 'Assistant output already belongs to the DSH conversation.');
 });
 
+test('resuming input carries current time, a day-long gap and the latest 32 timestamped unread messages', () => {
+  const now = Date.parse('2026-11-01T00:01:00Z');
+  const previous = now - 86_400_000;
+  const entries: HistoryMessage[] = Array.from({ length: 40 }, (_, index) => ({ id: `idle-${index}`, actor: '123',
+    receivedAt: now - 3_600_000 + index * 1000, content: [{ type: 'text', text: `消息${index}` }] }));
+  entries.push({ id: 'current', actor: '123', receivedAt: now - 1000, content: message.content });
+  const parts = prepareNativeChatInput({ id: 'current', type: 'message.received', conversationId: 'group:456', userId: '123',
+    data: { content: json([{ type: 'reply', messageId: 'idle-0' }, ...message.content]) } }, entries,
+  { owner: null, partial: false, now, timeZone: 'Asia/Shanghai', previousInputAcceptedAt: previous,
+    unread: { ids: entries.map(entry => entry.id), readThrough: 1, through: 42, partial: false } });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  const facts = JSON.parse(text.slice('会话事实：\n'.length, text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n'))) as { time: { now: string; timeZone: string; localNow: string; currentMessageAt: string; previousInputAcceptedAt: string; elapsedSincePreviousInputMs: number };
+      recent: { id: string; at: string }[]; quoted: { at: string }[]; unread: { partial: boolean; included: number } };
+  assert.equal(facts.time.now, new Date(now).toISOString());
+  assert.equal(facts.time.timeZone, 'Asia/Shanghai');
+  assert.match(facts.time.localNow, /2026-11-01.*08:01:00/);
+  assert.equal(facts.time.currentMessageAt, new Date(now - 1000).toISOString());
+  assert.equal(facts.time.previousInputAcceptedAt, new Date(previous).toISOString());
+  assert.equal(facts.time.elapsedSincePreviousInputMs, 86_400_000);
+  assert.equal(facts.recent.length, 32);
+  assert.deepEqual(facts.recent.map(item => item.id), entries.slice(8, 40).map(item => item.id));
+  assert.equal(facts.recent[0]!.at, new Date(entries[8]!.receivedAt).toISOString());
+  assert.equal(facts.quoted[0]!.at, new Date(entries[0]!.receivedAt).toISOString());
+  assert.equal(facts.unread.included, 33);
+  assert.equal(facts.unread.partial, true);
+});
+
+test('missing timestamps and clock rollback remain unknown rather than invented dates or negative gaps', () => {
+  const now = Date.parse('2026-11-01T00:01:00Z');
+  const parts = prepareNativeChatInput({ id: 'missing', type: 'message.received', conversationId: 'private:123', userId: '123',
+    data: { content: json([{ type: 'reply', messageId: 'legacy' }, ...message.content]) } }, [],
+  { owner: null, partial: false, now, previousInputAcceptedAt: now + 1000,
+    quotedMessages: [{ id: 'legacy', actor: '456', receivedAt: 0, content: message.content }] });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  const facts = JSON.parse(text.slice('会话事实：\n'.length, text.indexOf('当前消息：\n'))) as { time: { currentMessageAt: null; elapsedSincePreviousInputMs: null }; quoted: { at: null }[] };
+  assert.equal(facts.time.currentMessageAt, null);
+  assert.equal(facts.time.elapsedSincePreviousInputMs, null);
+  assert.equal(facts.quoted[0]!.at, null);
+  assert.doesNotMatch(text, /1970-/);
+});
+
+test('expanded unread input still respects byte and content-part bounds with Chinese metadata and attached images', () => {
+  const entries: HistoryMessage[] = Array.from({ length: 40 }, (_, index) => ({ id: `wide-${index}`, actor: String(1000 + index),
+    displayName: '名字'.repeat(64), receivedAt: Date.now(), content: [{ type: 'text', text: '很长的中文消息'.repeat(150) }] }));
+  const parts = prepareNativeChatInput({ id: 'wide-current', type: 'message.received', conversationId: 'group:456', userId: '123',
+    data: { content: [{ type: 'text', text: '中'.repeat(8000) }, { type: 'text', text: '中'.repeat(8000) }, ...Array.from({ length: 4 }, (_, index) => ({ type: 'image', assetId: `image-${index}` }))] } }, entries,
+  { owner: null, partial: false, maxHistoryCharacters: 16_000, attachImages: true, participation: 'direct' });
+  assert(Buffer.byteLength(JSON.stringify(parts)) <= 60 * 1024);
+  assert(parts.length <= 8);
+  assert.equal(parts.filter(part => part.type === 'image').length, 4);
+  assert.match(parts.flatMap(part => part.type === 'text' ? [part.text] : []).join(''), /"historyTruncated":true/);
+});
+
 test('participant names preserve distinct account identities across current, unread and quoted messages', () => {
   const entries: HistoryMessage[] = [
     { ...history[0]!, displayName: '旧名片' },

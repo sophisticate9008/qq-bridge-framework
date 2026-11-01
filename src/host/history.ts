@@ -11,15 +11,17 @@ export interface HistoryMessage {
   displayName?: string;
 }
 export interface HistoryEntry extends HistoryMessage { sequence: number }
-interface Timeline { sequence: number; readThrough: number; droppedThrough: number; messages: HistoryEntry[] }
+interface Timeline { sequence: number; readThrough: number; droppedThrough: number; lastReadAt: number | null; messages: HistoryEntry[] }
 const namespace = 'history';
 
 function decode(value: unknown): Timeline {
-  if (value === null) return { sequence: 0, readThrough: 0, droppedThrough: 0, messages: [] };
+  if (value === null) return { sequence: 0, readThrough: 0, droppedThrough: 0, lastReadAt: null, messages: [] };
   const data = object(value);
   assert(Number.isSafeInteger(data.sequence) && Number(data.sequence) >= 0 && Number.isSafeInteger(data.readThrough)
     && Number(data.readThrough) >= 0 && Number(data.readThrough) <= Number(data.sequence)
-    && Number.isSafeInteger(data.droppedThrough) && Number(data.droppedThrough) >= 0 && Array.isArray(data.messages),
+    && Number.isSafeInteger(data.droppedThrough) && Number(data.droppedThrough) >= 0 && Array.isArray(data.messages)
+    && (data.lastReadAt === undefined || data.lastReadAt === null
+      || Number.isSafeInteger(data.lastReadAt) && Number(data.lastReadAt) > 0 && Number(data.lastReadAt) <= 8.64e15),
   'INVALID_STORED_DATA', 'Stored conversation history is invalid.');
   const messages = data.messages.map(message => {
     assert(isRecord(message) && reference(message.id) && reference(message.actor) && Number.isFinite(message.receivedAt)
@@ -29,7 +31,8 @@ function decode(value: unknown): Timeline {
       ...(displayName === undefined ? {} : { displayName }),
       sequence: Number(message.sequence), content: normalizeContent(message.content) };
   });
-  return { sequence: Number(data.sequence), readThrough: Number(data.readThrough), droppedThrough: Number(data.droppedThrough), messages };
+  return { sequence: Number(data.sequence), readThrough: Number(data.readThrough), droppedThrough: Number(data.droppedThrough),
+    lastReadAt: typeof data.lastReadAt === 'number' ? data.lastReadAt : null, messages };
 }
 
 export function createConversationHistory({ store, maxMessages = 100, maxBytes = 256 * 1024 }:
@@ -85,13 +88,18 @@ export function createConversationHistory({ store, maxMessages = 100, maxBytes =
       const timeline = decode(store.read(namespace, digest(conversationId))?.value ?? null);
       const after = afterSequence ?? timeline.readThrough;
       const unread = timeline.messages.filter(message => message.sequence > after);
-      return snapshot({ messages: unread.slice(0, limit), readThrough: timeline.readThrough, latestSequence: timeline.sequence,
+      return snapshot({ messages: unread.slice(0, limit), readThrough: timeline.readThrough, lastReadAt: timeline.lastReadAt, latestSequence: timeline.sequence,
         droppedThrough: timeline.droppedThrough, partial: after < timeline.droppedThrough || unread.length > limit });
     },
-    markRead(conversationId: string, throughSequence: number) {
+    markRead(conversationId: string, throughSequence: number, acceptedAt?: number) {
       return mutate(conversationId, timeline => {
         assert(Number.isSafeInteger(throughSequence) && throughSequence >= timeline.readThrough && throughSequence <= timeline.sequence,
           'INVALID_READ_CURSOR', 'The read cursor must be monotonic and within received history.');
+        assert(acceptedAt === undefined || Number.isSafeInteger(acceptedAt) && acceptedAt > 0 && acceptedAt <= 8.64e15,
+          'INVALID_READ_TIME', 'The accepted input time must be a valid timestamp.');
+        // Only confirmed consumption advances this clock. Duplicate cursors and
+        // passive history appends must not make a sleeping conversation look active.
+        if (throughSequence > timeline.readThrough) timeline.lastReadAt = acceptedAt ?? null;
         timeline.readThrough = throughSequence;
       }).readThrough;
     },

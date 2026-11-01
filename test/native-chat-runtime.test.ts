@@ -2588,6 +2588,59 @@ test('explicit reply contract: host work feedback uses final narration while too
   assert.equal(fake.runtime().host()!.replies.get('private:123')?.status, 'responded')
 })
 
+test('native wake submits 32 dated unread messages and preserves its accepted-input clock and session through restart', async context => {
+  const fake = await fixture(context)
+  await fake.configure()
+  await fake.save('personas', { personas: [{ ...persona, wake: { ...DEFAULT_PERSONA_WAKE, continuationMs: 0, groupWakeProbabilityPercent: 0 } }] })
+  await fake.start()
+  const now = Date.now(), previous = now - 86_400_000
+  const history = fake.runtime().host()!.history
+  history.append('group:456', { id: 'yesterday', actor: '123', receivedAt: previous,
+    content: [{ type: 'text', text: '我去吃饭了' }] })
+  history.markRead('group:456', 1, previous)
+  for (let index = 0; index < 40; index++) history.append('group:456', { id: `sleep-${index}`, actor: '789',
+    receivedAt: now - 3_600_000 + index * 1000, content: [{ type: 'text', text: `闲聊${index}` }] })
+  assert.equal(history.snapshot('group:456').lastReadAt, previous)
+  fake.message(6001, { message_type: 'group', group_id: 456,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '早呀，换个话题' } }] })
+  await until(() => fake.rpc.some(call => call.method === 'session/prompt') && history.snapshot('group:456').lastReadAt !== previous)
+  const inputs = () => fake.rpc.filter(call => call.method === 'session/prompt')
+  function facts(request: Record<string, unknown>) {
+    function strings(value: unknown): string[] {
+      return typeof value === 'string' ? [value] : Array.isArray(value) ? value.flatMap(strings)
+        : isRecord(value) ? Object.values(value).flatMap(strings) : []
+    }
+    const text = strings(request.content).filter(item => item !== 'text').join('')
+    const end = text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n')
+    assert(text.startsWith('会话事实：\n') && end > 0)
+    const value: unknown = JSON.parse(text.slice('会话事实：\n'.length, end))
+    assert(isRecord(value) && isRecord(value.time) && Array.isArray(value.recent))
+    return value
+  }
+  const first = facts(inputs()[0]!.request)
+  assert(isRecord(first.time) && Array.isArray(first.recent))
+  assert.equal(first.time.previousInputAcceptedAt, new Date(previous).toISOString())
+  assert(Number(first.time.elapsedSincePreviousInputMs) >= 86_400_000)
+  assert.equal(first.recent.length, 32)
+  assert.deepEqual(first.recent.map(item => isRecord(item) ? item.id : null), Array.from({ length: 32 }, (_, index) => `sleep-${index + 8}`))
+  assert(first.recent.every(item => isRecord(item) && typeof item.at === 'string'))
+  const acceptedAt = history.snapshot('group:456').lastReadAt
+  assert(acceptedAt !== null && acceptedAt >= now)
+  await fake.answer(1)
+  await until(() => fake.runtime().executions()!.forConversation('group:456') === null)
+  await fake.restart()
+  assert.equal(fake.runtime().host()!.history.snapshot('group:456').lastReadAt, acceptedAt)
+  fake.message(6002, { message_type: 'group', group_id: 456,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '继续刚刚的话题' } }] })
+  await until(() => inputs().length === 2).catch(async error => { throw new Error(JSON.stringify(await fake.runtime().status()), { cause: error }) })
+  const second = facts(inputs()[1]!.request)
+  assert(isRecord(second.time))
+  assert.equal(second.time.previousInputAcceptedAt, new Date(acceptedAt).toISOString())
+  assert.equal(inputs()[0]!.request.sessionId, inputs()[1]!.request.sessionId)
+  assert.equal(fake.creates(), 1)
+  await fake.answer(2)
+})
+
 for (const sourceOwner of [false, true]) test(`queued source history boundary survives flood truncation without consuming later messages or mixing owner identity (${sourceOwner})`, async context => {
   let paused = false
   let release!: () => void

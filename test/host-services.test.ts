@@ -228,3 +228,30 @@ test('conversation history persists bounded unread state without allocating empt
     assert.throws(() => restarted.markRead('room:1', 4), { code: 'INVALID_READ_CURSOR' });
   } finally { fixture.close(); }
 });
+
+test('accepted-input time survives pruning and reopen without passive messages or duplicate reads refreshing it', () => {
+  const fixture = database();
+  try {
+    const store = fixture.open();
+    const history = createConversationHistory({ store, maxMessages: 2 });
+    const append = (id: string) => history.append('room:1', { id, actor: 'user:1', receivedAt: 100,
+      content: [{ type: 'text', text: 'hello' }] });
+    assert.equal(history.snapshot('room:1').lastReadAt, null);
+    append('one'); history.markRead('room:1', 1, 1000);
+    append('two'); append('three'); append('four');
+    history.markRead('room:1', 1, 2000);
+    const restarted = createConversationHistory({ store: fixture.open(), maxMessages: 2 });
+    assert.equal(restarted.snapshot('room:1').lastReadAt, 1000);
+    assert.equal(restarted.snapshot('room:1').partial, true);
+    assert.equal(restarted.snapshot('room:other').lastReadAt, null);
+    assert.throws(() => restarted.markRead('room:1', 4, NaN), { code: 'INVALID_READ_TIME' });
+    assert.equal(restarted.snapshot('room:1').lastReadAt, 1000);
+    restarted.markRead('room:1', 4, 3000);
+    assert.equal(restarted.snapshot('room:1').lastReadAt, 3000);
+    // Previously stored timelines have neither a timestamp nor fabricated activity.
+    const legacy = store.read('history', digest('room:1'))!;
+    const { lastReadAt: _ignored, ...value } = object(legacy.value);
+    store.write('history', legacy.key, value, { expectedRevision: legacy.revision });
+    assert.equal(restarted.snapshot('room:1').lastReadAt, null);
+  } finally { fixture.close(); }
+});

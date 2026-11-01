@@ -49,3 +49,17 @@ test('collection registration never becomes a success claim and multiple images 
   assert.match(collection, /用户明确要求静默时不回应/)
   assert.match(collection, /自动收藏与后台完成回执不触发主聊天发言/)
 })
+
+test('time-aware builtin upgrade preserves custom prose and all existing conversation requirements', () => {
+  const previous = '【默认混合模式】自然闲聊与明确任务在同一条连续上下文中理解，不要求用户切换聊天或工作模式，不把每轮对话都变成工作。围绕当前消息与相关上下文自然接话，先回应眼前的话和情绪；招呼、戳一戳、聊代码、抱怨工作或分享想法都不自动等于要求开工。普通提问有知识就直接回答，不顺势揽活。闲聊与工作均依据当前实际可用的能力处理，不凭风格设定假定执行器存在。'
+  const current = DAILY_CHAT_OPERATING_SECTIONS.find(section => section.startsWith('【默认混合模式】'))!
+  assert.match(current, /当前日期、时区、消息时间与距上次处理的间隔/)
+  assert.match(current, /未读不等于刚发生/)
+  assert.match(current, /已确认的关系、偏好与仍在进行的任务保留/)
+  assert.match(current, /时间未知时不编造中间经历/)
+  assert.equal(upgradeBuiltinChatOperatingInstructions(previous), current)
+  const custom = '用户自己写的人设和规则。'
+  assert.equal(upgradeBuiltinChatOperatingInstructions(previous + '\n\n' + custom), current + '\n\n' + custom)
+  assert.equal(upgradeBuiltinChatOperatingInstructions(previous + '用户在此段自定义。'), previous + '用户在此段自定义。')
+  assert.equal(upgradeBuiltinChatOperatingInstructions(current), current)
+})
