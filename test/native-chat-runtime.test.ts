@@ -2447,7 +2447,7 @@ for (const finalKind of ['none', 'text', 'invalid-silent']) test(`explicit reply
   await until(() => fake.runtime().executions()!.forConversation('private:123') === null && host.replies.get('private:123')?.status === 'suppressed')
   assert.equal(fake.sends.length, 0)
   assert.equal(host.history.snapshot('private:123', { afterSequence: 0 }).messages.filter(message => message.actor === 'assistant').length, 0)
-  assert(fake.runtime().activity().items.some(item => item.summary === '本轮观察结束，未发言。'))
+  assert(fake.runtime().activity().items.some(item => item.summary === '本轮处理结束，未发送聊天回复。'))
   assert(!fake.runtime().activity().items.some(item => item.level === 'warning'))
   const reader = createSqliteStore({ filename: join(fake.directory, 'native-chat.sqlite'), requireExisting: true })
   try {
@@ -2456,7 +2456,7 @@ for (const finalKind of ['none', 'text', 'invalid-silent']) test(`explicit reply
   fake.agentEvent('turn/end', { turn: 1, reason: { kind: 'completed' } })
   await delay(1100)
   assert.equal(host.replies.metrics().expired, 0)
-  assert.equal(fake.runtime().activity().items.filter(item => item.summary === '本轮观察结束，未发言。').length, 1)
+  assert.equal(fake.runtime().activity().items.filter(item => item.summary === '本轮处理结束，未发送聊天回复。').length, 1)
   assert.equal(fake.sends.length, 0)
 })
 
@@ -2486,7 +2486,7 @@ for (const conversation of ['private', 'group'] as const) test(`explicit reply c
   assert.equal(fake.runtime().host()!.deliveryForRequest(requestId), null, 'terminal releases delivery deduplication and attempted state')
   assert.equal(fake.sends.length, 1)
   assert.doesNotMatch(JSON.stringify(fake.sends), /Final answer|Tool narration/)
-  assert.equal(fake.runtime().activity().items.some(item => item.summary === '本轮观察结束，未发言。'), false)
+  assert.equal(fake.runtime().activity().items.some(item => item.summary === '本轮处理结束，未发送聊天回复。'), false)
   await delay(4100)
   assert.equal(fake.runtime().host()!.replies.metrics().expired, 0)
   assert.equal(fake.sends.length, 1)
@@ -2500,7 +2500,7 @@ test('explicit reply contract: failed model terminal settles its exact watchdog 
   await until(() => fake.runtime().executions()!.forConversation('private:123') === null)
   assert.equal(fake.runtime().host()!.replies.get('private:123')?.status, 'suppressed')
   assert.equal(fake.sends.length, 0)
-  assert.equal(fake.runtime().activity().items.some(item => item.summary === '本轮观察结束，未发言。'), false)
+  assert.equal(fake.runtime().activity().items.some(item => item.summary === '本轮处理结束，未发送聊天回复。'), false)
 })
 
 for (const unknownSend of [false, true]) test(`host result feedback keeps the original model context and records its actual delivery (${unknownSend ? 'unknown' : 'confirmed'})`, async context => {

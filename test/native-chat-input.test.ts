@@ -139,7 +139,7 @@ test('resuming input carries current time, a day-long gap and the latest 32 time
     unread: { ids: entries.map(entry => entry.id), readThrough: 1, through: 42, partial: false } });
   const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
   const facts = JSON.parse(text.slice('会话事实：\n'.length, text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n'))) as { time: { now: string; timeZone: string; localNow: string; currentMessageAt: string; previousInputAcceptedAt: string; elapsedSincePreviousInputMs: number };
-      recent: { id: string; at: string }[]; quoted: { at: string }[]; unread: { partial: boolean; included: number } };
+      recent: { id: string; at: string; localAt: string }[]; quoted: { at: string }[]; unread: { partial: boolean; included: number } };
   assert.equal(facts.time.now, new Date(now).toISOString());
   assert.equal(facts.time.timeZone, 'Asia/Shanghai');
   assert.match(facts.time.localNow, /2026-11-01.*08:01:00/);
@@ -149,6 +149,7 @@ test('resuming input carries current time, a day-long gap and the latest 32 time
   assert.equal(facts.recent.length, 32);
   assert.deepEqual(facts.recent.map(item => item.id), entries.slice(8, 40).map(item => item.id));
   assert.equal(facts.recent[0]!.at, new Date(entries[8]!.receivedAt).toISOString());
+  assert.match(facts.recent[0]!.localAt, /2026-11-01.*07:01:08/);
   assert.equal(facts.quoted[0]!.at, new Date(entries[0]!.receivedAt).toISOString());
   assert.equal(facts.unread.included, 33);
   assert.equal(facts.unread.partial, true);

@@ -55,6 +55,7 @@ test('time-aware builtin upgrade preserves custom prose and all existing convers
   const current = DAILY_CHAT_OPERATING_SECTIONS.find(section => section.startsWith('【默认混合模式】'))!
   assert.match(current, /当前日期、时区、消息时间与距上次处理的间隔/)
   assert.match(current, /未读不等于刚发生/)
+  assert.match(current, /不能仅因时间过去就断言已经结束、完成或发生过后续/)
   assert.match(current, /已确认的关系、偏好与仍在进行的任务保留/)
   assert.match(current, /时间未知时不编造中间经历/)
   assert.equal(upgradeBuiltinChatOperatingInstructions(previous), current)

@@ -4,7 +4,7 @@
 
 ## 聊天时间与有界补读
 
-原生聊天输入继续使用 `schema: 1`，附加 `time: { now, timeZone, localNow, currentMessageAt, previousInputAcceptedAt, elapsedSincePreviousInputMs }`。时间戳为 UTC ISO 字符串，`timeZone` 为宿主时区，`localNow` 为该时区的可读日期与时间；缺失消息时间、旧版缺少受理时间或时钟回拨导致间隔无法比较时，相应值为 `null`，不猜测、不生成负间隔。`recent`、`quoted` 及排队／未送达回复的消息事实增加 `at`，同样允许未知。消息时间只说明该条消息何时发生，不代表当前仍有同样的状态。
+原生聊天输入继续使用 `schema: 1`，附加 `time: { now, timeZone, localNow, currentMessageAt, currentMessageLocalAt, previousInputAcceptedAt, previousInputAcceptedLocalAt, elapsedSincePreviousInputMs }`。时间戳为 UTC ISO 字符串，`timeZone` 为宿主时区，`localNow` 为该时区的可读日期与时间；缺失消息时间、旧版缺少受理时间或时钟回拨导致间隔无法比较时，相应值为 `null`，不猜测、不生成负间隔。`currentMessageLocalAt` 与 `previousInputAcceptedLocalAt` 提供对应的本地时间；`recent`、`quoted` 及排队／未送达回复的消息事实增加 UTC `at` 和本地 `localAt`，同样允许未知。消息时间只说明该条消息何时发生，不代表当前仍有同样的状态。
 
 未读背景按历史序列取最新最多 32 条，按原顺序提交，另附当前消息；每条正文最多 800 字符，默认背景 JSON 字符预算 12000、内部可选预算最高 16000，整体继续限制为 60 KiB 和八个内容块。达到限制时优先保留当前消息，删去较早背景并标记 `historyTruncated`／`unread.partial`，不把有界补读说成完整覆盖。连续 DSH 历史、已确认记忆、会话绑定及未完成任务保留；不定时调用模型维持清醒。
 

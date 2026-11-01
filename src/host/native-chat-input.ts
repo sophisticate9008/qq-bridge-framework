@@ -104,13 +104,18 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const now = options.now ?? Date.now();
   assert(messageTime(now) !== null, 'INVALID_INPUT_TIME', 'Input preparation needs a valid current time.');
   const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const localFormatter = new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'long', hourCycle: 'h23' });
+  const localTime = (value: number | null | undefined) => messageTime(value) === null || typeof value !== 'number'
+    ? null : localFormatter.format(value);
+  const currentMessageAt = history.find(message => message.id === event.id)?.receivedAt;
   const previousInputAcceptedAt = options.previousInputAcceptedAt;
   const previousTime = messageTime(previousInputAcceptedAt);
   const time = {
     now: messageTime(now), timeZone,
-    localNow: new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'long', hourCycle: 'h23' }).format(now),
-    currentMessageAt: messageTime(history.find(message => message.id === event.id)?.receivedAt),
+    localNow: localTime(now),
+    currentMessageAt: messageTime(currentMessageAt), currentMessageLocalAt: localTime(currentMessageAt),
     previousInputAcceptedAt: previousTime,
+    previousInputAcceptedLocalAt: localTime(previousInputAcceptedAt),
     elapsedSincePreviousInputMs: previousTime !== null && typeof previousInputAcceptedAt === 'number' && now >= previousInputAcceptedAt
       ? now - previousInputAcceptedAt : null,
   };
@@ -144,7 +149,7 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     receivedMessagesInTwoMinutes: recentWindow.filter(message => message.actor !== 'assistant' && message.actor !== 'system').length,
     speakersInTwoMinutes: new Set(recentWindow.filter(message => message.actor !== 'assistant' && message.actor !== 'system').map(message => message.actor)).size
   } : undefined;
-  const recent: { id: string; actor: string; at: string | null; text: string; truncated: boolean; unread: boolean; addressing?: NativeMessageAddressing }[] = [];
+  const recent: { id: string; actor: string; at: string | null; localAt: string | null; text: string; truncated: boolean; unread: boolean; addressing?: NativeMessageAddressing }[] = [];
   let size = 0;
   let historyTruncated = options.partial;
   // DSH owns the continuous conversation. Only forward messages it has not seen.
@@ -157,7 +162,8 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     ? [event.id, ...history.filter(entry => nativeChatWakeKind(entry.id, entry.content, options.selfId) !== null).map(entry => entry.id)] : []);
   for (const entry of unreadMessages.slice().reverse()) {
     const full = contentText(entry.content);
-    const item = { id: entry.id, actor: entry.actor, at: messageTime(entry.receivedAt), text: full.slice(0, 800), truncated: full.length > 800,
+    const item = { id: entry.id, actor: entry.actor, at: messageTime(entry.receivedAt), localAt: localTime(entry.receivedAt),
+      text: full.slice(0, 800), truncated: full.length > 800,
       unread: options.unread?.ids.includes(entry.id) ?? false,
       ...(group && entry.content.some(part => part.type === 'reply' || part.type === 'mention') ? { addressing: addressing(entry.content, entry.id) } : {}) };
     const length = JSON.stringify(item).length;
@@ -168,7 +174,7 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     const entry = history.find(candidate => candidate.id === part.messageId)
       ?? options.quotedMessages?.find(candidate => candidate.id === part.messageId);
     const full = entry ? contentText(entry.content) : '';
-    return { id: part.messageId, available: entry !== undefined, actor: entry?.actor ?? null, at: messageTime(entry?.receivedAt),
+    return { id: part.messageId, available: entry !== undefined, actor: entry?.actor ?? null, at: messageTime(entry?.receivedAt), localAt: localTime(entry?.receivedAt),
       text: full.slice(0, 300), truncated: full.length > 300 };
   });
   // Names are scoped observations, never lookup keys or authorization facts. Include each relevant
@@ -190,12 +196,12 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const participants = relevantActors.slice(0, 32).map(userId => ({ userId, displayName: displayNames.get(userId) ?? null }));
   const envelope = (currentTruncated: boolean) => JSON.stringify({ schema: 1, conversationId: event.conversationId, messageId: event.id, time,
     ...(options.sentWhileQueued?.length ? { replyTiming: {
-      sentAfterCurrentMessage: options.sentWhileQueued.slice(-4).map(message => ({ id: message.id, at: messageTime(message.receivedAt), text: contentText(message.content).slice(0, 200) })),
+      sentAfterCurrentMessage: options.sentWhileQueued.slice(-4).map(message => ({ id: message.id, at: messageTime(message.receivedAt), localAt: localTime(message.receivedAt), text: contentText(message.content).slice(0, 200) })),
       note: '当前消息先到达，以上回复随后才发送。模型处理顺序不等于群聊发言顺序，不能把当前消息当成对这些回复的反馈。'
     } } : {}),
     ...(options.unsentReplyMessageIds?.length ? { replyDelivery: { unsentFor: options.unsentReplyMessageIds,
       requests: history.filter(item => options.unsentReplyMessageIds?.includes(item.id)).slice(-4)
-        .map(item => ({ id: item.id, actor: item.actor, at: messageTime(item.receivedAt), text: contentText(item.content).slice(0, 400) })),
+        .map(item => ({ id: item.id, actor: item.actor, at: messageTime(item.receivedAt), localAt: localTime(item.receivedAt), text: contentText(item.content).slice(0, 400) })),
       note: '这些旧消息的模型回复尚未发送，因为会话有新消息需要结合理解。先合并原请求与后续纠正，保留数量等未被修改的要求；其他人的顺嘴闲聊不是新的答复任务。此前模型回复未送达，不能把其中新编的玩笑、称呼、约定或事实当成双方共同语境，也不能把后续消息当作对这些草稿的回应。重新依据真实用户消息与已确认发送的内容判断；已执行的其他工具动作仍以真实结果为准，不重复执行。' } } : {}),
     senderId: event.userId ?? null, senderIsConfiguredOwner: options.owner !== null && event.userId === options.owner,
     participants, ...(relevantActors.length > participants.length ? { participantsLimited: true } : {}),
