@@ -7,6 +7,17 @@ const MAX_ANIMATION_PIXELS = 16_000_000
 const MAX_PREVIEW_PIXELS = 2_000_000
 const encoded = (bytes: Buffer, format: 'jpeg' | 'webp'): string => `data:image/${format};base64,${bytes.toString('base64')}`
 
+/** Recognise raster signatures without decoding an original animation in the server. */
+export function stickerOriginalMediaType(data: Uint8Array): string | null {
+  const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+  if (['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'))) return 'image/gif'
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png'
+  if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg'
+  if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  if (bytes.toString('ascii', 4, 8) === 'ftyp' && ['avif', 'avis'].includes(bytes.toString('ascii', 8, 12))) return 'image/avif'
+  return null
+}
+
 /** Called by the single-flight preview queue; completed previews are persisted on disk. */
 export async function createStickerPreview(data: Uint8Array, dimensions: StickerImageDimensions,
   signal: AbortSignal): Promise<StickerLibraryThumbnail> {

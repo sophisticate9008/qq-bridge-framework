@@ -576,6 +576,25 @@ test('admin response limit configuration rejects invalid values', () => {
   }
 })
 
+test('authenticated image routes serve bounded original bytes without JSON wrapping or browser caching', async t => {
+  const bytes = Buffer.from('GIF89a')
+  const fixture = await start({ routes: [
+    { method: 'GET', pathname: '/api/original', responseType: 'image', maxResponseBytes: 8 * 1024 * 1024,
+      handle: () => ({ mediaType: 'image/gif', data: bytes }) },
+    { method: 'GET', pathname: '/api/active', responseType: 'image', handle: () => ({ mediaType: 'image/svg+xml', data: bytes }) },
+    { method: 'GET', pathname: '/api/overflow', responseType: 'image', maxResponseBytes: 1024,
+      handle: () => ({ mediaType: 'image/gif', data: Buffer.alloc(1025) }) },
+  ] })
+  t.after(async () => stop(fixture.server))
+  assert.equal((await rawRequest(fixture.origin, '/api/original')).status, 401)
+  const headers = { Authorization: `Bearer ${TOKEN}` }
+  const result = await rawRequest(fixture.origin, '/api/original', { headers })
+  assert.equal(result.status, 200); assert.equal(result.text, bytes.toString())
+  assert.equal(result.headers['content-type'], 'image/gif'); assert.equal(result.headers['cache-control'], 'no-store')
+  assert.equal((await rawRequest(fixture.origin, '/api/active', { headers })).status, 500)
+  assert.equal((await rawRequest(fixture.origin, '/api/overflow', { headers })).status, 413)
+})
+
 test('admin route registration rejects collisions and demo dispatch is optional', () => {
   const base = { token: TOKEN, snapshot: () => ({}) }
   const route: AdminRoute = { method: 'GET', pathname: '/api/example', handle: () => ({}) }

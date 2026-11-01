@@ -379,3 +379,5 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 表情库新增 `POST /api/chat/stickers/annotation`，按 `{id,revision,annotation,identity?}` 原子更新完整人工语义；`annotation` 包含描述、检索标签、不适用语境、完整 facets 与 visual，允许空文本和空数组清空。省略 identity 保留角色，null 清空当前图片角色并抑制推断；手工指定身份只记用户确认。人工覆盖、账号缓存及角色索引一起提交，后台模型不能覆盖，旧角色编辑接口继续可用。
 
 表情条目可附 `usage:{sentCount,lastSentAt}`，缺省兼容旧快照。发送次数从功能启用后按实际协议确认累计，账号隔离、发送键幂等；未发送或未知结果不计，独立存储不修改标注 revision。GIF 收藏与语义补标复用现有媒体 V1／V2 时间抽样与网格规则，附件合并保留每个实际抽样时间点；原 GIF 发送字节不变。
+
+表情库 `GET /api/chat/stickers/original?id=<图片摘要>` 按当前运行账号核验真实条目并读取原始字节，优先复用磁盘缓存，校验内容哈希与可用状态；只接受单个 id，不接受 URL 或文件路径。使用管理端现有鉴权，返回有界的 JPEG／PNG／GIF／WebP／AVIF 图片字节、正确 Content-Type、no-store 与同源资源策略，最多 8 MiB，每个表情库同时最多两个读取任务。不进行动画解码、抽帧、缩放或模型调用。管理端路由以 `responseType: "image"` 显式声明只读图片响应，普通 JSON 路由上限保持 4 MiB。前端图片悬停 500ms 或点按打开原图浮层，同一页面只挂载一张原图，关闭与页面滚动后卸载。

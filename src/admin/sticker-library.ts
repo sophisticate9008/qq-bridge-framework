@@ -7,6 +7,7 @@ import { AdminRequestError, type AdminRoute } from './server.ts'
 interface StickerLibraryManager {
   snapshot(signal: AbortSignal): Promise<unknown>
   thumbnail(id: string, signal: AbortSignal): Promise<unknown>
+  original(id: string, signal: AbortSignal): Promise<{ readonly data: Uint8Array; readonly mediaType: string }>
   remove(id: string, revision: number, operationId: string, signal: AbortSignal): Promise<unknown>
   annotateIdentity(id: string, revision: number, identity: { readonly character: string; readonly aliases: readonly string[] }, signal: AbortSignal): Promise<unknown>
   annotate(input: StickerLibraryAnnotationUpdate, signal: AbortSignal): Promise<unknown>
@@ -49,6 +50,12 @@ export function createStickerLibraryRoutes(runtime: { stickerLibrary(): StickerL
         if (!value) throw new AdminRequestError(503, 'sticker_library_invalid_preview')
         return value
       } catch (error) { failed(error) }
+    } },
+  { method: 'GET', pathname: '/api/chat/stickers/original', responseType: 'image', maxResponseBytes: 8 * 1024 * 1024,
+    async handle({ query, signal }) {
+      const id = query.get('id')
+      if (query.size !== 1 || query.getAll('id').length !== 1 || !id || !/^[a-f0-9]{64}$/.test(id)) throw new AdminRequestError(400, 'invalid_sticker_query')
+      try { return await service().original(id, signal) } catch (error) { failed(error) }
     } },
   { method: 'POST', pathname: '/api/chat/stickers/delete', maxRequestBytes: 1024,
     async handle({ query, body, signal }) {

@@ -6,6 +6,7 @@ import { PackageConfigurationManager } from '../components/package-configuration
 import { ConnectPrompt, PageHeading, Section } from '../components/management.tsx'
 import { VirtualMasonry, type VirtualMasonryItemContext } from '../components/virtual-masonry.tsx'
 import { StickerAnnotationEditor } from '../components/sticker-annotation-editor.tsx'
+import { StickerOriginalViewer } from '../components/sticker-original-viewer.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Input } from '../components/ui/input.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select.tsx'
@@ -102,9 +103,10 @@ const previewRatio = (dimensions: StickerImageDimensions | undefined): number =>
   ? Math.max(1 / 3, Math.min(3, dimensions.width / dimensions.height)) : 1
 const stickerKey = (item: StickerLibraryItem): string => item.id
 
-function StickerPreview({ api, item, context, knownDimensions, onDimensions, refreshEpoch }: { readonly api: ApiClient; readonly item: StickerLibraryItem;
+function StickerPreview({ api, item, context, knownDimensions, onDimensions, refreshEpoch, originalOpen, onOriginalChange }: { readonly api: ApiClient; readonly item: StickerLibraryItem;
   readonly context: VirtualMasonryItemContext; readonly knownDimensions?: StickerImageDimensions;
-  readonly onDimensions: (id: string, dimensions: StickerImageDimensions) => void; readonly refreshEpoch: number }) {
+  readonly onDimensions: (id: string, dimensions: StickerImageDimensions) => void; readonly refreshEpoch: number
+  readonly originalOpen: boolean; readonly onOriginalChange: (id: string, open: boolean) => void }) {
   const root = useRef<HTMLDivElement>(null)
   const [nearViewport, setNearViewport] = useState(false)
   const key = `${item.id}:${item.revision}`
@@ -132,11 +134,14 @@ function StickerPreview({ api, item, context, knownDimensions, onDimensions, ref
     })
     return () => controller.abort()
   }, [api, item.id, item.revision, item.state, key, nearViewport, context.active, onDimensions, refreshEpoch, retry])
-  return <div ref={root} className="relative flex w-full items-center justify-center overflow-hidden rounded-md bg-muted/40" style={{ aspectRatio: previewRatio(dimensions) }}>
+  return <StickerOriginalViewer id={item.id} label={compact(item.description || item.name || '表情原图', 80)}
+    active={nearViewport && context.active && item.state === 'ready'} open={originalOpen} onOpenChange={onOriginalChange}>
+    <div ref={root} className="relative flex w-full items-center justify-center overflow-hidden rounded-md bg-muted/40" style={{ aspectRatio: previewRatio(dimensions) }}>
     {preview && item.state === 'ready' ? <img src={preview.image} alt={item.description || item.name || '表情预览'} loading="lazy" decoding="async" className="h-full w-full object-contain" />
-      : <div className="grid justify-items-center gap-1 px-2 text-center text-xs text-muted-foreground"><span>{item.state === 'unknown' ? '等待核对' : failed ? '预览暂不可用' : nearViewport ? '正在载入…' : '表情预览'}</span>{failed && item.state === 'ready' && <Button size="sm" variant="ghost" onClick={() => setRetry(value => value + 1)}>重试预览</Button>}</div>}
+      : <div className="grid justify-items-center gap-1 px-2 text-center text-xs text-muted-foreground"><span>{item.state === 'unknown' ? '等待核对' : failed ? '预览暂不可用' : nearViewport ? '正在载入…' : '表情预览'}</span>{failed && item.state === 'ready' && <Button size="sm" variant="ghost" className="relative z-10" onClick={() => setRetry(value => value + 1)}>重试预览</Button>}</div>}
     {preview?.animation && <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">{preview.animation === 'animated' ? 'GIF' : 'GIF · 静态预览'}</span>}
-  </div>
+    </div>
+  </StickerOriginalViewer>
 }
 
 export function StickersPage(props: PageProps) {
@@ -151,6 +156,7 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
   const [filter, setFilter] = useState('all'), [query, setQuery] = useState('')
   const [previewEpoch, setPreviewEpoch] = useState(0)
   const [detailsId, setDetailsId] = useState<string | null>(null)
+  const [originalId, setOriginalId] = useState<string | null>(null)
   const learnedDimensions = useRef(new Map<string, StickerImageDimensions>())
   const [character, setCharacter] = useState('all'), [identitySource, setIdentitySource] = useState('all')
   const [deleting, setDeleting] = useState<StickerLibraryItem | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState('')
@@ -165,11 +171,18 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
   }, [])
   const onDetailsChange = useCallback((id: string, open: boolean) => {
     if (open && (deleting || editing || dialogFrame.current !== null)) return
+    if (open) setOriginalId(null)
     setDetailsId(current => open ? id : current === id ? null : current)
+  }, [deleting, editing])
+  const onOriginalChange = useCallback((id: string, open: boolean) => {
+    if (open && (deleting || editing || dialogFrame.current !== null)) return
+    if (open) setDetailsId(null)
+    setOriginalId(current => open ? id : current === id ? null : current)
   }, [deleting, editing])
   const showItemDialog = useCallback((item: StickerLibraryItem, kind: 'annotation' | 'delete') => {
     if (busy || deleting || editing || dialogFrame.current !== null) return
     setDetailsId(null)
+    setOriginalId(null)
     // Let the nonmodal popup close before the modal dialog takes focus.
     dialogFrame.current = requestAnimationFrame(() => {
       dialogFrame.current = null
@@ -206,6 +219,7 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
     }).map(({ item }) => item)
   }, [searchEntries, filter, query, character, identitySource])
   useEffect(() => { if (detailsId && !items.some(item => item.id === detailsId)) setDetailsId(null) }, [detailsId, items])
+  useEffect(() => { if (originalId && !items.some(item => item.id === originalId)) setOriginalId(null) }, [originalId, items])
   const masonryReset = JSON.stringify([filter, query, character, identitySource])
   const estimateHeight = useCallback((item: StickerLibraryItem, _index: number, width: number) => {
     const contentWidth = Math.max(56, width - 26), perLine = Math.max(8, Math.floor(contentWidth / 7))
@@ -214,7 +228,7 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
       + (item.identity ? 20 : 0) + (item.tags.length ? 20 : 0)
     return contentWidth / previewRatio(item.dimensions ?? learnedDimensions.current.get(item.id)) + textHeight + 96
   }, [])
-  const refresh = () => { setPreviewEpoch(value => value + 1); resource.refresh() }
+  const refresh = () => { setOriginalId(null); setPreviewEpoch(value => value + 1); resource.refresh() }
   async function remove() {
     if (!deleting || busy || request.current || locks.has(deleting.id) || resource.error) return
     const latest = resource.snapshot?.items.find(item => item.id === deleting.id)
@@ -263,9 +277,10 @@ function ConnectedStickersPage({ api, connected, setDirty }: PageProps) {
       {!!snapshot?.pending && <p role="status" className="text-sm text-muted-foreground">正在处理 {snapshot.pending} 项表情任务。</p>}
       {message && <p role="status" className="text-sm">{message}</p>}
       <VirtualMasonry items={items} getItemKey={stickerKey} estimateSize={estimateHeight} resetKey={masonryReset}
-        pinnedKeys={[...(deleting ? [deleting.id] : []), ...(editing ? [editing.id] : []), ...(detailsId ? [detailsId] : [])]}>
+        pinnedKeys={[...(deleting ? [deleting.id] : []), ...(editing ? [editing.id] : []), ...(detailsId ? [detailsId] : []), ...(originalId ? [originalId] : [])]}>
         {(item, _index, context) => <article className="grid min-w-0 content-start gap-2 rounded-lg border p-3">
-          <StickerPreview api={api} item={item} context={context} knownDimensions={learnedDimensions.current.get(item.id)} onDimensions={onDimensions} refreshEpoch={previewEpoch} />
+          <StickerPreview api={api} item={item} context={context} knownDimensions={learnedDimensions.current.get(item.id)} onDimensions={onDimensions}
+            refreshEpoch={previewEpoch} originalOpen={originalId === item.id} onOriginalChange={onOriginalChange} />
           <StickerDetails item={item} open={detailsId === item.id} onOpenChange={onDetailsChange} onEdit={editAnnotation}
             canEdit={item.state === 'ready' && !locks.has(item.id) && !busy && !resource.loading && resource.error === null} />
           <p className="text-xs text-muted-foreground">发过 {item.usage?.sentCount ?? 0} 次</p>

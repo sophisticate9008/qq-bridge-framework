@@ -23,7 +23,7 @@ import { createStickerCharacterAliases } from './sticker-character-aliases.ts'
 import { createStickerCharacterRecognition, type StickerCharacterRecognitionRule } from './sticker-character-recognition.ts'
 import { createStickerUsage } from './sticker-usage.ts'
 import { prepareStickerObservation } from './sticker-observation.ts'
-import { createStickerPreview } from './sticker-preview.ts'
+import { createStickerPreview, stickerOriginalMediaType } from './sticker-preview.ts'
 import { createStickerSemanticCache, normalizeStickerCharacterName, validateStickerAnnotation, validateStickerCharacterIdentity, STICKER_ANNOTATION_GUIDANCE, type StickerAnnotation, type StickerCharacterIdentity } from './sticker-semantics.ts'
 
 const RECORDS = 'native-chat.sticker-library', SEEN = 'native-chat.sticker-seen', WRITES = 'native-chat.sticker-writes'
@@ -107,6 +107,7 @@ export function createStickerLibrary(options: {
   const jobs = new Set<Promise<unknown>>(), reservations = new Set<string>()
   const collectionReservations = new Map<string, CollectionReservation>()
   const lifetime = new AbortController()
+  let originalPending = 0
   const active = (signal: AbortSignal) => AbortSignal.any([signal, options.signal, lifetime.signal])
   const refinement: ReturnType<typeof createStickerSemanticRefinement> = createStickerSemanticRefinement({ store: options.store, accountId: options.accountId,
     client: options.collector, model: options.model, signal: active(options.signal), authorize: options.authorize,
@@ -302,6 +303,24 @@ export function createStickerLibrary(options: {
     await disk.write('original', id, identity, Buffer.from(read.data), signal).catch(() => undefined)
     availableImage(id, signal, version)
     return read.data
+  }
+  async function original(id: string, signal: AbortSignal): Promise<{ readonly data: Uint8Array; readonly mediaType: string }> {
+    const processing = active(signal), item = availableImage(id, processing), version = imageVersion(item)
+    assert(originalPending < 2, 'STICKER_ORIGINAL_BUSY', 'Original image reads are busy.')
+    originalPending++
+    const operation = (async () => {
+      try {
+        const data = await readImage(id, processing)
+        processing.throwIfAborted(); availableImage(id, processing, version)
+        assert(!item.md5 || createHash('md5').update(data).digest('hex') === item.md5.toLowerCase(),
+          'STICKER_IMAGE_CHANGED', 'The original image content changed.')
+        const mediaType = stickerOriginalMediaType(data)
+        assert(mediaType, 'STICKER_IMAGE_UNSUPPORTED', 'The original is not a supported raster image.')
+        return { data, mediaType }
+      } finally { originalPending-- }
+    })()
+    track(operation)
+    return operation
   }
   async function thumbnail(id: string, signal: AbortSignal) {
     const current = active(signal), item = availableImage(id, current), version = imageVersion(item), identity = stickerImageIdentity(item)
@@ -701,7 +720,7 @@ export function createStickerLibrary(options: {
     if (lifetime.signal.aborted || options.signal.aborted) return
     options.onFault?.(errorCode(error, 'STICKER_COLLECTION_INCOMPLETE'), conversationId)
   }
-  return Object.freeze({ snapshot, readImage, thumbnail, remove, choose, collect, annotateIdentity, annotate,
+  return Object.freeze({ snapshot, readImage, original, thumbnail, remove, choose, collect, annotateIdentity, annotate,
     warm, requestCollection,
     async hints(conversationId: string, signal: AbortSignal): Promise<JsonValue> {
       signal.throwIfAborted(); warm(conversationId)

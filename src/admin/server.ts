@@ -65,6 +65,8 @@ export interface AdminRoute {
   readonly pathname: string
   readonly maxRequestBytes?: number
   readonly maxResponseBytes?: number
+  /** Authenticated raster bytes; all ordinary routes retain their JSON limits. */
+  readonly responseType?: 'image'
   readonly handle: (request: {
     query: URLSearchParams
     body: Record<string, unknown> | null
@@ -418,10 +420,11 @@ export function createAdminServer({
       || route.pathname === '/api/snapshot' || route.pathname === '/api/demo/events' || route.pathname === '/api/setup'
       || route.pathname === '/api/auth' || route.pathname.startsWith(AUTH_ROUTE_PREFIX)
       || !['GET', 'POST'].includes(route.method) || typeof route.handle !== 'function'
+      || route.responseType !== undefined && (route.responseType !== 'image' || route.method !== 'GET')
       || extensions.has(`${route.method} ${route.pathname}`)) throw new TypeError('Invalid or duplicate admin route')
     if (route.maxResponseBytes !== undefined && (!Number.isSafeInteger(route.maxResponseBytes)
-      || route.maxResponseBytes < 1024 || route.maxResponseBytes > 4 * 1024 * 1024)) {
-      throw new TypeError('Admin route maxResponseBytes must be an integer between 1024 and 4194304')
+      || route.maxResponseBytes < 1024 || route.maxResponseBytes > (route.responseType === 'image' ? 8 : 4) * 1024 * 1024)) {
+      throw new TypeError('Admin route maxResponseBytes exceeds its response type bounds')
     }
     if (route.maxRequestBytes !== undefined && (route.method !== 'POST'
       || !Number.isSafeInteger(route.maxRequestBytes) || route.maxRequestBytes < 1024
@@ -607,6 +610,17 @@ export function createAdminServer({
             signal
           })
         })
+        if (route.responseType === 'image') {
+          if (!isRecord(result) || !(result.data instanceof Uint8Array) || result.data.buffer instanceof SharedArrayBuffer
+            || !['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'].includes(String(result.mediaType))) {
+            throw new RequestError(500, 'invalid_image_response')
+          }
+          if (!result.data.byteLength || result.data.byteLength > (route.maxResponseBytes ?? 256 * 1024)) {
+            throw new RequestError(413, 'response_too_large')
+          }
+          send(response, 200, result.data, String(result.mediaType), { 'Content-Disposition': 'inline', 'Cross-Origin-Resource-Policy': 'same-origin' })
+          return
+        }
         const payload = JSON.stringify(result ?? { ok: true })
         if (Buffer.byteLength(payload) > (route.maxResponseBytes ?? 256 * 1024)) {
           throw new RequestError(413, 'response_too_large')

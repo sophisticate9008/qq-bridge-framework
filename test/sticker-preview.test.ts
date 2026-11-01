@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import sharp from 'sharp'
-import { createStickerPreview } from '../src/host/sticker-preview.ts'
+import { createStickerPreview, stickerOriginalMediaType } from '../src/host/sticker-preview.ts'
 import { parseStickerLibraryThumbnail } from '../src/contracts/sticker-library.ts'
 
 async function animation(pages: number, delay: readonly number[], width = 24, height = 16) {
@@ -12,6 +12,14 @@ async function animation(pages: number, delay: readonly number[], width = 24, he
   return sharp(pixels, { raw: { width, height: height * pages, channels: 3, pageHeight: height } })
     .gif({ loop: 2, delay: [...delay] }).toBuffer()
 }
+
+test('original image types come from raster signatures and never accept active document content', () => {
+  assert.equal(stickerOriginalMediaType(Buffer.from('GIF89a')), 'image/gif')
+  assert.equal(stickerOriginalMediaType(Buffer.from([255, 216, 255])), 'image/jpeg')
+  for (const text of ['', '<svg></svg>', '<html></html>', '{"mediaType":"image/gif"}']) {
+    assert.equal(stickerOriginalMediaType(Buffer.from(text)), null)
+  }
+})
 
 test('animated previews retain the full frame sequence, timing, loop and source layout dimensions', async () => {
   const data = await animation(3, [100, 200, 300])

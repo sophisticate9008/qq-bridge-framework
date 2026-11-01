@@ -15,6 +15,8 @@ function fixture() {
   const manager = {
     async snapshot(signal: AbortSignal) { signal.throwIfAborted(); if (failure) throw failure; return list },
     async thumbnail(stickerId: string, signal: AbortSignal) { calls.push(stickerId); signal.throwIfAborted(); if (failure) throw failure; return preview },
+    async original(stickerId: string, signal: AbortSignal) { calls.push(stickerId); signal.throwIfAborted(); if (failure) throw failure;
+      return { data: Buffer.from('GIF89a'), mediaType: 'image/gif' } },
     async remove(stickerId: string, revision: number, operationId: string, signal: AbortSignal) {
       calls.push({ stickerId, revision, operationId }); signal.throwIfAborted(); if (failure) throw failure; return result
     },
@@ -28,11 +30,20 @@ function fixture() {
   const routes = createStickerLibraryRoutes({ stickerLibrary: () => connected ? manager : undefined })
   return { calls, routes, setList(value: unknown) { list = value }, setPreview(value: unknown) { preview = value },
     setResult(value: unknown) { result = value }, setFailure(value: unknown) { failure = value }, disconnect() { connected = false },
-    invoke(path: 'library' | 'preview' | 'delete' | 'identity' | 'annotation', body: Record<string, unknown> | null = null, query = new URLSearchParams(), signal = new AbortController().signal) {
+    invoke(path: 'library' | 'preview' | 'original' | 'delete' | 'identity' | 'annotation', body: Record<string, unknown> | null = null, query = new URLSearchParams(), signal = new AbortController().signal) {
       const route = routes.find(route => route.pathname === `/api/chat/stickers/${path}`)
       assert(route); return Promise.resolve().then(() => route.handle({ query, body, signal }))
     } }
 }
+
+test('original route reads only a validated current library identifier and returns raster bytes', async () => {
+  const f = fixture()
+  await rejected(f.invoke('original', null, new URLSearchParams('id=bad')), 400, 'invalid_sticker_query')
+  await rejected(f.invoke('original', null, new URLSearchParams({ id, url: 'https://private.example' })), 400, 'invalid_sticker_query')
+  assert.deepEqual(await f.invoke('original', null, new URLSearchParams({ id })), { data: Buffer.from('GIF89a'), mediaType: 'image/gif' })
+  assert.deepEqual(f.calls, [id])
+  f.disconnect(); await rejected(f.invoke('original', null, new URLSearchParams({ id })), 503, 'runtime_not_connected')
+})
 function rejected(promise: Promise<unknown>, status: number, code: string) {
   return assert.rejects(promise, error => error instanceof AdminRequestError && error.statusCode === status && error.code === code)
 }
