@@ -64,13 +64,9 @@ test('ordinary observations, work feedback, explicit silence, attempted sends an
   }
 })
 
-test('sticker selection and collection attempts suppress repair for native and projected call arguments', () => {
+test('sticker sending suppresses repair while ordinary management remains repairable', () => {
   for (const block of [
     { name: 'qbf_sticker_send', arguments: '{}' },
-    { name: 'qbf_sticker_manage', arguments: '{"action":"add"}' },
-    { name: 'qbf_sticker_manage', arguments: '{"action":"add","assetIds":["first","second"]}' },
-    { name: 'qbf_sticker_manage', arguments: { action: 'add' } },
-    { name: 'qbf_sticker_manage', input: { action: 'add' } },
   ]) {
     const { agent, repair, steering } = fixture()
     repair.assistant(agent, 7, [{ type: 'tool-call', ...block }])
@@ -134,4 +130,38 @@ test('a contact signal consumed into unread facts still gets a bounded direct-pr
   assert.equal(steering.length, 1)
   assert.match(JSON.stringify(steering[0]), /unread-request/)
   assert(!JSON.stringify(steering[0]).includes('之前未处理的问题'), 'no duplicated private message body')
+})
+
+
+test('explicit collection in private, directly addressed or ordinary group input gets one factual reply reminder', () => {
+  for (const conversationId of ['private:fixture', 'group:fixture']) {
+    for (const participation of ['direct', 'ambient']) {
+      for (const args of [JSON.stringify({ action: 'add', assetIds: ['first', 'second'] }), { action: 'add', assetId: 'first' }]) {
+        const { agent, repair, steering } = fixture(participation, [], conversationId)
+        repair.assistant(agent, 7, [{ type: 'tool-call', name: 'qbf_sticker_manage', arguments: args }])
+        repair.assistant(agent, 7, [{ type: 'text', text: '{"schema":"qbf.reply/1","action":"silent","reason":"already-answered"}' }])
+        repair.stopping(agent, 7, new AbortController().signal)
+        assert.equal(steering.length, 1)
+        const reminder = JSON.stringify(steering[0])
+        assert.match(reminder, /只有受理项明确为 queued／accepted 时才说已提交筛选/)
+        assert.match(reminder, /未知不能声称已提交/)
+        assert.match(reminder, /不重复收藏/)
+        repair.stopping(agent, 7, new AbortController().signal)
+        assert.equal(steering.length, 1)
+      }
+    }
+  }
+})
+
+test('explicit collection honours user-requested silence and never adds another reply after a real reply attempt', () => {
+  for (const mode of ['user-requested', 'replied', 'sending']) {
+    const { agent, repair, steering, source } = fixture('ambient')
+    repair.assistant(agent, 7, [{ type: 'tool-call', name: 'qbf_sticker_manage', input: { action: 'add', assetId: 'first' } }])
+    if (mode === 'replied') repair.attempted(agent, { requestId: 'real-request', userMessageId: source.id, turn: 7 })
+    if (mode === 'sending') repair.assistant(agent, 7, [{ type: 'tool-call', name: 'qbf_sticker_send', arguments: '{}' }])
+    repair.assistant(agent, 7, [{ type: 'text', text: mode === 'user-requested'
+      ? '{"schema":"qbf.reply/1","action":"silent","reason":"user-requested"}' : 'No second acknowledgement' }])
+    repair.stopping(agent, 7, new AbortController().signal)
+    assert.equal(steering.length, 0, mode)
+  }
 })

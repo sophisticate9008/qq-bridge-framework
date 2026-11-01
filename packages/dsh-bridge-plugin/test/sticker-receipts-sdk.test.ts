@@ -20,9 +20,13 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 class StickerAdapter extends LlmAdapter {
   requests = 0
   next: { name: string; input: unknown } | null = null
+  readonly responses: ({ name: string; input: unknown } | { text: string })[] = []
+  readonly contexts: string[] = []
   override async *stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests++
-    const call = this.next
+    this.contexts.push(JSON.stringify(_options.messages))
+    const response = this.next ?? this.responses.shift()
+    const call = response && 'name' in response ? response : null
     this.next = null
     if (call) {
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
@@ -31,13 +35,13 @@ class StickerAdapter extends LlmAdapter {
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
     } else {
       yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'block-end', index: 0, block: { type: 'text', text: '{"schema":"qbf.reply/1","action":"silent","reason":"no-useful-addition"}' } }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: response && 'text' in response ? response.text : '{"schema":"qbf.reply/1","action":"silent","reason":"already-answered"}' } }
       yield { type: 'finish', reason: { kind: 'stop' } }
     }
   }
 }
 
-test('actual SDK collection and sending receipts close quietly, including validation, refusal and timeout', async context => {
+test('actual SDK sending stays quiet and explicit collection continues to one factual reply', async context => {
   const ctx = new Context()
   const loader = ctx.plugin(Loader)
   const fibers = [Agents, Sessions, Projections, SystemPrompt, Tools, Llm, Registry, RemoteAccess, Gateway].map(plugin => ctx.plugin(plugin))
@@ -63,8 +67,9 @@ test('actual SDK collection and sending receipts close quietly, including valida
     { name: 'qbf_sticker_send', description: 'Send fixture', timeoutMs: 100,
       parameters: { type: 'object', required: ['intent'], additionalProperties: false, properties: { intent: { type: 'string' } } } },
     { name: 'qbf_sticker_manage', description: 'Collect fixture', timeoutMs: 100,
-      parameters: { type: 'object', required: ['action', 'assetId'], additionalProperties: false,
-        properties: { action: { type: 'string' }, assetId: { type: 'string' } } } },
+      parameters: { type: 'object', required: ['action'], additionalProperties: false,
+        properties: { action: { type: 'string' }, assetId: { type: 'string' },
+          assetIds: { type: 'array', items: { type: 'string' } } } } },
   ] } })
   const sources: string[] = []
   ctx.on('session/event', (session, event) => {
@@ -72,12 +77,12 @@ test('actual SDK collection and sending receipts close quietly, including valida
   })
   const content = [{ type: 'text' as const, text: '会话事实：\n'
     + JSON.stringify({ senderId: 'ordinary-member', conversationId: 'group:fixture', participation: 'direct' }) + '当前消息：\n收藏或者发一张表情' }]
-  async function queuedCall() {
+  async function queuedCall(name?: string) {
     for (let attempt = 0; attempt < 200; attempt++) {
       const result = await invoke('pollFrameworkTools', { request: { issuerEpoch } })
       assert(object(result) && Array.isArray(result.calls))
-      if (result.calls.length) {
-        const pending = result.calls[0]
+      const pending = result.calls.find(value => object(value) && object(value.call) && (name === undefined || value.call.name === name))
+      if (pending) {
         assert(object(pending) && typeof pending.ticket === 'string')
         return pending
       }
@@ -85,7 +90,7 @@ test('actual SDK collection and sending receipts close quietly, including valida
     }
     assert.fail('SDK sticker call did not arrive')
   }
-  for (const name of ['qbf_sticker_send', 'qbf_sticker_manage']) {
+  for (const name of ['qbf_sticker_send']) {
     const input = name === 'qbf_sticker_send' ? { intent: '开心' } : { action: 'add', assetId: 'registered' }
     for (const result of [
       { status: 'confirmed', value: { status: 'sent' } },
@@ -126,5 +131,72 @@ test('actual SDK collection and sending receipts close quietly, including valida
     await agent.whenIdle()
     assert.equal(adapter.requests - before, 2, `${action} does not terminate an ordinary tool workflow`)
   }
-  assert(!sources.includes('qbf-reply-decision-repair'), 'collection and sending never request a follow-up decision')
+  assert(!sources.includes('qbf-reply-decision-repair'), 'sending and completed ordinary workflows need no reminder')
+
+  const collectionCases = [
+    { key: 'queued', result: { status: 'confirmed', value: { status: 'queued', completed: false, acceptedCount: 2 } }, text: '交去筛选啦，合适的再收藏～' },
+    { key: 'skipped', result: { status: 'confirmed', value: { status: 'skipped', reason: 'busy', completed: false } }, text: '这次还没提交上，筛选那边有点忙。' },
+    { key: 'refused', result: { status: 'rejected', code: 'POLICY_DENIED' }, text: '这次没能交去筛选。' },
+    { key: 'unknown', result: { status: 'unknown', code: 'TOOL_EXECUTION_UNKNOWN' }, text: '这次还没确认提交上，先不重复交。' },
+    { key: 'timeout', result: null, text: '这次提交结果还没确认，先不重复交。' },
+    { key: 'invalid', result: null, text: '这次没能提交筛选。' },
+  ]
+  for (const example of collectionCases) {
+    const before = adapter.requests
+    adapter.next = { name: 'qbf_sticker_manage', input: example.key === 'invalid'
+      ? { action: 'add', assetId: 42 } : { action: 'add', assetIds: ['first', 'second'] } }
+    adapter.responses.push({ name: 'qbf_reply', input: { content: example.text } })
+    const ordinaryGroup = [{ type: 'text' as const, text: '会话事实：\n'
+      + JSON.stringify({ senderId: 'ordinary-member', conversationId: 'group:fixture', participation: 'ambient' })
+      + '当前消息：\n这两张帮我收藏一下' }]
+    agent.followup(createUserMessage({ source: { kind: 'user', rpcId: `collection-${before}` }, content: ordinaryGroup }))
+    let collectionTicket: string | null = null
+    if (example.key !== 'invalid') {
+      const pending = await queuedCall()
+      assert(object(pending.call) && pending.call.name === 'qbf_sticker_manage')
+      assert.deepEqual(pending.call.input, { action: 'add', assetIds: ['first', 'second'] })
+      assert(typeof pending.ticket === 'string'); collectionTicket = pending.ticket
+      if (example.result) await invoke('completeFrameworkTool', { request: { issuerEpoch, ticket: pending.ticket, result: example.result } })
+    }
+    const reply = await queuedCall('qbf_reply')
+    assert(object(reply.call) && reply.call.name === 'qbf_reply', example.key)
+    assert(object(reply.call.input)); assert.equal(reply.call.input.content, example.text)
+    assert.equal(reply.call.requestId, `collection-${before}`, 'reply retains the original QQ user claim')
+    assert.equal(adapter.requests - before, 2, 'one result-processing model step follows collection')
+    const receiptContext = adapter.contexts.at(-1)!
+    if (example.key === 'queued') assert(receiptContext.includes('queued') && receiptContext.includes('acceptedCount'))
+    if (example.key === 'unknown') assert(receiptContext.includes('TOOL_EXECUTION_UNKNOWN'))
+    if (example.key === 'timeout') assert(receiptContext.includes('TOOL_HOST_TIMEOUT'))
+    await invoke('completeFrameworkTool', { request: { issuerEpoch, ticket: reply.ticket,
+      result: { status: 'confirmed', value: { status: 'sent' } } } })
+    await agent.whenIdle()
+    assert.equal(adapter.requests - before, 2, 'QQ reply receipt does not trigger another acknowledgement')
+    if (collectionTicket && example.key === 'timeout') {
+      const late = await invoke('completeFrameworkTool', { request: { issuerEpoch, ticket: collectionTicket,
+        result: { status: 'confirmed', value: { status: 'queued', completed: false } } } })
+      assert(object(late) && late.accepted === false, 'late collection results cannot restart the original chat')
+      assert.equal(adapter.requests - before, 2)
+    }
+  }
+
+  for (const mode of ['repair', 'user-silent']) {
+    const before = adapter.requests
+    adapter.next = { name: 'qbf_sticker_manage', input: { action: 'add', assetId: 'one' } }
+    adapter.responses.push({ text: mode === 'repair' ? 'Bare collection acknowledgement'
+      : '{"schema":"qbf.reply/1","action":"silent","reason":"user-requested"}' })
+    if (mode === 'repair') adapter.responses.push({ name: 'qbf_reply', input: { content: '先交去筛选啦～' } })
+    agent.followup(createUserMessage({ source: { kind: 'user', rpcId: `collection-${mode}` }, content }))
+    const pending = await queuedCall()
+    await invoke('completeFrameworkTool', { request: { issuerEpoch, ticket: pending.ticket,
+      result: { status: 'confirmed', value: { status: 'queued', completed: false } } } })
+    if (mode === 'repair') {
+      const reply = await queuedCall('qbf_reply')
+      assert(object(reply.call) && reply.call.name === 'qbf_reply')
+      await invoke('completeFrameworkTool', { request: { issuerEpoch, ticket: reply.ticket, result: { status: 'confirmed', value: { status: 'sent' } } } })
+    }
+    await agent.whenIdle()
+    assert.equal(adapter.requests - before, mode === 'repair' ? 3 : 2, mode)
+  }
+  assert.equal(sources.filter(source => source === 'qbf-reply-decision-repair').length, 1,
+    'only an omitted collection reply gets one reminder; no asynchronous completion is injected')
 })

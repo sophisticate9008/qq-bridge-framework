@@ -169,8 +169,7 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
                 || agent.status !== 'running' || !claim || !root || root.turn !== claim.turn || root.requestId !== claim.requestId
                 || root.userMessageId !== claim.userMessageId || exec.callId === exec.rootCallId && root.name !== spec.name
                 || exec.signal.aborted) return { status: 'rejected', code: 'TOOL_SOURCE_UNAVAILABLE' }
-              const quietSticker = spec.name === 'qbf_sticker_send' || spec.name === 'qbf_sticker_manage'
-                && args !== null && typeof args === 'object' && 'action' in args && args.action === 'add'
+              const quietSticker = spec.name === 'qbf_sticker_send'
               // This marker belongs to the authentic SDK call, including local validation
               // and capacity failures. Its receipt must never start another model step.
               if (quietSticker) {

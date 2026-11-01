@@ -59,7 +59,7 @@ export const NATIVE_STICKER_TOOLS: readonly NativeToolContribution[] = Object.fr
 }, {
   definition: { name: 'qbf_sticker_manage', capability: 'native.stickers.manage', featureId: 'framework-tools', timeoutMs: 60000,
     registrationSource: { origin: 'framework-builtin', ownerId: 'qq-bridge-framework', ownerName: '框架内置工具', transport: 'native' },
-    description: '表情管理：annotate为已看过的收藏写入本地语义缓存，传列表的stickerKey、已qbf_media_read的当前assetId、description、tags，可选avoid不适用场景。只记图像情绪和用途，不记人物身份或聊天内容，不改QQ备注。add将当前会话图片交给独立收藏机制筛选、去重和存储，任何聊天成员都可要求收藏；单图传assetId，多图用一次assetIds数组提交1至8张，两字段互斥。回执queued及外层confirmed仅表示请求受理，completed:false不是已收藏；不提前声称完成，不把历史queued当作当前收藏事实。调用后静默结束本轮，不因回执补充发言；delete删除真实stickerId；describe修改QQ备注。先列表核对标识。协议写结果unknown不重试；annotate的cached不等于发出或新收藏。',
+    description: '表情管理：annotate为已看过的收藏写入本地语义缓存，传列表的stickerKey、已qbf_media_read的当前assetId、description、tags，可选avoid不适用场景。只记图像情绪和用途，不记人物身份或聊天内容，不改QQ备注。add将当前会话图片交给独立收藏机制筛选、去重和存储，任何聊天成员都可要求收藏；单图传assetId，多图用一次assetIds数组提交1至8张，两字段互斥。回执queued及外层confirmed仅表示请求受理，completed:false不是已收藏；不提前声称完成，不把历史queued当作当前收藏事实。明确要求收藏时先调用，再按当前人设自然回应一次：仅queued的数量可确认已提交筛选，不说已收藏；部分受理、未受理或未知按本轮实际结果说明，未知不重试；用户要求静默时不回应。后台完成不追发；delete删除真实stickerId；describe修改QQ备注。先列表核对标识。协议写结果unknown不重试；annotate的cached不等于发出或新收藏。',
     parameters: { type: 'object', additionalProperties: false, required: ['action'], properties: {
       action: { enum: ['add', 'delete', 'describe', 'annotate'] }, assetId: { type: 'string', minLength: 1, maxLength: 512 },
       assetIds: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 512 },
@@ -141,7 +141,7 @@ export function createNativeStickerService(options: {
         }
         // This acknowledges registration only; completion stays in the background.
         return { status: uncertain ? 'unknown' : acceptedCount > 0 ? 'queued' : rejected ? 'rejected' : 'skipped',
-          requestedCount: input.assetIds.length, acceptedCount, completed: false, quiet: true, items };
+          requestedCount: input.assetIds.length, acceptedCount, completed: false, quiet: false, items };
       }
       if (input.action === 'annotate') {
         assert(cache && options.selfId && options.store, 'STICKER_CACHE_UNAVAILABLE', 'Semantic annotations require account storage.');
@@ -177,7 +177,7 @@ export function createNativeStickerService(options: {
       // Prepare and validate before recording dispatch; only fixed protocol writes run after the durable record.
       let run: () => Promise<JsonValue>;
       if (input.action === 'add') {
-        if (input.assetIds.length !== 1) return { status: 'rejected', code: 'STICKER_BATCH_COLLECTION_UNAVAILABLE', completed: false, quiet: true };
+        if (input.assetIds.length !== 1) return { status: 'rejected', code: 'STICKER_BATCH_COLLECTION_UNAVAILABLE', completed: false, quiet: false };
         const add = options.port.add;
         const resolve = options.resolveAsset;
         if (!add || !resolve) return { status: 'rejected', code: 'STICKER_ADD_UNSUPPORTED' };

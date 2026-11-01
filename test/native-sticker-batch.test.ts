@@ -33,13 +33,13 @@ test('one multi-image request registers each unique image without claiming colle
   f.asset('first'); f.asset('second')
   const result = await f.execute({ action: 'add', assetIds: ['first', 'first', 'second'] })
   assert.deepEqual(f.calls.map(call => call.input), [{ action: 'add', assetId: 'first' }, { action: 'add', assetId: 'second' }])
-  assert.deepEqual(result, { status: 'queued', requestedCount: 2, acceptedCount: 1, completed: false, quiet: true,
+  assert.deepEqual(result, { status: 'queued', requestedCount: 2, acceptedCount: 1, completed: false, quiet: false,
     items: [{ status: 'queued', quiet: true, assetId: 'first', completed: false },
       { status: 'skipped', reason: 'busy', quiet: true, assetId: 'second', completed: false }] })
   const allQueued = fixture(t)
   allQueued.asset('first'); allQueued.asset('second')
   const accepted = await allQueued.execute({ action: 'add', assetIds: ['first', 'second'] })
-  assert(isRecord(accepted)); assert.equal(accepted.acceptedCount, 2); assert.equal(accepted.completed, false)
+  assert(isRecord(accepted)); assert.equal(accepted.acceptedCount, 2); assert.equal(accepted.completed, false); assert.equal(accepted.quiet, false)
   assert.equal(allQueued.calls.length, 2)
 })
 
@@ -62,7 +62,7 @@ test('single-image callers remain compatible and uncertain registration is not r
   const uncertain = fixture(t, async () => { throw new Error('No confirmed registration result') })
   uncertain.asset('single')
   const unknown = await uncertain.execute({ action: 'add', assetIds: ['single'] })
-  assert(isRecord(unknown)); assert.equal(unknown.status, 'unknown'); assert.equal(unknown.completed, false)
+  assert(isRecord(unknown)); assert.equal(unknown.status, 'unknown'); assert.equal(unknown.completed, false); assert.equal(unknown.quiet, false)
   assert.equal(uncertain.calls.length, 1)
 })
 
@@ -75,4 +75,24 @@ test('add input accepts one bounded image form and rejects ambiguous or oversize
     assert.throws(() => tool.validate(input), { code: 'INVALID_STICKER_INPUT' })
   }
   assert.deepEqual(tool.validate({ action: 'add', assetIds: ['first', 'second'] }), { action: 'add', assetIds: ['first', 'second'] })
+})
+
+
+test('an explicit collection reports partial uncertainty and zero accepted requests without inventing submission', async t => {
+  const partial = fixture(t, async (_request, index) => index === 0
+    ? { status: 'queued', quiet: true } : { status: 'unknown', retry: false, quiet: true })
+  partial.asset('first'); partial.asset('second')
+  const result = await partial.execute({ action: 'add', assetIds: ['first', 'second'] })
+  assert(isRecord(result))
+  assert.equal(result.status, 'unknown'); assert.equal(result.acceptedCount, 1)
+  assert.equal(result.completed, false); assert.equal(result.quiet, false)
+  assert.equal(partial.calls.length, 2)
+  for (const status of ['rejected', 'skipped'] as const) {
+    const failed = fixture(t, async () => ({ status, quiet: true }))
+    failed.asset('single')
+    const value = await failed.execute({ action: 'add', assetId: 'single' })
+    assert(isRecord(value)); assert.equal(value.status, status); assert.equal(value.acceptedCount, 0)
+    assert.equal(value.completed, false); assert.equal(value.quiet, false)
+    assert.equal(failed.calls.length, 1)
+  }
 })
