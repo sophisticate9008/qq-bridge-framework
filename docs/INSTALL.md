@@ -14,18 +14,16 @@
 
 当前在 Linux 上部署；本机 DSH 发现依赖同用户进程及 `/proc`，服务管理器的 screen 运维也面向 Linux。普通安装、构建和运行无需 Playwright。
 
-v1.7.3 的同一全量包已在 GitHub 标准 runner 验证：
+v1.8.0 使用原生 CI 验收同源完整包：
 
-| 环境 | 实际结果 |
+| 环境 | 验收范围 |
 | --- | --- |
-| Ubuntu 24.04 x64（amd64／x86_64） | 生产依赖安装、编译后端、62 个网页资源、中文公式原生排版、初始化和重启通过 |
+| Ubuntu 24.04 x64（amd64／x86_64） | 生产依赖、编译后端、62 个网页资源、中文公式排版、初始化和重启 |
 | Ubuntu 24.04 ARM64 | 同上，使用真实 ARM64 runner |
-| Windows Server 2022 x64 | 生产依赖与中文公式原生排版通过；初始化被内置文件信任检查拒绝，暂不支持原生运行 |
-| macOS | 尚未验收 |
+| Windows Server 2022 x64 | ZIP 与启动器、以上完整安装项，以及 ACL 防护和模拟聊天链路 |
+| Windows 10／11、Windows ARM64、macOS | 尚未实机验收 |
 
-开发候选包的 Windows ZIP 与控制台启动器已通过 Windows Server 2022 x64 的完整云端验收，包含模拟聊天链路；使用方法见 [Windows 候选包](WINDOWS.md)。v1.7.3 正式附件仍保持原样，以上旧包结果不代表当前开发候选包。
-
-v1.7.3 正式包的 Windows 初始化失败为 `NATIVE_PACKAGE_CONTENT_UNSAFE`；开发候选包已通过 Windows ACL 适配解决该限制。上述 CI 不包含真实 QQ 登录或真实 DSH／模型联调，不代表其他发行版、libc 或操作系统版本已验证；详细证据见 [验收记录](VALIDATION.md)。
+Windows 直接从 Release 下载 `qq-bridge-framework-1.8.0-windows-x64.zip`，按 [Windows 安装说明](WINDOWS.md)校验、解压并运行启动器；不需要本地构建。Node.js、QQ 协议端和 DSH 独立准备。CI 不包含真实 QQ 登录或真实 DSH／模型联调，其他发行版、libc 和系统版本以实际依赖支持为准，详见 [验收记录](VALIDATION.md)。
 
 检查本机版本：
 
@@ -39,12 +37,12 @@ git --version
 
 ## 2. 下载完整框架包并安装依赖
 
-从 [v1.7.3 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.3) 下载 `qq-bridge-framework-1.7.3.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
+从 [v1.8.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.8.0) 下载 `qq-bridge-framework-1.8.0.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
 
 ```sh
 sha256sum --ignore-missing --check SHA256SUMS
-tar -xzf qq-bridge-framework-1.7.3.tar.gz
-cd qq-bridge-framework-1.7.3
+tar -xzf qq-bridge-framework-1.8.0.tar.gz
+cd qq-bridge-framework-1.8.0
 npm ci --omit=dev
 ```
 
@@ -97,7 +95,7 @@ npm start
 
 ## 5. 准备 DSH 桥接插件
 
-按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.7.3.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
+按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.8.0.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
 
 确认独立 DSH web 已启动，并在控制台“连接设置”选择自动连接本机 DSH。本机自动鉴权要求 DSH 与框架由同一系统用户运行，凭据文件归该用户所有且权限为 `0600` 或 `0400`。默认无需手填地址、令牌和凭据路径。远程实例使用高级手动接入。
 

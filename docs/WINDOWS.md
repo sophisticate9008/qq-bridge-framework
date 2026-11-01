@@ -2,11 +2,11 @@
 
 Windows 使用预构建 ZIP、控制台启动脚本和浏览器中的现有 WebUI。运行环境为 Node.js 24.12.0 或更新版本（带 npm）、Windows PowerShell 5.1 和本地 NTFS 目录。QQ 协议端和 DSH 由用户独立安装、运行和配置。
 
-当前开发候选包通过 GitHub Actions 的“Windows 启动包验证”工作流构建，尚未作为正式 Release 发布。v1.7.3 正式附件保持原样，不包含本轮 Windows 适配。[完整候选包验收](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41303624892)已在 Windows Server 2022 x64、Ubuntu 24.04 x64／ARM64 通过。Windows 10／11、Windows ARM64 和真实 QQ／DSH 联调尚未实机验证。
+从 v1.8.0 开始，GitHub Release 直接提供 Windows ZIP 和 SHA-256。原生 CI 在 Windows Server 2022 x64 验证安装、WebUI、重启和模拟聊天链路；Windows 10／11、Windows ARM64 和真实 QQ／DSH 联调尚未实机验证。
 
-## 使用候选包
+## 安装与启动
 
-1. 从[已通过的完整运行](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41303624892)（或后续同名全量验收成功的运行）的 `windows-candidate-packages` artifact 取得 `qq-bridge-framework-<版本>-windows-x64.zip` 与 `SHA256SUMS`。
+1. 从 [v1.8.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.8.0) 下载 `qq-bridge-framework-1.8.0-windows-x64.zip` 与 `SHA256SUMS`。
 2. 用 PowerShell `Get-FileHash <压缩包> -Algorithm SHA256` 核对校验文件中的对应项，解压到自己可写的本地 NTFS 文件夹。
 3. 双击根目录 `start-windows.cmd`。首次启动联网安装锁定的生产依赖，创建配置，然后启动管理端；后续启动复用依赖与原配置。
 4. 保持控制台窗口打开，在浏览器打开日志给出的本机地址（默认 `http://127.0.0.1:3210`），完成首次初始化和 QQ／DSH 连接设置。DSH 使用高级手动地址及鉴权；Linux 的进程自动发现与 screen 运维不适用于 Windows。
@@ -22,6 +22,6 @@ JSON 使用独占锁、写临时文件、文件 flush、版本检查、同目录
 
 ## CI
 
-维护者运行 `gh workflow run windows.yml --ref main`。工作流在 Linux 的干净提交上构建框架、网页与两个配套组件，生成同源 TAR、Windows ZIP 与 SHA-256；随后由 Windows x64、Linux x64 和真实 Linux ARM64 runner 安装同一候选内容。
+版本标签自动运行发行包安装工作流，在 Linux 构建并验收后，将同一批附件交给 Windows x64 和 Linux ARM64 安装验证；发行附件取自通过验证的 `release-packages`。开发阶段也可运行 `gh workflow run windows.yml --ref main`。工作流在 Linux 的干净提交上构建框架、网页与两个配套组件，生成同源 TAR、Windows ZIP 与 SHA-256；随后由 Windows x64、Linux x64 和真实 Linux ARM64 runner 安装同一候选内容。
 
 Windows 验收实际解压 ZIP，验证原生中文／公式排版、初始化、全套 WebUI 静态资源、首次令牌、启动器启动、正常退出、保留配置重启、缺失资源拒绝，以及 ACL 修改后的缓存失效、权限进程通信与退出、真实本地 WebSocket→DSH 适配器→持久出站→模拟 QQ HTTP 链路。Windows 定向链路使用候选包内的生产依赖与同提交源码执行，随后删除源目录验证实际编译后端；不重复安装测试依赖。测试不使用真实 QQ 登录或商业模型。包保留七天，小型报告保留三天，不上传依赖与运行目录。定位聊天问题时可追加 `-f source_only=true`，只跑 Windows 源码定向诊断，不构建或宣称安装包通过。

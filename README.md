@@ -12,13 +12,18 @@ AI许愿生成的，目前自用
 
 ## 安装与开始使用
 
-需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Linux 支持本机 DSH 自动发现；v1.7.3 全量包已通过 Ubuntu 24.04 x64 与 ARM64 的安装、WebUI、原生排版和重启验收。开发候选包新增 Windows x64 ZIP 与双击启动脚本，已在 Windows Server 2022 通过安装、WebUI、重启与模拟聊天链路；见 [Windows 使用说明](docs/WINDOWS.md)。v1.7.3 正式附件不包含本轮适配，macOS 尚未验收。详见 [平台验证记录](docs/VALIDATION.md)。
+需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Windows x64 使用 ZIP 与双击启动脚本；Linux x64／ARM64 使用全量 TAR 包。原生 CI 环境为 Windows Server 2022 与 Ubuntu 24.04，涵盖安装、WebUI、原生排版和重启；Windows 另验证模拟聊天链路。见 [Windows 使用说明](docs/WINDOWS.md)与[平台验证记录](docs/VALIDATION.md)。
 
-从 [v1.7.3 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.3) 下载 `qq-bridge-framework-1.7.3.tar.gz`，其中已包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包。
+从 [v1.8.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.8.0) 下载对应完整包：
+
+- Windows x64：`qq-bridge-framework-1.8.0-windows-x64.zip`，解压后双击 `start-windows.cmd`，首次自动安装生产依赖并初始化。
+- Linux x64／ARM64：`qq-bridge-framework-1.8.0.tar.gz`，按下面命令启动。
+
+两种包均包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包，附件由 `SHA256SUMS` 校验。
 
 ```sh
-tar -xzf qq-bridge-framework-1.7.3.tar.gz
-cd qq-bridge-framework-1.7.3
+tar -xzf qq-bridge-framework-1.8.0.tar.gz
+cd qq-bridge-framework-1.8.0
 npm ci --omit=dev
 npm run cli -- init
 npm start
@@ -49,7 +54,7 @@ npm start
 
 安装、注册、就绪与授权分别显示。实际能力以所选模型、协议端、DSH 插件和已加载扩展为准。使用示例和限制见 [使用教程](docs/USAGE.md)。
 
-当前版本为 **v1.7.3**（框架、SDK 与 DSH 桥接插件统一为 `1.7.3`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
+当前版本为 **v1.8.0**（框架、SDK 与 DSH 桥接插件统一为 `1.8.0`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
 
 ## 文档
 

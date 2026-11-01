@@ -7,7 +7,7 @@ on:
       release_tag:
         description: 已发布且与当前源码版本一致的标签
         required: true
-        default: v1.7.3
+        default: v1.8.0
         type: string
       windows_only:
         description: 仅复核 Windows，不重复已通过的 Linux 检查

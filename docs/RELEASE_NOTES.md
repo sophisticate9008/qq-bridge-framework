@@ -1,5 +1,18 @@
 # 发布记录
 
+## v1.8.0 · Windows ZIP 与简易启动器
+
+框架、TypeScript SDK 与 DSH 桥接插件统一为 `1.8.0`。本版新增 Windows x64 的压缩包启动方式，保留既有 Linux 用法、配置、会话、持久数据和线协议。
+
+- Windows 下载 `qq-bridge-framework-1.8.0-windows-x64.zip`，解压后双击 `start-windows.cmd`。首次联网安装锁定生产依赖并创建配置，后续复用原配置与依赖；在浏览器使用随包 WebUI，按 Ctrl+C 退出。
+- Linux x64／ARM64 使用 `qq-bridge-framework-1.8.0.tar.gz`。两种完整包均包含编译后端、WebUI、中文字体、公开源码、启动入口和同版配套组件，无需本地构建。
+- Windows 按系统 ACL 和 SID 核验私有文件及可信代码，保留链接、文件身份、版本冲突与结果未知检查。权限核验复用受控本机进程，减少重复启动造成的消息延迟；JSON 写入保留文件 flush、同目录替换和读回核对。
+- 发行 CI 在 Linux x64 构建并验证，再由 Windows x64 和真实 Linux ARM64 安装同一批附件。Windows 验证 ZIP、启动器、ACL 与模拟聊天链路；发布附件同时提供 SHA-256，SDK 与桥接插件另提供独立 `.tgz`。
+
+要求 Node.js `>=24.12.0`（含 npm）；Windows 使用 PowerShell 5.1 与本地 NTFS 目录。QQ 协议端和 DSH 独立运行，Windows 使用高级手动 DSH 接入；DSH SDK／Cordis 仍为 `0.2.1-rc.2`／`4.0.5`。升级保留原 `runtime/` 和会话，更新框架及同版桥接插件。
+
+验收环境为 Windows Server 2022 x64、Ubuntu 24.04 x64／ARM64。Windows 10／11、Windows ARM64、macOS、真实 QQ 登录及真实 DSH／模型未在本次 CI 联调。JSON 在 Windows 不提供 POSIX 目录 fsync 的突然断电持久性承诺，数据库由 SQLite 处理事务；细节见 [Windows 说明](WINDOWS.md)。
+
 ## v1.7.3 · 唤醒后的时间与现场
 
 框架、TypeScript SDK 与 DSH 桥接插件统一为 `1.7.3`。本版修复长时间未唤醒时容易沿用旧现场的问题，现有配置、会话与线协议保持兼容，不重置聊天或记忆。

@@ -39,9 +39,15 @@
 
 从 v1.7.2 开始，版本标签同时触发“发行包安装验证”工作流。该工作流在干净环境构建、打包并实际安装启动，成功后保存 `release-packages` artifact。发布使用该次 CI 已验证的附件，连同普通框架验证全部成功后才创建 Release；不为旧 Release 回填完整框架包。
 
-Windows 候选包由手动工作流 `windows.yml` 构建并在原生 Windows x64、Linux x64／ARM64 安装验收，产物仅作为 CI artifact 保存，不自动发布或修改 Release；使用范围见 [Windows 说明](WINDOWS.md)。完整包打包入口同时生成 Windows ZIP 与对应 SHA-256，下一次正式发布须使用该提交的全平台验收结果。
+从 v1.8.0 开始，版本标签的发行验证自动将同批 `release-packages` 交给 Windows x64 和 Linux ARM64，Windows 执行 ZIP、启动器、ACL 与模拟聊天链路。框架 TAR 在构建任务内由 Linux x64 验收；三个平台全部通过后才发布，Windows ZIP 与 TAR、两个组件包及 SHA-256 一起作为正式附件。
 
-“发行包跨平台验证”是手动诊断工作流，使用 `gh workflow run platforms.yml --ref main -f release_tag=v1.7.3` 启动。它在标准 Ubuntu x64、Ubuntu ARM64 与 Windows x64 runner 上下载同一正式全量包，核对 SHA-256 与原标签提交，再安装生产依赖、验证原生中文排版、初始化、WebUI 和重启。所选发行版本须与运行工作流的源码版本相同；三个任务独立报告，失败不取消其余平台，不重打包、不改历史 Release、不部署本机。只上传三天保留的小型阶段报告和日志，不上传依赖或安装目录。新增诊断任务不自动表示对应平台已获支持，实际结果记录在验收文档。仅复核 Windows 时追加 `-f windows_only=true`，避免重复已经通过的 Linux 安装。
+开发期 Windows 候选包由手动工作流 `windows.yml` 构建并在原生 Windows x64、Linux x64／ARM64 安装验收，产物仅作为 CI artifact 保存，不自动发布或修改 Release；使用范围见 [Windows 说明](WINDOWS.md)。完整包打包入口同时生成 Windows ZIP 与对应 SHA-256，下一次正式发布须使用该提交的全平台验收结果。
+
+“发行包跨平台验证”是手动诊断工作流，使用 `gh workflow run platforms.yml --ref main -f release_tag=v1.8.0` 启动。它在标准 Ubuntu x64、Ubuntu ARM64 与 Windows x64 runner 上下载同一正式全量包，核对 SHA-256 与原标签提交，再安装生产依赖、验证原生中文排版、初始化、WebUI 和重启。所选发行版本须与运行工作流的源码版本相同；三个任务独立报告，失败不取消其余平台，不重打包、不改历史 Release、不部署本机。只上传三天保留的小型阶段报告和日志，不上传依赖或安装目录。新增诊断任务不自动表示对应平台已获支持，实际结果记录在验收文档。仅复核 Windows 时追加 `-f windows_only=true`，避免重复已经通过的 Linux 安装。
+
+## v1.8.0 的判断实例
+
+本次 `1.7.3 → 1.8.0` 新增 Windows x64 ZIP、命令启动器和系统 ACL 适配，扩展可独立使用的平台安装能力，按次版本发布。既有 Linux 用法、配置、持久数据和线协议兼容，三个组件统一为 `1.8.0`，桥接版本识别保留旧版并增加新版。QQ 协议端、DSH 与 Node.js 仍独立准备；旧 Release 不修改。
 
 ## v1.7.3 的判断实例
 
