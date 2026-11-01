@@ -1,0 +1,74 @@
+name: 发行包跨平台验证
+run-name: 发行包平台验收 ${{ inputs.release_tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 已发布且与当前源码版本一致的标签
+        required: true
+        default: v1.7.3
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-package-${{ github.ref }}-${{ inputs.release_tag }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: 安装验收 ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+          - runner: windows-2022
+            platform: win32
+            arch: x64
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      QQ_BRIDGE_FRAMEWORK_RELEASE_PLATFORM: ${{ matrix.platform }}
+      QQ_BRIDGE_FRAMEWORK_RELEASE_ARCH: ${{ matrix.arch }}
+      QQ_BRIDGE_FRAMEWORK_RELEASE_REPORT: platform-result.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - name: 下载同一正式发行包与校验文件
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module -e 'if (!/^v\d+\.\d+\.\d+$/.test(process.env.RELEASE_TAG ?? "")) throw new Error("Invalid release tag")'
+          mkdir -p "runtime/releases/$RELEASE_TAG"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'qq-bridge-framework-*.tar.gz' --pattern SHA256SUMS --dir "runtime/releases/$RELEASE_TAG"
+          echo "QQ_BRIDGE_FRAMEWORK_RELEASE_SOURCE_COMMIT=$(git rev-parse "$RELEASE_TAG^{commit}")" >> "$GITHUB_ENV"
+      - name: 原生安装、排版、初始化、WebUI 与重启
+        run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
+      - name: 保存小型验证报告
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: platform-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            platform-result.json
+            platform-verification.log
+          if-no-files-found: ignore
+          retention-days: 3
