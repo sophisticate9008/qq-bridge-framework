@@ -6,7 +6,7 @@ import { isRecord } from '../src/core/values.ts';
 
 function start(code: string) {
   const state = new Int32Array(new SharedArrayBuffer(8)), output = new Uint8Array(new SharedArrayBuffer(65536));
-  const worker = new Worker(new URL('../src/storage/windows-acl-worker.ts', import.meta.url), {
+  const worker = new Worker(new URL(import.meta.url.endsWith('.ts') ? '../src/storage/windows-acl-worker.ts' : '../src/storage/windows-acl-worker.js', import.meta.url), {
     execArgv: [], workerData: { executable: process.execPath, args: ['--input-type=module', '-e', code],
       state: state.buffer, output: output.buffer }
   });

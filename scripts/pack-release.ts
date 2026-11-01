@@ -30,6 +30,8 @@ async function pack(directory: string, name: string): Promise<string> {
       || /^dist\/(?!.*(?:^|\/)\.\.\/)[a-z0-9./-]+\.(?:js|d\.ts)$/.test(file.path), `Unexpected package file: ${file.path}`);
     assert(!/(?:^|\/)(?:runtime|node_modules|test|admin|web|scripts)(?:\/|$)/.test(file.path));
   }
+  if (name === '@qq-bridge-framework/sdk') assert(packed.files.some((file: unknown) =>
+    isRecord(file) && file.path === 'dist/storage/windows-acl-worker.js'), 'SDK Windows ACL worker must be included.');
   const filename = join(destination, packed.filename);
   const sum = createHash('sha256').update(await readFile(filename)).digest('hex');
   checksums.push(`${sum}  ${packed.filename}`);

@@ -30,7 +30,7 @@ delete env.QQ_BRIDGE_FRAMEWORK_CONFIG;
 let child: ChildProcess | undefined, childExit: Promise<unknown[]> | undefined, diagnostics = '';
 let phase = 'archive', completed = false;
 const evidence = { version, platform: process.platform, arch: process.arch, productionInstall: false,
-  nativeRenderingAndFonts: false, initialized: false, webAssetsVerified: 0, initializationAndRestart: false };
+  nativeRenderingAndFonts: false, windowsChatAndAcl: false, initialized: false, webAssetsVerified: 0, initializationAndRestart: false };
 function checkpoint(next: string): void { phase = next; console.log(JSON.stringify({ phase, platform: process.platform, arch: process.arch })); }
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function port(): Promise<number> {
@@ -103,6 +103,18 @@ try {
   assert((await lstat(join(cwd, 'node_modules'))).isDirectory());
   assert(!(await lstat(join(cwd, 'node_modules'))).isSymbolicLink());
   await assert.rejects(lstat(join(cwd, 'node_modules/vite')), { code: 'ENOENT' });
+  if (process.platform === 'win32' && process.env.QQ_BRIDGE_FRAMEWORK_RELEASE_WINDOWS_SMOKE === '1') {
+    checkpoint('windows-chat-and-acl');
+    for (const args of [
+      ['--test', 'test/windows-file-security.test.ts', 'test/windows-acl-worker.test.ts'],
+      ['--test', '--test-name-pattern=real local WS text passes through native host', 'test/native-chat-runtime.test.ts']
+    ]) {
+      const result = await run(process.execPath, args, { cwd, env, timeout: 45000, maxBuffer: 256 * 1024 });
+      console.log(result.stdout.trim());
+      assert.match(result.stdout, /pass [1-9]/);
+    }
+    evidence.windowsChatAndAcl = true;
+  }
   // Removing original TS proves that the runtime package actually uses compiled backend/worker files.
   await rm(join(cwd, 'src'), { recursive: true });
   await rm(join(cwd, 'scripts'), { recursive: true });

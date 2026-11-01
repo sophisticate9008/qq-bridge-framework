@@ -1037,7 +1037,7 @@ test('real local WS text passes through native host/DSH/policy/durable outbox to
   const promptBegan = Date.now()
   try {
     await awaitCondition(() => fake.rpc.some(request => request.method === 'session/prompt'), {
-      message: 'Native prompt did not reach DSH', timeoutMs: process.platform === 'win32' ? 15000 : 5000,
+      message: 'Native prompt did not reach DSH', timeoutMs: 5000,
       diagnostics: () => ({ rpc: fake.rpc.map(call => call.method), activity: fake.runtime().activity() })
     })
   } catch (error) {
