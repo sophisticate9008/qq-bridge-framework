@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isRecord } from '../src/core/values.ts';
+import { packFrameworkRelease } from './framework-release.ts';
 
 // Pack only the components' allowlisted files under their current names.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -14,6 +15,7 @@ const version = manifest.version;
 const destination = join(root, 'runtime', 'releases', `v${version}`);
 await mkdir(destination, { recursive: true });
 const checksums: string[] = [];
+const components: string[] = [];
 
 async function pack(directory: string, name: string): Promise<string> {
   const result: unknown = JSON.parse(execFileSync('npm', ['pack', directory, '--ignore-scripts', '--json',
@@ -31,6 +33,7 @@ async function pack(directory: string, name: string): Promise<string> {
   const filename = join(destination, packed.filename);
   const sum = createHash('sha256').update(await readFile(filename)).digest('hex');
   checksums.push(`${sum}  ${packed.filename}`);
+  components.push(packed.filename);
   console.log(`${name}@${version}: ${packed.filename}`);
   return filename;
 }
@@ -46,5 +49,8 @@ for (const [directory, component] of [['framework-sdk', 'sdk'], ['dsh-bridge-plu
   }
   await pack(source, name);
 }
+const framework = await packFrameworkRelease({ root, destination, version, components });
+checksums.push(`${createHash('sha256').update(await readFile(framework)).digest('hex')}  qq-bridge-framework-${version}.tar.gz`);
+console.log(`Framework runtime: qq-bridge-framework-${version}.tar.gz`);
 await writeFile(join(destination, 'SHA256SUMS'), checksums.sort().join('\n') + '\n');
 console.log(`Release files: ${destination}`);

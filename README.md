@@ -14,14 +14,17 @@ AI许愿生成的，目前自用
 
 需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Linux 支持本机 DSH 自动发现；Windows/macOS 需要按高级接入方式配置，当前未提供同等运行验收保证。
 
+从 [v1.7.2 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.2) 下载 `qq-bridge-framework-1.7.2.tar.gz`，其中已包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包。
+
 ```sh
-git clone https://github.com/sophisticate9008/qq-bridge-framework.git
-cd qq-bridge-framework
-npm ci
-npm run build
+tar -xzf qq-bridge-framework-1.7.2.tar.gz
+cd qq-bridge-framework-1.7.2
+npm ci --omit=dev
 npm run cli -- init
 npm start
 ```
+
+框架包使用已构建产物启动，无需 Git 和本地构建。Node.js 与目标平台依赖由运行机器提供，QQ 协议端与 DSH 独立安装。SDK 供扩展开发，DSH 桥接插件安装到 DSH；两者也随框架包保存在 `components/`。
 
 打开 `http://127.0.0.1:3210`，完成管理令牌初始化。依次配置 QQ 与 DSH 连接、模型服务、人设和聊天方案、主人及会话白名单，最后应用并启用聊天。
 
@@ -46,7 +49,7 @@ npm start
 
 安装、注册、就绪与授权分别显示。实际能力以所选模型、协议端、DSH 插件和已加载扩展为准。使用示例和限制见 [使用教程](docs/USAGE.md)。
 
-当前版本为 **v1.7.1**（框架、SDK 与 DSH 桥接插件统一为 `1.7.1`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
+当前版本为 **v1.7.2**（框架、SDK 与 DSH 桥接插件统一为 `1.7.2`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
 
 ## 文档
 

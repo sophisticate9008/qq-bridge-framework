@@ -1,0 +1,40 @@
+name: 发行包安装验证
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: 完整框架包安装与启动
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix packages/dsh-bridge-plugin --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - run: npm run build:sdk
+      - run: npm --prefix packages/dsh-bridge-plugin run build
+      - run: npm run release:pack
+      - name: 全新目录安装、控制台资源、原生渲染与重启
+        run: npm run test:release
+      - name: 保存经过安装验证的发行包
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-packages
+          path: runtime/releases/v*/*
+          if-no-files-found: error
+          retention-days: 7

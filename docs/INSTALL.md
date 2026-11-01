@@ -1,13 +1,13 @@
 # 安装教程
 
-本教程对应当前仓库源码与锁文件。框架以源码安装，SDK 和 DSH 桥接插件通过本地构建安装包使用；不要把包名理解为已公开发布的 npm 安装入口。
+本教程对应当前发行包与锁文件。完整框架包包含已构建的后端和 WebUI、中文字体、公开源码、启动入口及 `components/` 中的配套 SDK／DSH 桥接插件。安装后无需本地构建；这些包通过 GitHub Release 提供。
 
 ## 1. 准备运行环境
 
 | 组件 | 要求 |
 | --- | --- |
 | Node.js | 24.12.0 或更新版本，附带 npm；框架使用 Node.js 原生 TypeScript 与 SQLite 能力 |
-| Git | 用于克隆和更新源码 |
+| Git | 仅源码开发安装需要；使用完整框架包无需 Git |
 | QQ 协议端 | 已登录 QQ、提供 OneBot v11 HTTP API 与正向 WebSocket 的独立服务；可接入 NapCat 或 SnowLuma |
 | DSH | 独立运行的 DSH web 实例，桥接插件当前匹配 SDK `0.2.1-rc.2`、Cordis `4.0.5` |
 | 可选组件 | 视频观察需要 FFmpeg 和 FFprobe；语音转写、生图、搜索等按已安装扩展提供 |
@@ -24,7 +24,22 @@ git --version
 
 先按各外部项目的安装方式准备协议端及 DSH。DSH 的版本、插件打包、Loader 加载及鉴权见 [DSH 接入](DSH.md)。两项服务需要先能独立正常工作，框架不会代为安装或登录 QQ。
 
-## 2. 克隆、安装并构建
+## 2. 下载完整框架包并安装依赖
+
+从 [v1.7.2 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.7.2) 下载 `qq-bridge-framework-1.7.2.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
+
+```sh
+sha256sum --ignore-missing --check SHA256SUMS
+tar -xzf qq-bridge-framework-1.7.2.tar.gz
+cd qq-bridge-framework-1.7.2
+npm ci --omit=dev
+```
+
+校验命令核对当前目录实际下载的附件。完整包中的 `npm start` 和 `npm run cli` 使用编译后的后端与网页，无需运行构建命令。依赖按照锁文件安装到目标机器；保留平台可选依赖，供图片与排版所需的原生模块使用，不复制其他机器的 `node_modules`。
+
+SDK 供扩展开发；DSH 桥接插件安装到独立 DSH 项目。两者可单独下载，也可直接使用完整包中 `components/` 的同版附件。QQ 协议端、DSH、Node.js 和个人配置由部署机器提供。
+
+开发者也可从源码安装：
 
 ```sh
 git clone https://github.com/sophisticate9008/qq-bridge-framework.git
@@ -33,7 +48,7 @@ npm ci
 npm run build
 ```
 
-`npm ci` 按仓库锁文件安装依赖。Markdown 排版和图片处理包含本机原生依赖，部署时保留目标平台的可选依赖；不要复制另一平台的 `node_modules`。
+源码安装中的 `npm ci` 包含构建工具，`npm run build` 生成后端和网页。
 
 ## 3. 初始化并启动框架
 
@@ -69,7 +84,7 @@ npm start
 
 ## 5. 准备 DSH 桥接插件
 
-按照 [DSH 接入的版本与安装](DSH.md#版本与安装) 构建插件 tarball，在所管理的 DSH Node 项目中安装，并按该文档将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
+按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.7.2.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
 
 确认独立 DSH web 已启动，并在控制台“连接设置”选择自动连接本机 DSH。本机自动鉴权要求 DSH 与框架由同一系统用户运行，凭据文件归该用户所有且权限为 `0600` 或 `0400`。默认无需手填地址、令牌和凭据路径。远程实例使用高级手动接入。
 

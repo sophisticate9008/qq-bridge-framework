@@ -1,6 +1,6 @@
 {
   "name": "qq-bridge-framework",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "private": true,
   "description": "面向 QQ 会话的可扩展智能体框架，提供中文控制台、连续聊天与受控工具执行。AI许愿生成的，目前自用",
   "type": "module",
@@ -45,7 +45,8 @@
     "build:sdk": "node scripts/build-sdk.ts",
     "test:sdk": "node scripts/verify-sdk-package.ts",
     "ops": "node scripts/service-manager.ts",
-    "release:pack": "node scripts/pack-release.ts"
+    "release:pack": "node scripts/pack-release.ts",
+    "test:release": "node scripts/verify-framework-release.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
