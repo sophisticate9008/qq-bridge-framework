@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import sharp from 'sharp'
 import type { OneBotSticker, OneBotStickerPort } from '../adapters/onebot-stickers.ts'
 import type { NativeMediaContentReader } from '../contracts/native-media.ts'
 import type { MediaObservationVersion } from '../contracts/native-media-configuration.ts'
@@ -24,6 +23,7 @@ import { createStickerCharacterAliases } from './sticker-character-aliases.ts'
 import { createStickerCharacterRecognition, type StickerCharacterRecognitionRule } from './sticker-character-recognition.ts'
 import { createStickerUsage } from './sticker-usage.ts'
 import { prepareStickerObservation } from './sticker-observation.ts'
+import { createStickerPreview } from './sticker-preview.ts'
 import { createStickerSemanticCache, normalizeStickerCharacterName, validateStickerAnnotation, validateStickerCharacterIdentity, STICKER_ANNOTATION_GUIDANCE, type StickerAnnotation, type StickerCharacterIdentity } from './sticker-semantics.ts'
 
 const RECORDS = 'native-chat.sticker-library', SEEN = 'native-chat.sticker-seen', WRITES = 'native-chat.sticker-writes'
@@ -317,12 +317,9 @@ export function createStickerLibrary(options: {
       }
       const data = await readImage(id, processing)
       const dimensions = await readStickerImageDimensions(data, processing)
-      const thumb = await sharp(data, { pages: 1, limitInputPixels: 40_000_000 }).timeout({ seconds: 2 }).rotate()
-        .resize({ width: 384, height: 384, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer()
+      const result = await createStickerPreview(data, dimensions, processing)
       availableImage(id, processing, version)
       imageMetadata.remember(id, identity, dimensions)
-      const result = { image: `data:image/jpeg;base64,${thumb.toString('base64')}`, ...dimensions }
-      assert(result.image.length <= 200_000, 'STICKER_PREVIEW_TOO_LARGE', 'The preview exceeds its byte limit.')
       await disk.write('thumbnail', id, identity, Buffer.from(JSON.stringify(result)), processing).catch(() => undefined)
       availableImage(id, processing, version)
       return result

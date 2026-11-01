@@ -68,8 +68,12 @@ test('sticker snapshot accommodates full account and extra storage without trunc
     id: index.toString(16).padStart(64, '0') })) }), null)
 })
 
-test('sticker previews accept only bounded JPEG data and deletion receipts cannot request retries', () => {
+test('sticker previews accept bounded JPEG or animated WebP data and deletion receipts cannot request retries', () => {
   assert.deepEqual(parseStickerLibraryThumbnail({ image: 'data:image/jpeg;base64,/9j/', url: 'private' }), { image: 'data:image/jpeg;base64,/9j/' })
+  const animated = { image: 'data:image/webp;base64,UklGRg==', animation: 'animated' }
+  assert.deepEqual(parseStickerLibraryThumbnail(animated), animated)
+  assert.equal(parseStickerLibraryThumbnail({ image: 'data:image/jpeg;base64,/9j/', animation: 'animated' }), null)
+  assert.equal(parseStickerLibraryThumbnail({ ...animated, animation: 'unknown' }), null)
   for (const image of ['https://private.example', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/jpeg;base64,',
     'data:image/jpeg;base64,abc==', `data:image/jpeg;base64,${'a'.repeat(200_000)}`]) assert.equal(parseStickerLibraryThumbnail({ image }), null)
   for (const status of ['confirmed', 'rejected', 'unknown']) {

@@ -132,9 +132,10 @@ function StickerPreview({ api, item, context, knownDimensions, onDimensions, ref
     })
     return () => controller.abort()
   }, [api, item.id, item.revision, item.state, key, nearViewport, context.active, onDimensions, refreshEpoch, retry])
-  return <div ref={root} className="flex w-full items-center justify-center overflow-hidden rounded-md bg-muted/40" style={{ aspectRatio: previewRatio(dimensions) }}>
+  return <div ref={root} className="relative flex w-full items-center justify-center overflow-hidden rounded-md bg-muted/40" style={{ aspectRatio: previewRatio(dimensions) }}>
     {preview && item.state === 'ready' ? <img src={preview.image} alt={item.description || item.name || '表情预览'} loading="lazy" decoding="async" className="h-full w-full object-contain" />
       : <div className="grid justify-items-center gap-1 px-2 text-center text-xs text-muted-foreground"><span>{item.state === 'unknown' ? '等待核对' : failed ? '预览暂不可用' : nearViewport ? '正在载入…' : '表情预览'}</span>{failed && item.state === 'ready' && <Button size="sm" variant="ghost" onClick={() => setRetry(value => value + 1)}>重试预览</Button>}</div>}
+    {preview?.animation && <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">{preview.animation === 'animated' ? 'GIF' : 'GIF · 静态预览'}</span>}
   </div>
 }
 

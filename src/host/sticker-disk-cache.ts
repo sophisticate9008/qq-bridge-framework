@@ -29,7 +29,7 @@ function cached(value: unknown, kind: Kind): Cached | null {
 export function createStickerDiskCache(options: { readonly directory: string; readonly accountId: string; readonly store: DurableStore }) {
   const directory = join(options.directory, 'sticker-cache', digest(options.accountId))
   const namespace = (kind: Kind) => `native-chat.sticker-disk-cache.${digest([options.accountId, kind])}`
-  const key = (kind: Kind, id: string, identity: string) => digest([kind, id, identity, kind === 'thumbnail' ? 'jpeg-384-q70-v1' : 'original-v1'])
+  const key = (kind: Kind, id: string, identity: string) => digest([kind, id, identity, kind === 'thumbnail' ? 'animated-webp-static-jpeg-v2' : 'original-v1'])
   let tail: Promise<unknown> = Promise.resolve()
   function serial<Value>(operation: () => Promise<Value>) {
     const pending = tail.catch(() => undefined).then(operation); tail = pending; return pending

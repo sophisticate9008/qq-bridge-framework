@@ -171,14 +171,20 @@ export function parseStickerLibrarySnapshot(value: unknown): StickerLibrarySnaps
     items, limited: value.limited, pending: Number(value.pending) }
 }
 
-export interface StickerLibraryThumbnail { readonly image: string; readonly width?: number; readonly height?: number }
+export interface StickerLibraryThumbnail {
+  readonly image: string; readonly width?: number; readonly height?: number
+  /** Present only for an animated source; static means a bounded fallback preview. */
+  readonly animation?: 'animated' | 'static'
+}
 export function parseStickerLibraryThumbnail(value: unknown): StickerLibraryThumbnail | null {
   if (!isRecord(value) || typeof value.image !== 'string' || value.image.length > 200_000
-    || !/^data:image\/jpeg;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.image)
-    || value.image.length <= 'data:image/jpeg;base64,'.length) return null
+    || !/^data:image\/(?:jpeg|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.image)
+    || value.image.length <= 'data:image/jpeg;base64,'.length
+    || value.animation !== undefined && value.animation !== 'animated' && value.animation !== 'static'
+    || value.animation === 'animated' && !value.image.startsWith('data:image/webp;base64,')) return null
   const dimensions = value.width === undefined && value.height === undefined ? undefined : parseStickerImageDimensions({ width: value.width, height: value.height })
   if (dimensions === null) return null
-  return { image: value.image, ...(dimensions ?? {}) }
+  return { image: value.image, ...(dimensions ?? {}), ...(value.animation === undefined ? {} : { animation: value.animation }) }
 }
 
 export interface StickerLibraryDeleteResult {
