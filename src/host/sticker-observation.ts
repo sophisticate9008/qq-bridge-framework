@@ -15,7 +15,8 @@ export async function prepareStickerObservation(input: {
   const gif = ['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'))
   const observed = gif ? await observeGif({ data: bytes, signal: input.signal, version: input.version ?? 'v1' }) : null
   input.signal.throwIfAborted()
-  assert(observed?.status !== 'rejected', 'STICKER_GIF_OBSERVATION_FAILED', 'GIF observation could not be completed within the existing media limits.')
+  assert(observed?.status !== 'rejected', observed?.status === 'rejected' ? observed.code.toUpperCase() : 'STICKER_GIF_OBSERVATION_FAILED',
+    'GIF observation could not be completed within the existing media limits.')
   if (observed?.status !== 'animated') {
     const image = await sharp(bytes, { pages: 1, limitInputPixels: 40_000_000 }).timeout({ seconds: 3 })
       .rotate().resize({ width: 768, height: 768, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 75 }).toBuffer()

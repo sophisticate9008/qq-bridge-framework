@@ -1344,7 +1344,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             const end = beforeMessageId ? messages.findIndex(message => message.id === beforeMessageId) : -1
             return (end >= 0 ? messages.slice(0, end) : messages).slice(-5).map(message =>
               message.content.map(part => part.type === 'text' ? part.text : '[媒体]').join('').slice(0, 500))
-          }, onFault: code => activity.record('error', null, undefined, {}, code) })
+          }, onFault: (code, conversationId) => activity.record(conversationId ? 'sticker_collection_failed' : 'sticker_index_failed',
+            conversationId ?? null, undefined, {}, code) })
         stickerLibrary.warm()
         stickers = createNativeStickerService({
           port: stickerPort,

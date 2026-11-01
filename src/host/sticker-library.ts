@@ -11,7 +11,7 @@ import { parseStickerLibraryIdentityUpdate, parseStickerLibraryAnnotation, parse
   type StickerLibraryAnnotation, type StickerLibraryAnnotationUpdate, type StickerLibraryAnnotationUpdateResult } from '../contracts/sticker-library.ts'
 import type { DurableStore, InboundMessage } from './types.ts'
 import type { JsonValue } from '../core/types.ts'
-import { assert, isRecord } from '../core/values.ts'
+import { assert, errorCode, isRecord } from '../core/values.ts'
 import { digest, json, object } from './data.ts'
 import { withDeadline } from './deadlines.ts'
 import { createStickerMatcher } from './sticker-matching.ts'
@@ -50,7 +50,9 @@ function parse(value: JsonValue): Entry {
     ...(manualIdentity === undefined ? {} : { manualIdentity }), ...(manualAnnotation ? { manualAnnotation } : {}) }
 }
 function response(text: string): Record<string, unknown> {
-  const value: unknown = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
+  let value: unknown
+  try { value = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')) }
+  catch { assert(false, 'STICKER_MODEL_INVALID', 'Expected a bounded JSON result.') }
   assert(isRecord(value), 'STICKER_MODEL_INVALID', 'Expected a bounded JSON result.')
   return value
 }
@@ -90,7 +92,7 @@ export function createStickerLibrary(options: {
   readonly observationVersion?: (signal: AbortSignal) => Promise<MediaObservationVersion>
   readonly random?: () => number
   readonly reconcile?: (owner: string, name: string, conversationId: string, signal: AbortSignal) => Promise<void>
-  readonly onFault?: (code: string) => void
+  readonly onFault?: (code: string, conversationId?: string) => void
 }) {
   const directory = join(options.directory, 'sticker-library', digest(options.accountId))
   const cache = createStickerSemanticCache(options.store, options.accountId)
@@ -695,8 +697,12 @@ export function createStickerLibrary(options: {
     if (pending) { pending.manual = true; return { status: 'queued', quiet: true } }
     if (jobs.size >= 8) return { status: 'skipped', reason: 'busy', quiet: true }
     // Acceptance ends the calling tool. Classification is owned by the mechanism lifetime, not by the ended main turn.
-    track(collect(assetId, conversationId, true, active(options.signal)).catch(() => { options.onFault?.('STICKER_COLLECTION_INCOMPLETE') }))
+    track(collect(assetId, conversationId, true, active(options.signal)).catch(error => collectionFault(error, conversationId)))
     return { status: 'queued', quiet: true }
+  }
+  function collectionFault(error: unknown, conversationId: string) {
+    if (lifetime.signal.aborted || options.signal.aborted) return
+    options.onFault?.(errorCode(error, 'STICKER_COLLECTION_INCOMPLETE'), conversationId)
   }
   return Object.freeze({ snapshot, readImage, thumbnail, remove, choose, collect, annotateIdentity, annotate,
     warm, requestCollection,
@@ -709,7 +715,7 @@ export function createStickerLibrary(options: {
       if (jobs.size >= 8 || lifetime.signal.aborted) return
       for (const assetId of stickerMessageAssets(message, raw)) {
         if (jobs.size >= 8) break
-        track(collect(assetId, message.conversationId, false, active(options.signal)).catch(() => { options.onFault?.('STICKER_COLLECTION_INCOMPLETE') }))
+        track(collect(assetId, message.conversationId, false, active(options.signal)).catch(error => collectionFault(error, message.conversationId)))
       }
     },
     async stop() { lifetime.abort(); await Promise.all([thumbnails.close(), Promise.allSettled([...jobs])]); await mutations.catch(() => undefined); await disk.close(); matcher.clear() },
