@@ -1348,8 +1348,14 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           context(conversationId, beforeMessageId) {
             const messages = host?.history.snapshot(conversationId, { afterSequence: 0, limit: 100 }).messages ?? []
             const end = beforeMessageId ? messages.findIndex(message => message.id === beforeMessageId) : -1
-            return (end >= 0 ? messages.slice(0, end) : messages).slice(-5).map(message =>
-              message.content.map(part => part.type === 'text' ? part.text : '[媒体]').join('').slice(0, 500))
+            const speakers = new Map<string, string>()
+            return (end >= 0 ? messages.slice(0, end) : messages).slice(-5).map(message => {
+              const speaker = message.actor === 'assistant' || message.actor === selfId ? '机器人'
+                : message.actor === 'system' ? '系统事件' : speakers.get(message.actor) ?? `发言者${speakers.size + 1}`
+              if (message.actor !== 'assistant' && message.actor !== selfId && message.actor !== 'system') speakers.set(message.actor, speaker)
+              return JSON.stringify({ speaker, at: new Date(message.receivedAt).toISOString(),
+                text: message.content.map(part => part.type === 'text' ? part.text : '[媒体]').join('').slice(0, 400) })
+            })
           }, onFault: (code, conversationId) => activity.record(conversationId ? 'sticker_collection_failed' : 'sticker_index_failed',
             conversationId ?? null, undefined, {}, code) })
         stickerLibrary.warm()

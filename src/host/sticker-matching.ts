@@ -10,6 +10,8 @@ export interface StickerMatchOptions {
   readonly context: readonly string[]
   readonly candidates: readonly StickerMatchCandidate[]
   readonly recentlyUsed: readonly string[]
+  /** Recall delegates semantic suitability (including negation and emotional stance) to the selection model. */
+  readonly mode?: 'recall'
   /** An explicit identity requirement; a mere mention in intent is only a weak preference. */
   readonly character?: string
   readonly characterAliases?: readonly { readonly character: string; readonly aliases: readonly string[] }[]
@@ -273,6 +275,14 @@ export function createStickerMatcher(accountId: string) {
     } else {
       for (const key of query.keys()) for (const id of postings.get(key) ?? []) recalled.add(id)
     }
+    // Open phrases such as “被摸头” can be segmented differently inside a sentence.
+    // Recall them literally too; only the model decides their meaning in context.
+    if (options.mode === 'recall') for (const [id, indexed] of documents) {
+      if (constrained && (!indexed.character || !constrained.has(indexed.character))) continue
+      const annotation = indexed.candidate.annotation
+      if ([...annotation.tags, ...(annotation.facets?.actions ?? []), ...(annotation.facets?.intents ?? []), ...(annotation.facets?.emotions ?? [])]
+        .some(value => value.length >= 2 && intent.includes(normalize(value)))) recalled.add(id)
+    }
     for (const character of requested.negative) for (const id of characterPostings.get(character) ?? []) recalled.delete(id)
     const averages = lengths.map(length => Math.max(1, length / Math.max(1, documents.size)))
     const requestedConcepts = [...query.keys()].filter(key => key.startsWith('concept:'))
@@ -280,10 +290,13 @@ export function createStickerMatcher(accountId: string) {
     for (const id of recalled) {
       const indexed = documents.get(id)!
       const { candidate, fields: values, available } = indexed
-      if (recent.has(id) || emotionConflict(candidate.annotation, requested.query, options.context.at(-1) ?? '')
-        || restrictions(candidate.annotation, requested.query, contextExpression, serious)) continue
-      if ([...excluded].some(key => available.has(key))) continue
-      if (requestedConcepts.length && !requestedConcepts.some(key => available.has(key))) continue
+      if (recent.has(id)) continue
+      if (options.mode !== 'recall') {
+        if (emotionConflict(candidate.annotation, requested.query, options.context.at(-1) ?? '')
+          || restrictions(candidate.annotation, requested.query, contextExpression, serious)) continue
+        if ([...excluded].some(key => available.has(key))) continue
+        if (requestedConcepts.length && !requestedConcepts.some(key => available.has(key))) continue
+      }
       let score = identityOnly ? 1 : 0, strongest = 0, wordMatches = 0, conceptMatch = false, expressionEvidence = false
       for (const key of query.keys()) {
         let frequency = 0, strongestField = 0
@@ -302,7 +315,7 @@ export function createStickerMatcher(accountId: string) {
         const idf = Math.min(2, Math.max(0.75, Math.log(1 + (documents.size - count + 0.5) / (count + 0.5))))
         score += idf * frequency * 2.2 / (frequency + 1.2) * (key.startsWith('concept:') ? 1.6 : 1)
       }
-      if (query.size && (strongest < 2.4 && (wordMatches < 2 || !conceptMatch) || score < 1.1)) continue
+      if (options.mode !== 'recall' && query.size && (strongest < 2.4 && (wordMatches < 2 || !conceptMatch) || score < 1.1)) continue
       // Identity cannot admit an otherwise unsuitable image or rescue its threshold.
       // A plain mention may only slightly prefer an already matching expression.
       if (!constrained && !requested.ambiguous && expressionEvidence && indexed.character && requested.positive.has(indexed.character)) score += 0.2

@@ -17,6 +17,7 @@ import { awaitCondition } from './fixtures/await-condition.ts'
 async function fixture(context: TestContext, options: {
   choose?: (signal: AbortSignal) => Promise<string | null>
   prepare?: (signal: AbortSignal) => Promise<void>
+  noSelector?: boolean
   configuration?: StickerSendingConfiguration
 } = {}) {
   const store = createSqliteStore({ filename: ':memory:' })
@@ -27,7 +28,8 @@ async function fixture(context: TestContext, options: {
   const sent: SendRequest[] = []
   let choices = 0
   const effect = createNativeStickerSendEffect({ sources: () => sources.reader, authorize: async () => {},
-    ...(options.configuration ? { configuration: async () => options.configuration!, selector: async () => null } : {}), library: () => ({
+    ...(options.noSelector ? {} : { selector: async () => null }),
+    ...(options.configuration ? { configuration: async () => options.configuration! } : {}), library: () => ({
     async choose(_intent, conversationId, currentSignal) {
       choices++
       assert.equal(conversationId, 'group:fixture')
@@ -115,7 +117,7 @@ test('an unsuitable pure image stays quiet without inventing a reply', async con
 })
 
 test('the image selection deadline preserves text but the original tool deadline still fences dispatch', async context => {
-  const runtime = await fixture(context, { configuration: { useAiSelection: true, dshSelectionTimeoutSeconds: 1 },
+  const runtime = await fixture(context, { configuration: { dshSelectionTimeoutSeconds: 1 },
     choose: async () => { await new Promise<void>(resolve => setTimeout(resolve, 1050)); return 'late-image' } })
   assert.equal((await runtime.invoke({ intent: '开心', text: '嘿嘿' })).status, 'confirmed')
   assert.deepEqual(runtime.sent.map(request => request.content), [[{ type: 'text', text: '嘿嘿' }]])
@@ -147,4 +149,12 @@ test('output preparation that ignores cancellation cannot dispatch after the ori
   release!()
   await new Promise<void>(resolve => setTimeout(resolve, 30))
   assert.equal(runtime.sent.length, 0)
+})
+
+
+test('an unavailable selector never falls back to local matching and preserves normal text', async context => {
+  const runtime = await fixture(context, { noSelector: true })
+  assert.equal((await runtime.invoke({ intent: '开心地招手', text: '回来啦' })).status, 'confirmed')
+  assert.equal(runtime.choices(), 0)
+  assert.deepEqual(runtime.sent.map(request => request.content), [[{ type: 'text', text: '回来啦' }]])
 })

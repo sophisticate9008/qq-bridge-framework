@@ -207,3 +207,14 @@ test('identity alone adds no expression score to visual matches and names do not
   const collision = named('collision', '开心', [], ['吃饭'])
   assert.deepEqual(rank('开心', [collision, celebrate]).map(item => item.id), ['celebrate'])
 })
+
+
+test('model recall includes opposing moods and weak descriptions without pre-judging suitability', () => {
+  const happy = candidate('happy-pat', { description: '开心地被摸头', tags: ['开心'] }, { actions: ['被摸头'], emotions: ['开心'] })
+  const angry = candidate('angry-pat', { description: '生气地被摸头', tags: ['生气'], avoid: '严肃争执' }, { actions: ['被摸头'], emotions: ['生气'] })
+  const input = { intent: '仍在生气，被摸头', candidates: [happy, angry], context: ['严肃争执'], recentlyUsed: [], mode: 'recall' as const }
+  assert.deepEqual(new Set(rankStickerCandidates(input).map(item => item.id)), new Set([happy.id, angry.id]))
+  assert.deepEqual(rankStickerCandidates({ ...input, recentlyUsed: [happy.id] }).map(item => item.id), [angry.id])
+  const weak = candidate('description-only', { description: '角色身旁的桌子上有纸张' })
+  assert.equal(rankStickerCandidates({ ...input, intent: '桌子', candidates: [weak], context: [] })[0]?.id, weak.id)
+})

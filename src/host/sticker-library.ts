@@ -74,13 +74,14 @@ export interface StickerSelectionRequest {
   readonly intent: string
   readonly character?: string
   readonly context: readonly string[]
+  readonly replyText?: string
   readonly conversationId: string
   readonly candidates: readonly { readonly id: string; readonly score: number; readonly annotation: StickerAnnotation }[]
   readonly signal: AbortSignal
   readonly deadlineAt: number
 }
 
-/** The background collector owns model work; local selection and QQ writes remain owned by the host. */
+/** Models own semantic decisions; the host owns bounded recall, resource checks and QQ writes. */
 export function createStickerLibrary(options: {
   readonly model?: PluginModelSelection
   readonly directory: string; readonly store: DurableStore; readonly accountId: string; readonly port: OneBotStickerPort
@@ -617,8 +618,8 @@ export function createStickerLibrary(options: {
   }
   const recent = new Map<string, readonly { readonly id: string; readonly at: number }[]>()
   async function choose(intent: string, conversationId: string, callerSignal: AbortSignal, deadlineAt: number, character?: string,
-    selector?: (request: StickerSelectionRequest) => Promise<string | null>): Promise<string | null> {
-    if (deadlineAt !== Infinity && !Number.isFinite(deadlineAt) || deadlineAt <= Date.now()) return null
+    selector?: (request: StickerSelectionRequest) => Promise<string | null>, replyText?: string): Promise<string | null> {
+    if (!selector || deadlineAt !== Infinity && !Number.isFinite(deadlineAt) || deadlineAt <= Date.now()) return null
     let needsRefinement = false, selecting = false, authorized = false
     let context: readonly string[] = []
     const run = async (signal: AbortSignal): Promise<string | null> => {
@@ -627,28 +628,22 @@ export function createStickerLibrary(options: {
       const candidates = semanticCandidates().map(candidate => ({ ...candidate,
         annotation: refinement.annotation(candidate.id, candidate.version, candidate.annotation) }))
       context = options.context(conversationId).slice(-5)
-      const matched = matcher.rank({ intent, context, candidates, ...(character === undefined ? {} : { character }),
+      const matched = matcher.rank({ intent, context, candidates, mode: 'recall', ...(character === undefined ? {} : { character }),
         characterAliases: characterAliases(),
         recentlyUsed: (recent.get(conversationId) ?? []).filter(item => Date.now() - item.at < 120_000).map(item => item.id) })
-      const allowed = matched.slice(0, 8)
-      if (!allowed.length || Date.now() >= deadlineAt) { needsRefinement = Boolean(selector); return null }
-      // Only an unambiguous, explicit action/use match bypasses auxiliary work.
-      // The matcher has already enforced character, negation, avoid and recency.
-      const normalizedIntent = normalizeStickerCharacterName(intent)
-      const explicit = allowed.filter(match => {
-        const annotation = candidates.find(candidate => candidate.id === match.id)!.annotation
-        return [...(annotation.facets?.actions ?? []), ...(annotation.facets?.intents ?? [])]
-          .some(value => { const phrase = normalizeStickerCharacterName(value); return phrase.length >= 2 && normalizedIntent.includes(phrase) })
-      })
-      const direct = explicit.length === 1 && explicit[0]!.id === allowed[0]!.id
-      selecting = Boolean(selector) && !direct
-      const selectedId = selecting && selector ? await selector({ intent, ...(character === undefined ? {} : { character }), context, conversationId,
-        candidates: allowed.map(candidate => ({ ...candidate, annotation: candidates.find(item => item.id === candidate.id)!.annotation })), signal, deadlineAt }) : allowed[0]?.id
+      const allowed = matched.slice(0, 12)
+      if (!allowed.length || Date.now() >= deadlineAt) { needsRefinement = true; return null }
+      selecting = true
+      const selectedId = await selector({ intent, ...(character === undefined ? {} : { character }), context, conversationId,
+        ...(replyText === undefined ? {} : { replyText: replyText.slice(0, 500) }),
+        candidates: allowed.map(candidate => ({ ...candidate, annotation: candidates.find(item => item.id === candidate.id)!.annotation })), signal, deadlineAt })
       selecting = false
-      needsRefinement = Boolean(selector) && (!allowed.some(candidate => candidate.id === selectedId) || Date.now() >= deadlineAt)
+      needsRefinement = !allowed.some(candidate => candidate.id === selectedId) || Date.now() >= deadlineAt
       signal.throwIfAborted()
       const chosen = allowed.find(candidate => candidate.id === selectedId)
       if (!chosen || Date.now() >= deadlineAt) return null
+      const original = candidates.find(candidate => candidate.id === chosen.id)!
+      if (!currentSemanticCandidate(original) || (recent.get(conversationId) ?? []).some(item => item.id === chosen.id && Date.now() - item.at < 120_000)) return null
       const assetId = await options.register(chosen.id, conversationId, signal)
       signal.throwIfAborted()
       if (Date.now() >= deadlineAt) return null
@@ -667,7 +662,7 @@ export function createStickerLibrary(options: {
     }
     // Only an AI miss/timeout starts learning. Its lifetime is independent of the expired send deadline,
     // but cancellation, shutdown and revoked authorization cannot start a new helper model request.
-    if (!result && selector && authorized && needsRefinement && !signal.aborted && jobs.size < 8) {
+    if (!result && authorized && needsRefinement && !signal.aborted && jobs.size < 8) {
       const job = refinement.request({ intent, conversationId, context, ...(character === undefined ? {} : { character }) })
       if (job) track(job)
     }

@@ -159,7 +159,7 @@ test('unclassified account images accept a manual character without inventing se
   await assert.rejects(f.library.annotateIdentity(initial.id, current.revision, { character: '角色乙', aliases: [] }, signal()), { code: 'STICKER_NOT_FOUND' })
 })
 
-test('optional selection receives only actual matched candidates and cannot register an invented id', async t => {
+test('model selection receives only actual matched candidates and cannot register an invented id', async t => {
   const f = await fixture(t); f.seed()
   const item = (await f.library.snapshot(signal())).items[0]!
   assert.equal(await f.library.choose('开心', 'group:123', signal(), Infinity, undefined, async request => {
@@ -173,7 +173,7 @@ test('optional selection receives only actual matched candidates and cannot regi
   assert.deepEqual(f.writes, ['register'])
 })
 
-test('a unique explicit top action bypasses weaker emotion matches but ambiguous actions still use AI', async t => {
+test('both unique and ambiguous action candidates require model approval', async t => {
   for (const ambiguous of [false, true]) {
     const f = await fixture(t)
     f.seed()
@@ -195,9 +195,9 @@ test('a unique explicit top action bypasses weaker emotion matches but ambiguous
     let selections = 0
     const selector = async () => { selections++; return null }
     assert.equal(await f.library.choose('开心', 'group:123', signal(), Infinity, undefined, selector), null)
-    assert.equal(selections, 1, 'generic emotion retains the configured AI check')
-    assert.equal(await f.library.choose('开心地招手', 'group:123', signal(), Infinity, undefined, selector), ambiguous ? null : `media-${item.id}`)
-    assert.equal(selections, ambiguous ? 2 : 1)
+    assert.equal(selections, 1, 'generic emotion requires model approval')
+    assert.equal(await f.library.choose('开心地招手', 'group:123', signal(), Infinity, undefined, selector), null)
+    assert.equal(selections, 2)
     assert.equal(await f.library.choose('开心地招手', 'group:123', signal(), Infinity, undefined, selector), null, 'recent or rejected images do not leak into a send')
   }
 })
@@ -278,16 +278,21 @@ test('UI deletion is versioned, reuses its receipt and prevents automatic recoll
   assert.equal((await f.library.snapshot(signal())).items.filter(item => item.storage === 'extra').length, 0)
   await assert.rejects(f.library.readImage(item.id, signal()))
 })
-test('local selection reads tags instantly without model calls and declines unsuitable or repeated use', async t => {
+test('selection never registers a local match without a model and still excludes recent choices', async t => {
   const f = await fixture(t); f.seed(); await f.library.snapshot(signal())
-  const hint = await f.library.hints('group:123', signal())
-  assert(!JSON.stringify(hint).includes(annotation.description))
-  assert.equal(await f.library.choose('严肃难过，需要安慰', 'group:123', signal(), Date.now() + 10_000), null)
+  assert.equal(await f.library.choose('开心地打招呼', 'group:123', signal(), Infinity), null)
   assert.deepEqual(f.writes, [])
+  let selections = 0
+  const selector = async (request: import('../src/host/sticker-library.ts').StickerSelectionRequest) => {
+    selections++
+    assert.equal(request.replyText, '嘿，回来啦')
+    return request.candidates[0]!.id
+  }
   const item = (await f.library.snapshot(signal())).items[0]!
-  assert.equal(await f.library.choose('开心地打招呼', 'group:123', signal(), Date.now() + 10_000), `media-${item.id}`)
-  assert.equal(f.calls.length, 0, 'sending never runs a DSH model')
-  assert.equal(await f.library.choose('开心地打招呼', 'group:123', signal(), Date.now() + 10_000), null)
+  assert.equal(await f.library.choose('开心地打招呼', 'group:123', signal(), Infinity, undefined, selector, '嘿，回来啦'), `media-${item.id}`)
+  assert.equal(await f.library.choose('开心地打招呼', 'group:123', signal(), Infinity, undefined, selector), null)
+  assert.equal(selections, 1)
+  assert.deepEqual(f.writes, ['register'])
 })
 test('manual collection accepts immediately and tagging stays in the background without an execution timeout', async t => {
   const f = await fixture(t)
@@ -309,8 +314,8 @@ test('manual collection accepts immediately and tagging stays in the background 
   assert.deepEqual(f.writes, ['add'])
   await f.library.snapshot(signal())
   assert.equal(f.calls.length, 1)
-  assert(await f.library.choose('开心地打招呼', 'group:123', signal(), Date.now() + 10_000))
-  assert.equal(f.calls.length, 1, 'ready tags are reused by local selection')
+  assert(await f.library.choose('开心地打招呼', 'group:123', signal(), Date.now() + 10_000, undefined, async request => request.candidates[0]!.id))
+  assert.equal(f.calls.length, 1, 'ready tags are reused without another visual annotation')
 })
 test('only protocol-marked sticker images trigger automatic collection and percentages accept fractions', () => {
   const message = { receivedAt: Date.now(), directed: false, isSelf: false, id: 'message', userId: '123', conversationId: 'group:123', content: [{ type: 'image' as const, assetId: 'photo' }, { type: 'image' as const, assetId: 'sticker' }] }
@@ -394,7 +399,7 @@ test('manual full-dimensional labels can clear fields and survive model cache wr
   cache.remember(account, { description: '新模型描述', tags: ['开心'], avoid: '争执', identity: { character: '模型角色', aliases: [], source: 'model' } })
   assert.deepEqual(cache.read(account), manual, 'independent model annotations cannot overwrite the manual cache overlay')
   assert.equal(createStickerSemanticCache(f.store, 'other').read(account), null)
-  assert.equal(await f.library.choose('生气', 'group:123', signal(), Infinity), `media-${initial.id}`)
+  assert.equal(await f.library.choose('生气', 'group:123', signal(), Infinity, undefined, async request => request.candidates[0]!.id), `media-${initial.id}`)
   await assert.rejects(f.library.annotate({ id: initial.id, revision: initial.revision, annotation: manual }, signal()), { code: 'STICKER_ANNOTATION_CONFLICT' })
   const empty = { description: '', tags: [], avoid: '', facets: { emotions: [], actions: [], intents: [], scenes: [], visibleText: '' },
     visual: { colors: [], styles: [], entities: [] } }
