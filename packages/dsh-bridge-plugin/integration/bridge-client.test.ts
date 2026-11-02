@@ -522,10 +522,14 @@ test('official plugin entry and actual framework HTTP client isolate claims, per
           // This focused registry fixture supplies the same committed root event
           // that the model loop publishes before dispatching its tool pipeline.
           agent.session.append('assistant/message', { turn: payload.turn, step: payload.step, stream: [], message: createAssistantMessage({
-            source: { provider: 'local-fixture', model: 'safe-model' }, content: [{ type: 'tool-call', id: ToolCallId(sdkCallId),
+            source: { provider: 'local-fixture', model: 'safe-model' }, content: [{ type: 'tool-call', id: ToolCallId(`${sdkCallId}-malformed`),
+              name: 'qbf_media_inspect', arguments: '{"assetId":"opaque-asset","owner":true}' }, { type: 'tool-call', id: ToolCallId(sdkCallId),
               name: 'qbf_media_inspect', arguments: '{"assetId":"opaque-asset"}' }]
           }) }, { surfaceOp: 'append' })
           await new Promise<void>(resolve => setImmediate(resolve))
+          const invalid = await agent.ctx.tools.execute({ callId: ToolCallId(`${sdkCallId}-malformed`), agent, name: 'qbf_media_inspect',
+            arguments: { assetId: 'opaque-asset', owner: true }, signal: payload.signal })
+          assert.deepEqual(invalid.value, { status: 'rejected', code: 'INVALID_TOOL_INPUT' })
           outcome = await agent.ctx.tools.execute({ callId: ToolCallId(sdkCallId), agent, name: 'qbf_media_inspect',
             arguments: { assetId: 'opaque-asset' }, signal: AbortSignal.any([payload.signal, toolSignal]) })
         }
@@ -579,7 +583,8 @@ test('official plugin entry and actual framework HTTP client isolate claims, per
         assert.deepEqual(noSource.value, { status: 'rejected', code: 'TOOL_SOURCE_UNAVAILABLE' })
         const malformed = await agent.ctx.tools.execute({ callId: ToolCallId('forged-input'), agent, name: 'qbf_media_inspect', arguments: { assetId: 'opaque-asset', owner: true }, signal })
         assert.equal(malformed.isError, false)
-        assert.deepEqual(malformed.value, { status: 'rejected', code: 'INVALID_TOOL_INPUT' })
+        // Both late calls lack a live model turn; source validation precedes input validation.
+        assert.deepEqual(malformed.value, { status: 'rejected', code: 'TOOL_SOURCE_UNAVAILABLE' })
         const revoke = agent.ctx.tools.guard(() => 'Original DSH tool policy denies this invocation')
         try {
           const denied = await agent.ctx.tools.execute({ callId: ToolCallId('dsh-policy-denied'), agent, name: 'qbf_media_inspect', arguments: { assetId: 'opaque-asset' }, signal })

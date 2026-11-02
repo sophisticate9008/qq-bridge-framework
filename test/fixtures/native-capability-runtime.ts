@@ -99,6 +99,7 @@ export async function createNativeCapabilityRuntimeFixture(context: NativeCapabi
         record({ kind: 'onebot', method: url.pathname })
         if (url.pathname.endsWith('/get_login_info')) response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { user_id: 999 } }))
         else if (url.pathname.endsWith('/get_version_info')) response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { app_name: 'SyntheticOneBot', app_version: '1.0.0' } }))
+        else if (url.pathname.endsWith('/fetch_custom_face_detail')) response.end(JSON.stringify({ status: 'ok', retcode: 0, data: [] }))
         else {
           let body = ''
           for await (const chunk of request) body += String(chunk)

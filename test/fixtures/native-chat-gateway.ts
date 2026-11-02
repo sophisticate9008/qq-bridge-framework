@@ -99,6 +99,7 @@ export async function createNativeChatGatewayFixture(context: TestContext, optio
       if (url.pathname === '/onebot/get_login_info') response.end(JSON.stringify({
         ...(httpLoginStatus === null ? {} : { status: httpLoginStatus }), retcode: 0, data: { user_id: 999 } }))
       else if (url.pathname === '/onebot/get_version_info') response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { app_name: 'SyntheticOneBot', app_version: '1.0.0' } }))
+      else if (url.pathname === '/onebot/fetch_custom_face_detail') response.end(JSON.stringify({ status: 'ok', retcode: 0, data: [] }))
       else {
         sends.push(object(JSON.parse(body)))
         sendActions.push(url.pathname)

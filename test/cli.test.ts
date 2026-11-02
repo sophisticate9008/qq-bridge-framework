@@ -160,8 +160,8 @@ test('CLI parses only supported command options and presents standalone init fir
   try {
     const help = capturedIo(directory);
     assert.equal(await runCli(['init', '--help'], help.io), 0);
-    assert.match(help.stdout.join('\n'), /用法：\n  npm run cli -- init \[/);
-    assert.match(help.stdout.join('\n'), /npm run cli -- init --gateway-config <网关配置>/);
+    assert.match(help.stdout.join('\n'), /用法：\n  qbf-cli init \[/);
+    assert.match(help.stdout.join('\n'), /qbf-cli init --gateway-config <网关配置>/);
     assert.doesNotMatch(help.stdout.join('\n'), /bridge-dir|legacy-root|qq-bridge/i);
   } finally {
     rmSync(directory, { recursive: true, force: true });

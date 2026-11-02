@@ -62,6 +62,7 @@ async function fixture(name: string, settings: { turnTimeoutMs?: number; createD
     if (pathname.startsWith('/onebot/')) {
       if (pathname.endsWith('get_login_info')) response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { user_id: 999 } }))
       else if (pathname.endsWith('get_version_info')) response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { app_name: 'SyntheticOneBot' } }))
+      else if (pathname.endsWith('fetch_custom_face_detail')) response.end(JSON.stringify({ status: 'ok', retcode: 0, data: [] }))
       else {
         sends.push({ input: value(JSON.parse(body)), at: Date.now() })
         if (sendDelayMs) await delay(sendDelayMs)
