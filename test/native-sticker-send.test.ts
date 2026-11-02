@@ -11,11 +11,13 @@ import { createNativeFrameworkTools, NATIVE_TOOL_EVENT, validateNativeToolEvent 
 import { createNativeMessageSources } from '../src/host/native-message-sources.ts'
 import { createNativeStickerSendEffect, NATIVE_STICKER_SEND_TOOLS } from '../src/host/native-sticker-send.ts'
 import { createSqliteStore } from '../src/storage/sqlite.ts'
+import type { StickerSendingConfiguration } from '../src/contracts/sticker-sending.ts'
 import { awaitCondition } from './fixtures/await-condition.ts'
 
 async function fixture(context: TestContext, options: {
   choose?: (signal: AbortSignal) => Promise<string | null>
   prepare?: (signal: AbortSignal) => Promise<void>
+  configuration?: StickerSendingConfiguration
 } = {}) {
   const store = createSqliteStore({ filename: ':memory:' })
   const lifetime = new AbortController(), signal = lifetime.signal
@@ -24,7 +26,8 @@ async function fixture(context: TestContext, options: {
   const persona = contexts.registerPersona({ id: 'test', version: '1', name: 'Test', identity: {}, style: {} })
   const sent: SendRequest[] = []
   let choices = 0
-  const effect = createNativeStickerSendEffect({ sources: () => sources.reader, authorize: async () => {}, library: () => ({
+  const effect = createNativeStickerSendEffect({ sources: () => sources.reader, authorize: async () => {},
+    ...(options.configuration ? { configuration: async () => options.configuration!, selector: async () => null } : {}), library: () => ({
     async choose(_intent, conversationId, currentSignal) {
       choices++
       assert.equal(conversationId, 'group:fixture')
@@ -97,10 +100,25 @@ test('revoking the ordinary conversation grant stops selection and dispatch', as
   assert.equal(runtime.sent.length, 0)
 })
 
-test('an unsuitable selection leaves both image and accompanying text unsent', async context => {
+test('an unsuitable selection preserves accompanying text through the same reply policy and outbox', async context => {
   const runtime = await fixture(context, { choose: async () => null })
-  assert.deepEqual(await runtime.invoke({ intent: '开心', text: '嘿嘿' }), { status: 'confirmed', value: { status: 'skipped', quiet: true } })
+  assert.equal((await runtime.invoke({ intent: '开心', text: '嘿嘿' })).status, 'confirmed')
+  assert.equal(runtime.sent.length, 1)
+  assert.deepEqual(runtime.sent[0]!.content, [{ type: 'text', text: '嘿嘿' }])
+  assert.equal(runtime.host.history.snapshot('group:fixture').messages.length, 1)
+})
+
+test('an unsuitable pure image stays quiet without inventing a reply', async context => {
+  const runtime = await fixture(context, { choose: async () => null })
+  assert.deepEqual(await runtime.invoke({ intent: '开心' }), { status: 'confirmed', value: { status: 'skipped', quiet: true } })
   assert.equal(runtime.sent.length, 0)
+})
+
+test('the image selection deadline preserves text but the original tool deadline still fences dispatch', async context => {
+  const runtime = await fixture(context, { configuration: { useAiSelection: true, dshSelectionTimeoutSeconds: 1 },
+    choose: async () => { await new Promise<void>(resolve => setTimeout(resolve, 1050)); return 'late-image' } })
+  assert.equal((await runtime.invoke({ intent: '开心', text: '嘿嘿' })).status, 'confirmed')
+  assert.deepEqual(runtime.sent.map(request => request.content), [[{ type: 'text', text: '嘿嘿' }]])
 })
 
 test('an expired original call fences a late selector that ignores cancellation', async context => {
@@ -110,7 +128,7 @@ test('an expired original call fences a late selector that ignores cancellation'
     helperSignal = signal
     return new Promise<string>(resolve => { release = resolve })
   } })
-  const pending = runtime.invoke({ intent: '开心' }, 300)
+  const pending = runtime.invoke({ intent: '开心', text: '这段文字也必须遵守原票据期限' }, 300)
   await awaitCondition(() => release !== undefined, { timeoutMs: 250, message: 'selector started' })
   const result = await pending
   assert.equal(result.status, 'unknown')
@@ -123,7 +141,7 @@ test('an expired original call fences a late selector that ignores cancellation'
 test('output preparation that ignores cancellation cannot dispatch after the original deadline', async context => {
   let release: (() => void) | undefined
   const runtime = await fixture(context, { prepare: () => new Promise<void>(resolve => { release = resolve }) })
-  const pending = runtime.invoke({ intent: '开心' }, 300)
+  const pending = runtime.invoke({ intent: '开心', text: '这段文字也必须遵守原票据期限' }, 300)
   await awaitCondition(() => release !== undefined, { timeoutMs: 250, message: 'output preparation started' })
   assert.equal((await pending).status, 'unknown')
   release!()

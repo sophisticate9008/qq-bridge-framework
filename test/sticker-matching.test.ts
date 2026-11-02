@@ -15,6 +15,17 @@ const comfort = candidate('comfort', { description: '温和地伸手摸摸', tag
 const tease = candidate('tease', { description: '坏笑着指向前方，配字「笨蛋」', tags: ['调侃'], avoid: '严肃道歉、安慰时' }, { intents: ['调侃'], visibleText: '笨蛋' })
 const food = candidate('food', { description: '角色举着饭碗吃饭', tags: ['吃饭', '饭碗'] }, { actions: ['吃饭'], scenes: ['饭桌'] })
 
+test('the same head-pat action cannot replace anger with a happy shy expression', () => {
+  const happy = candidate('happy-head-pat', { tags: ['被摸头', '开心', '害羞'] }, { actions: ['被摸头'], emotions: ['开心', '害羞'] })
+  const angry = candidate('angry-head-pat', { tags: ['被摸头', '生气'] }, { actions: ['被摸头'], emotions: ['生气'] })
+  assert.deepEqual(rank('被摸头、生气', [happy]), [])
+  assert.deepEqual(rank('被摸头、生气', [happy, angry]).map(item => item.id), [angry.id])
+  assert.deepEqual(rank('被摸头', [happy], ['还在生气，别以为摸摸头就算了']), [])
+  assert.deepEqual(rank('被摸头、开心', [happy], ['我还在生气呢']), [], 'the latest explicit negative tone also fences a misleading positive intent')
+  assert.deepEqual(rank('被摸头、开心', [happy, angry], ['刚才还在生气', '现在已经不生气了，开心地摸摸头']).map(item => item.id), [happy.id])
+  assert.deepEqual(rank('被摸头、开心', [happy], ['昨天在生气', '今天开开心心来摸摸头']).map(item => item.id), [happy.id], 'old background anger is not a permanent mood')
+})
+
 test('avoid directives do not turn unrelated output instructions into refusal context', () => {
   const joke = candidate('joke', { tags: ['笨蛋', '调侃'],
     avoid: '不适合在严肃争执、正式场合或关系不熟时使用；文字带骂人含义，可能显得冒犯；不要用来进行人身攻击。' }, { intents: ['开玩笑', '调侃'], visibleText: '笨蛋' })

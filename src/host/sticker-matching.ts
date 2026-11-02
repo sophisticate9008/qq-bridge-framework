@@ -1,4 +1,4 @@
-import { normalizeStickerCharacterName, stickerContainsMeaning, stickerSemanticConcepts, type StickerAnnotation } from './sticker-semantics.ts'
+import { normalizeStickerCharacterName, stickerContainsMeaning, stickerEmotions, stickerSemanticConcepts, type StickerAnnotation } from './sticker-semantics.ts'
 
 export interface StickerMatchCandidate {
   readonly id: string
@@ -54,6 +54,16 @@ function fields(candidate: StickerMatchCandidate, indexedTerms: (value: string) 
   return values.map(([value, weight]) => ({ text: value, weight, terms: indexedTerms(value) }))
 }
 const has = (value: string, words: readonly string[]): boolean => words.some(word => stickerContainsMeaning(value, word))
+/** An action match cannot erase an explicitly incompatible emotional tone. */
+function emotionConflict(annotation: StickerAnnotation, intent: string, latestContext: string): boolean {
+  const requested = new Set(stickerEmotions(intent)), current = new Set(stickerEmotions(latestContext))
+  const image = new Set(stickerEmotions([...(annotation.facets?.emotions ?? []), ...annotation.tags].join(' / ')))
+  const negative = ['生气', '难过', '委屈'].filter(emotion => requested.has(emotion) || current.has(emotion))
+  if (negative.length && ['开心', '得意', '害羞'].some(emotion => image.has(emotion))
+    && !negative.some(emotion => image.has(emotion))) return true
+  return requested.size > 0 && !requested.has('生气') && !current.has('生气')
+    && image.has('生气') && ['开心', '得意', '害羞'].some(emotion => requested.has(emotion))
+}
 const seriousWords = ['认真', '严肃', '安慰', '难过', '委屈', '道歉', '生病', '去世', '丧亲', '失业', '分手', '抑郁', '痛苦', '害怕', '崩溃',
   '伤害', 'comfort', 'grief', 'sorry', 'serious', 'sad']
 const hostileWords = ['侮辱', '辱骂', '骂人', '威胁', '恐吓', '嘲讽', '嘲笑', '挑衅', '调侃', '恶意', '贬低', '笨蛋', '傻逼', '傻瓜', '白痴',
@@ -270,7 +280,8 @@ export function createStickerMatcher(accountId: string) {
     for (const id of recalled) {
       const indexed = documents.get(id)!
       const { candidate, fields: values, available } = indexed
-      if (recent.has(id) || restrictions(candidate.annotation, requested.query, contextExpression, serious)) continue
+      if (recent.has(id) || emotionConflict(candidate.annotation, requested.query, options.context.at(-1) ?? '')
+        || restrictions(candidate.annotation, requested.query, contextExpression, serious)) continue
       if ([...excluded].some(key => available.has(key))) continue
       if (requestedConcepts.length && !requestedConcepts.some(key => available.has(key))) continue
       let score = identityOnly ? 1 : 0, strongest = 0, wordMatches = 0, conceptMatch = false, expressionEvidence = false

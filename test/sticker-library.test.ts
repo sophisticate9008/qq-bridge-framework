@@ -173,6 +173,35 @@ test('optional selection receives only actual matched candidates and cannot regi
   assert.deepEqual(f.writes, ['register'])
 })
 
+test('a unique explicit top action bypasses weaker emotion matches but ambiguous actions still use AI', async t => {
+  for (const ambiguous of [false, true]) {
+    const f = await fixture(t)
+    f.seed()
+    const listed = await f.port.list({ limit: 10, signal: signal() })
+    assert.equal(listed.status, 'confirmed')
+    if (listed.status !== 'confirmed') throw new Error('missing fixture collection')
+    const first = listed.data.items[0]!, other = { ...first, id: 'other', stickerId: 'other', md5: 'b'.repeat(32), url: 'https://media.example/other' }
+    const explicit = { ...annotation, facets: { emotions: ['开心'], actions: ['招手'], intents: ['问候'], scenes: [], visibleText: '' } }
+    const cache = createStickerSemanticCache(f.store, '999')
+    cache.remember(first, explicit)
+    cache.remember(other, ambiguous ? explicit : { description: '开心的动物', tags: ['开心'], avoid: '' })
+    f.setRoster([first, other])
+    const item = (await f.library.snapshot(signal())).items.find(item => item.description === annotation.description)!
+    const hints = await f.library.hints('group:123', signal())
+    assert(isRecord(hints) && isRecord(hints.vocabulary))
+    assert.deepEqual(hints.vocabulary.actions, ['招手'])
+    assert.equal(JSON.stringify(hints).includes(first.url), false)
+    assert.equal(JSON.stringify(hints).includes(item.id), false)
+    let selections = 0
+    const selector = async () => { selections++; return null }
+    assert.equal(await f.library.choose('开心', 'group:123', signal(), Infinity, undefined, selector), null)
+    assert.equal(selections, 1, 'generic emotion retains the configured AI check')
+    assert.equal(await f.library.choose('开心地招手', 'group:123', signal(), Infinity, undefined, selector), ambiguous ? null : `media-${item.id}`)
+    assert.equal(selections, ambiguous ? 2 : 1)
+    assert.equal(await f.library.choose('开心地招手', 'group:123', signal(), Infinity, undefined, selector), null, 'recent or rejected images do not leak into a send')
+  }
+})
+
 test('manual collection bypasses both probability gates, filters in a persistent helper and deduplicates across incoming aliases', async t => {
   const f = await fixture(t, { probabilities: 0 })
   assert.deepEqual(await f.library.collect('incoming', 'group:123', false, signal()), { status: 'skipped', reason: 'probability', quiet: true })
