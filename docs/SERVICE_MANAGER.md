@@ -26,7 +26,7 @@
 
 重载命令先查询当前 64 位内容指纹，再提交带期望指纹的请求。版本冲突、已有重载或旧实例仍在排空时明确失败。命令不自动重试写操作；连接中断或超时后运行 `qqbridge-framework extensions` 查询真实状态，再决定下一步。返回 `changed: false` 表示内容版本相同，`draining: true` 表示旧实例的任务或清理仍未结束。清理失败保留错误码，阻止继续堆积实例。
 
-每个固定模块入口在同一宿主进程中最多保留 64 个源码代次，运行实例最多保留一代旧实例排空；模块上限达到后可按需重启 `framework-admin`。普通实现更新保持同一工具协议，工具 schema、名称、依赖或注册结构变化需要完整应用。生图配置的 `generationAccess: owner | whitelist` 在执行权限检查时热读，配置即时更新不消耗源码代次。重载机制的开发约定见 [扩展开发](EXTENDING.md)。
+每个固定模块入口在同一宿主进程中最多保留 64 个源码代次，运行实例最多保留一代旧实例排空；模块上限达到后可按需重启 `framework-admin`。普通实现更新保持同一工具协议，工具 schema、名称、依赖或注册结构变化需要完整应用。扩展即时配置的生效方式由扩展自身约定。重载机制的开发约定见 [扩展开发](EXTENDING.md)。
 
 ## 私有服务清单
 
@@ -65,22 +65,19 @@
 - `prepare` 可配置 `{ command, args, cwd? }`，仅创建新服务进程前执行，用于启动必要依赖。
 - `logFile` 可沿用已运行组件的原日志；未指定时使用 `logDirectory/<组件>.log`。
 - 顶层 `accountCheck` 可配置只读 QQ 在线检查命令。`doctor` 报告其结果；整套 `start` 遇到待登录只提示，不把已启动的服务判成启动失败。
+- `status` 与 `doctor` 展示当前清单选择的受管服务。自定义服务通过 `optional` 登记，专用健康检查由扩展提供，并通过 `ready.kind: "command"` 接入。
 
-本机的 `scripts/service-health.ts dsh|qq|image-worker` 提供鉴权健康检查，读取私有 `runtime/live/service-health.json`：
+`scripts/service-health.ts dsh|qq` 提供 DSH 与 QQ 的鉴权健康检查，读取私有 `runtime/live/service-health.json`：
 
 ```json
 {
   "schema": 1,
   "nativeDirectory": "/srv/qq-bridge-framework/runtime/admin/runtime",
-  "accountId": "需要核验的机器人账号",
-  "imageWorker": {
-    "url": "http://127.0.0.1:17865/health",
-    "tokenFile": "/srv/image-worker/token"
-  }
+  "accountId": "需要核验的机器人账号"
 }
 ```
 
-DSH 和 QQ 鉴权从框架已保存的适配器配置读取；生图令牌从指定私有文件读取，不输出令牌或响应正文。`imageWorker` 仅生图检查使用，`accountId` 仅 QQ 检查使用。
+DSH 和 QQ 鉴权从框架已保存的适配器配置读取，不输出令牌或响应正文；`accountId` 仅 QQ 检查使用。扩展专属检查的实现、配置和维护说明由扩展自行保存。
 
 ## 安装与 boot
 
@@ -114,9 +111,9 @@ node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --a
 | DSH 程序、配置、会话与附件 | `/srv/qq-services/dsh/runtime/`、`/srv/qq-services/dsh/home/` |
 | 协议端及其登录数据 | 独立安装目录；各协议端分别登记，可保留备用安装 |
 
-本机复用的组件源码及其依赖也应有独立、明确的部署位置；服务启动不能依赖参考仓库仍然存在。图片 worker 等辅助进程的配置、输出目录和 DSH 附件目录需要随部署一起更新。原有安装已独立存在时，可以直接登记真实路径，无须为了统一目录再次搬迁。
+本机复用的组件源码及其依赖也应有独立、明确的部署位置；服务启动不能依赖参考仓库仍然存在。扩展辅助进程的配置、输出目录和 DSH 附件目录需要随部署一起更新。原有安装已独立存在时，可以直接登记真实路径，无须为了统一目录再次搬迁。
 
-迁移安装位置前，保存服务清单、私有配置与数据快照，记录原先运行的服务和聊天状态。暂停聊天并确认助手、生图等任务已结束，再停止受管服务，保留文件权限和所有者。需要同步核对：
+迁移安装位置前，保存服务清单、私有配置与数据快照，记录原先运行的服务和聊天状态。暂停聊天并确认助手及扩展任务已结束，再停止受管服务，保留文件权限和所有者。需要同步核对：
 
 - 服务命令、工作目录、`DSH_HOME`、`DSH_INSTALL_MODULES`、`PATH` 和日志位置。
 - 框架保存的 DSH 凭据与部署目标、DSH profile、插件依赖链接及技能入口。

@@ -18,8 +18,7 @@ test('framework sources have no previous-project runtime or private business int
       else if (entry.isFile() && /\.(?:tsx?|js)$/.test(entry.name)) {
         const source = readFileSync(filename, 'utf8');
         const location = relative(sourceRoot, filename);
-        const healthProbe = ['scripts/service-health.ts', 'dist/scripts/service-health.js'].includes(location);
-        if (forbidden.some(pattern => pattern.test(source)) || !healthProbe && /imageWorker/i.test(source)) findings.push(location);
+        if (forbidden.some(pattern => pattern.test(source)) || /imageWorker/i.test(source)) findings.push(location);
       }
     }
   }
