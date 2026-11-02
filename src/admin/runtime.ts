@@ -2,6 +2,7 @@ import { withDeadline } from '../host/deadlines.ts'
 import { readAdminActivity } from './simulation-activity.ts'
 import { createNativeToolInventoryRoutes, type NativeToolInventoryReader } from './native-tool-inventory.ts'
 import { createNativeExtensionReloadRoutes } from './native-extension-reload.ts'
+import { createNativeDshHealthRoutes } from './native-dsh-health.ts'
 import { createPluginSessionRoutes } from './plugin-sessions.ts'
 import { createStickerLibraryRoutes } from './sticker-library.ts'
 import { createPluginScheduleRoutes } from './plugin-schedules.ts'
@@ -994,6 +995,7 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
       }
     }
   ]
+  routes.push(...createNativeDshHealthRoutes(directory))
   routes.push(...createPackageConfigurationRoutes({ directory, registry: options.packageConfigurationRegistry }))
   if (options.assistantTarget) routes.push(...createNativeAssistantDeploymentRoutes({ target: options.assistantTarget,
     runExclusive: run => nativeControl(directory, run) }))

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { parse as parseYaml } from 'yaml';
 
 import {
@@ -27,6 +28,16 @@ import { projectNativeDiagnostics } from '../src/host/native-diagnostics.ts';
 
 const ADMIN_SECRET = 'cli-administrator-secret-0123456789';
 const GATEWAY_SECRET = 'cli-gateway-secret-0123456789';
+
+test('the globally linked CLI executes its main entry and reports the unified name', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'qbf-cli-link-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const entry = new URL('../scripts/cli' + (import.meta.url.endsWith('.js') ? '.js' : '.ts'), import.meta.url);
+  const link = join(directory, 'qbf-cli');
+  symlinkSync(entry, link);
+  const output = execFileSync(process.execPath, [link, '--version'], { encoding: 'utf8', timeout: 15_000 });
+  assert.match(output, /^qbf-cli \d+\.\d+\.\d+\n$/);
+});
 
 test('test CLI selects explicit suites and built output without mixing browser options', () => {
   assert.equal(parseCliArguments(['test']).suite, undefined);
@@ -602,12 +613,22 @@ test('status performs read-only health requests and does not print administrator
   const values = fixture();
   const requests: Array<{ readonly method: string | undefined; readonly url: string | undefined; readonly authorization: string | undefined }> = [];
   let expectedRevision = '';
+  let runtimeFailed = false;
+  let runtimeBlocked = false;
   const server = createServer((request, response) => {
     requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization });
     request.resume();
     response.setHeader('content-type', 'application/json');
     if (request.url === '/health') response.end(JSON.stringify({ ok: true, mode: 'framework' }));
     else if (request.url === '/api/gateway/health') response.end(JSON.stringify({ ok: true, mode: 'gateway-live', revision: expectedRevision }));
+    else if (request.url === '/api/chat/dsh/health') response.end(JSON.stringify({ schema: 1, state: 'ready', reason: null,
+      checkedAt: 1, scope: 'authenticated-api', modelExecutionVerified: false }));
+    else if (request.url === '/api/chat/runtime') {
+      if (runtimeFailed) { response.statusCode = 503; response.end(JSON.stringify({ secret: ADMIN_SECRET })); }
+      else response.end(JSON.stringify({ state: 'stopped', chatReady: false, protocolConnected: true,
+        missingReasons: runtimeBlocked ? ['native_runtime_lease_blocked'] : [] }));
+    }
+    else if (request.url === '/api/chat/application') response.end(JSON.stringify({ schema: 1, operation: null }));
     else { response.statusCode = 404; response.end(JSON.stringify({ secret: ADMIN_SECRET })); }
   });
   context.after(async () => {
@@ -635,22 +656,39 @@ test('status performs read-only health requests and does not print administrator
 
   const output = capturedIo(values.directory, { QQ_BRIDGE_FRAMEWORK_CONFIG: join(values.directory, 'missing.json') });
   assert.equal(await runCli(['status', '--config', adminConfiguration], output.io), 0);
-  assert.deepEqual(requests.map(request => [request.method, request.url]), [
+  assert.deepEqual(requests.map(request => [request.method, request.url]).sort(), [
     ['GET', '/health'],
-    ['GET', '/api/gateway/health']
-  ]);
-  assert.equal(requests[0]?.authorization, undefined);
-  assert.equal(requests[1]?.authorization, `Bearer ${ADMIN_SECRET}`);
+    ['GET', '/api/gateway/health'], ['GET', '/api/chat/dsh/health'], ['GET', '/api/chat/runtime'], ['GET', '/api/chat/application']
+  ].sort());
+  assert.equal(requests.find(request => request.url === '/health')?.authorization, undefined);
+  assert(requests.filter(request => request.url !== '/health').every(request => request.authorization === `Bearer ${ADMIN_SECRET}`));
+  assert(output.stdout.some(line => line.includes('DSH 鉴权接口：正常')));
+  assert(output.stdout.some(line => line.includes('聊天处理：已停止')));
   assert.doesNotMatch([...output.stdout, ...output.stderr].join('\n'), new RegExp(`${ADMIN_SECRET}|${GATEWAY_SECRET}`));
+  runtimeFailed = true;
+  const partial = capturedIo(values.directory);
+  assert.equal(await runCli(['status', '--config', adminConfiguration, '--json'], partial.io), 1);
+  const report = JSON.parse(partial.stdout.join('\n')) as { checks: { id: string; state: string }[] };
+  assert.equal(report.checks.find(check => check.id === 'dsh')?.state, 'ready');
+  assert.equal(report.checks.find(check => check.id === 'chat')?.state, 'unknown');
+  assert.doesNotMatch([...partial.stdout, ...partial.stderr].join('\n'), new RegExp(`${ADMIN_SECRET}|${GATEWAY_SECRET}`));
+  runtimeFailed = false; runtimeBlocked = true;
+  const blocked = capturedIo(values.directory);
+  assert.equal(await runCli(['status', '--config', adminConfiguration, '--json'], blocked.io), 1);
+  const blockedReport = JSON.parse(blocked.stdout.join('\n')) as { checks: { id: string; state: string }[] };
+  assert.equal(blockedReport.checks.find(check => check.id === 'chat')?.state, 'blocked');
+  assert.equal(blockedReport.checks.find(check => check.id === 'dsh')?.state, 'ready');
 });
 
-test('doctor requires one canonical conversation and accepts only read configuration options', () => {
+test('doctor supports layered health or one canonical conversation and accepts only read configuration options', () => {
+  assert.equal(parseCliArguments(['doctor']).conversation, undefined);
+  assert.equal(parseCliArguments(['status', '--json', '--account', 'a'.repeat(64)]).json, true);
   assert.equal(parseCliArguments(['doctor', '--conversation', 'group:123']).conversation, 'group:123');
   assert.equal(parseCliArguments(['doctor', '--conversation', 'private:123', '--config', '/tmp/admin.json']).command, 'doctor');
   assert.equal(parseCliArguments(['doctor', '--conversation', 'private:123', '--account', 'a'.repeat(64)]).account, 'a'.repeat(64));
-  for (const args of [['doctor'], ['doctor', '--conversation', 'group:0'], ['doctor', '--conversation', 'group:123', '--admin-only'],
+  for (const args of [['doctor', '--conversation', 'group:0'], ['doctor', '--conversation', 'group:123', '--admin-only'],
     ['status', '--conversation', 'group:123'], ['doctor', '--conversation', 'private:123', '--account', '123'],
-    ['status', '--account', 'a'.repeat(64)]]) assert.throws(() => parseCliArguments(args));
+    ['status', '--account', 'invalid']]) assert.throws(() => parseCliArguments(args));
 });
 
 test('doctor sends authenticated read-only requests for the exact conversation and optional account and rejects invalid evidence', async context => {
@@ -672,9 +710,9 @@ test('doctor sends authenticated read-only requests for the exact conversation a
     tokenFile: './admin.token', gatewayConfiguration: './gateway.json' }));
   const output = capturedIo(values.directory);
   const args = ['doctor', '--conversation', 'group:123', '--config', filename];
-  assert.equal(await runCli(args, output.io), 0);
+  assert.equal(await runCli(args, output.io), diagnosis.state === 'ready' ? 0 : 1);
   assert.deepEqual(JSON.parse(output.stdout[0]), diagnosis);
-  assert.equal(await runCli([...args, '--account', 'a'.repeat(64)], output.io), 0);
+  assert.equal(await runCli([...args, '--account', 'a'.repeat(64)], output.io), diagnosis.state === 'ready' ? 0 : 1);
   assert.equal(requests[0].url.pathname, '/api/chat/diagnostics');
   assert.equal(requests[1].url.pathname, '/api/accounts/dispatch');
   assert.equal(requests[1].url.searchParams.get('account'), 'a'.repeat(64));

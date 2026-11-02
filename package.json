@@ -9,8 +9,7 @@
     "node": ">=24.12.0"
   },
   "bin": {
-    "qq-bridge-framework": "scripts/cli.ts",
-    "qqbridge-framework": "ops/qqbridge-framework"
+    "qbf-cli": "scripts/cli.ts"
   },
   "scripts": {
     "start": "node scripts/cli.ts start",
@@ -44,7 +43,7 @@
     "bench:soak": "node --expose-gc scripts/bench-soak.ts",
     "build:sdk": "node scripts/build-sdk.ts",
     "test:sdk": "node scripts/verify-sdk-package.ts",
-    "ops": "node scripts/service-manager.ts",
+    "ops": "node scripts/cli.ts service",
     "release:pack": "node scripts/pack-release.ts",
     "test:release": "node scripts/verify-framework-release.ts"
   },

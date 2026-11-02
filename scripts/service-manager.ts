@@ -36,9 +36,11 @@ interface Configuration {
   accountCheck?: Command;
 }
 interface CommandResult { code: number; output: string }
+interface ServiceHealth { state: 'ready' | 'unavailable' | 'unknown' | 'unverified'; check: 'command' | 'http' | 'none'; reason: string | null }
 interface ProcessIdentity { pid: number; parent: number; started: string }
 
-const root = fileURLToPath(new URL('../', import.meta.url));
+const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
+const root = path.basename(sourceRoot) === 'dist' ? path.dirname(sourceRoot) : sourceRoot;
 const entry = fileURLToPath(import.meta.url);
 const configFile = path.join(root, 'runtime/live/services.json');
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
@@ -175,6 +177,46 @@ async function ready(service: Service, timeout = 8000): Promise<boolean> {
     return response.ok;
   } catch { return false; }
 }
+
+async function health(service: Service): Promise<ServiceHealth> {
+  if (!service.ready) return { state: 'unverified', check: 'none', reason: 'health_check_not_configured' };
+  if (service.ready.kind === 'command') {
+    const result = await execute(service.ready.command, service.ready.args, { cwd: service.ready.cwd ?? service.cwd,
+      env: { ...process.env, ...service.env }, timeout: 8000 });
+    let reason: string | null = result.code === 0 ? null : result.code === 124 ? 'probe_timeout' : result.code === 127 ? 'probe_unavailable' : 'probe_failed';
+    let state: ServiceHealth['state'] = result.code === 0 ? 'ready' : result.code === 127 ? 'unknown' : 'unavailable';
+    try {
+      const parsed: unknown = JSON.parse(result.output);
+      if (record(parsed) && parsed.schema === 1 && ['ready', 'unavailable', 'unknown', 'disabled', 'unconfigured'].includes(String(parsed.state))
+        && (parsed.state === 'ready') === (result.code === 0)
+        && (parsed.reason === null && parsed.state === 'ready' || typeof parsed.reason === 'string' && /^[a-z][a-z_]{0,63}$/.test(parsed.reason))) {
+        state = parsed.state === 'ready' ? 'ready' : parsed.state === 'unavailable' ? 'unavailable' : 'unknown';
+        reason = parsed.reason as string | null;
+      }
+    } catch { /* Arbitrary command output is never printed. */ }
+    return { state, check: 'command', reason };
+  }
+  const signal = AbortSignal.timeout(2000);
+  try {
+    const response = await fetch(service.ready.url, { redirect: 'error', signal });
+    await response.body?.cancel();
+    return { state: response.ok ? 'ready' : 'unavailable', check: 'http', reason: response.ok ? null : `http_${response.status}` };
+  } catch { return { state: 'unavailable', check: 'http', reason: signal.aborted ? 'probe_timeout' : 'connection_failed' }; }
+}
+
+async function inspectService(id: string, service: Service, probe: boolean) {
+  const [screen, port, checked] = await Promise.all([execute('/usr/bin/screen', ['-ls']),
+    service.port ? listening(service) : Promise.resolve(null), probe ? health(service) : Promise.resolve(null)]);
+  const names = new Set([service.screen, ...(service.screenAliases ?? [])]);
+  const managed = screen.output.split('\n').some(line => {
+    const match = /^\s*\d+\.([^\s]+)\s+\(/.exec(line);
+    return match && names.has(match[1]!) && !line.includes('(Dead');
+  });
+  const processState = managed ? 'running' : screen.code === 0 || screen.code === 1 && /No Sockets found/i.test(screen.output) ? 'stopped' : 'unknown';
+  const healthStatus = checked?.state === 'ready' && port === false
+    ? { ...checked, state: 'unavailable' as const, reason: 'configured_port_not_listening' } : checked;
+  return { id, process: processState, port, health: healthStatus };
+}
 function ordered(config: Configuration): string[] {
   return [...(config.order ?? []), ...Object.keys(config.services).filter(id => !config.order?.includes(id))];
 }
@@ -186,7 +228,7 @@ function selected(config: Configuration, stop = false): string[] {
   });
 }
 function component(config: Configuration, id: string): Service {
-  if (!identifier.test(id) || !Object.hasOwn(config.services, id)) fail('未知组件，请用 qqbridge-framework status 查看配置。');
+  if (!identifier.test(id) || !Object.hasOwn(config.services, id)) fail('未知组件，请用 qbf-cli status 查看配置。');
   return config.services[id]!;
 }
 function remaining(deadline: number, maximum: number): number {
@@ -196,10 +238,10 @@ function remaining(deadline: number, maximum: number): number {
 }
 async function ensureProtocol(config: Configuration, service: Service): Promise<void> {
   if (service.group !== 'napcat' && service.group !== 'snowluma') return;
-  if (service.group !== config.activeProtocol) fail('请使用 qqbridge-framework protocol 切换协议端。');
+  if (service.group !== config.activeProtocol) fail('请使用 qbf-cli protocol 切换协议端。');
   for (const other of Object.values(config.services)) {
     if ((other.group === 'napcat' || other.group === 'snowluma') && other.group !== service.group
-      && ((await sessions(other)).length > 0 || await listening(other))) fail('另一协议端仍在运行，请使用 qqbridge-framework protocol 切换。');
+      && ((await sessions(other)).length > 0 || await listening(other))) fail('另一协议端仍在运行，请使用 qbf-cli protocol 切换。');
   }
 }
 async function startOne(config: Configuration, id: string, deadline: number): Promise<void> {
@@ -207,7 +249,7 @@ async function startOne(config: Configuration, id: string, deadline: number): Pr
   await ensureProtocol(config, service);
   const running = (await sessions(service)).length > 0;
   if (!running && await ready(service, remaining(deadline, 8000))) {
-    console.log(`${id} 已就绪（外部进程）。`);
+    console.log(service.ready ? `${id} 已就绪（外部进程）。` : `${id} 已监听（外部进程，健康未核验）。`);
     return;
   }
   if (!running) {
@@ -230,7 +272,7 @@ async function startOne(config: Configuration, id: string, deadline: number): Pr
   }
   while (Date.now() < deadline) {
     if ((await sessions(service)).length === 0) fail(`${id} 进程已退出，请查看日志。`);
-    if (await ready(service, remaining(deadline, 8000))) { console.log(`${id} 已就绪。`); return; }
+    if (await ready(service, remaining(deadline, 8000))) { console.log(service.ready ? `${id} 已就绪。` : `${id} 已启动（健康未核验）。`); return; }
     await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
   }
   fail(`${id} 等待就绪超时，请查看日志。`);
@@ -268,12 +310,17 @@ async function stopOne(config: Configuration, id: string, deadline: number): Pro
     return;
   }
   const processes = await descendants(running.map(session => Number(session.split('.')[0])));
-  await Promise.all(processes.map(item => signal(item, 'SIGTERM')));
-  for (const session of running) await execute('/usr/bin/screen', ['-S', session, '-X', 'quit'], { timeout: remaining(deadline, 2000) });
-  const forceAfter = Math.min(Date.now() + 10000, deadline - 2000);
+  const roots = new Set(running.map(session => Number(session.split('.')[0])));
+  // Supervisors forward once along the parent chain. Signalling every descendant
+  // can deliver SIGTERM twice and kill a process during its graceful cleanup.
+  await Promise.all(processes.filter(item => roots.has(item.parent)).map(item => signal(item, 'SIGTERM')));
+  const forceAfter = Math.min(Date.now() + 20000, deadline - 2000);
   let forced = false;
   while (Date.now() < deadline) {
     const survivors = (await Promise.all(processes.map(async item => await alive(item) ? item : undefined))).filter((item): item is ProcessIdentity => item !== undefined);
+    if (survivors.length === 0) for (const session of await sessions(service)) {
+      await execute('/usr/bin/screen', ['-S', session, '-X', 'quit'], { timeout: remaining(deadline, 2000) });
+    }
     if (survivors.length === 0 && (await sessions(service)).length === 0 && !await listening(service)) { console.log(`${id} 已停止。`); return; }
     if (!forced && Date.now() >= forceAfter) { await Promise.all(survivors.map(item => signal(item, 'SIGKILL'))); forced = true; }
     await sleep(Math.min(250, Math.max(0, deadline - Date.now())));
@@ -350,10 +397,11 @@ async function supervise(config: Configuration, id: string): Promise<void> {
     process.exitCode = exitCode;
   };
   const stoppingNow = (signalValue: NodeJS.Signals): void => {
-    forward(signalValue);
     if (stopping) return;
     stopping = true;
-    timer = setTimeout(cleanup, 10000);
+    // Let wrappers forward to their own child; reserve group signals for force cleanup.
+    child.kill(signalValue);
+    timer = setTimeout(cleanup, 20000);
   };
   for (const signalValue of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signalValue, () => stoppingNow(signalValue));
   child.on('error', () => { console.error(`${id} 子进程启动失败。`); exitCode = 1; cleanup(); });
@@ -366,14 +414,14 @@ async function supervise(config: Configuration, id: string): Promise<void> {
 }
 
 function help(): void {
-  console.log(`qqbridge-framework [start|stop|restart|status|doctor|logs|console|protocol|extensions|describe|help] [组件]
+  console.log(`qbf-cli service [start|stop|restart|status|doctor|logs|console|protocol|help] [组件]
 
-不带参数：启动框架、当前协议端与已启用的辅助服务。
+service start：启动框架、当前协议端与已启用的辅助服务。
 start [组件]       启动并等待就绪，接管已有 screen 会话
 stop [组件]        停止配置中的组件；省略组件时包含两套协议端
 restart [组件]     停止后启动；可只重启 framework-admin 或 dsh
-status [组件]      查看配置中的 screen 会话与监听状态
-doctor [组件]      只读检查服务就绪状态
+status [组件] [--json]  分别查看受管进程与端口；不据此宣称健康
+doctor [组件] [--json]  独立检查各服务；未配置健康检查时显示未核验
 logs [组件] [-f]   查看最近 100 行日志；默认 framework-admin
 console [组件]     显示配置中的控制台地址
 protocol [napcat|snowluma]  查看或切换协议端并保存选择
@@ -397,7 +445,10 @@ async function lockAndRun(config: Configuration, argumentsList: string[]): Promi
 async function main(): Promise<void> {
   const argumentsList = process.argv.slice(2);
   const action = argumentsList[0] ?? 'start';
-  const rest = argumentsList.slice(1);
+  const rawRest = argumentsList.slice(1);
+  const json = ['status', 'doctor'].includes(action) && rawRest.includes('--json');
+  if (json && rawRest.filter(value => value === '--json').length !== 1) fail('JSON 参数不能重复。');
+  const rest = json ? rawRest.filter(value => value !== '--json') : rawRest;
   if (['help', '--help', '-h'].includes(action)) { help(); return; }
   if (action === 'extensions') {
     const { ExtensionManagementError, manageExtensions } = await import('./extension-management.ts');
@@ -405,11 +456,11 @@ async function main(): Promise<void> {
     catch (error) { if (error instanceof ExtensionManagementError) fail(error.message); throw error; }
     return;
   }
-  if (!['start', 'stop', 'restart', 'status', 'doctor', 'logs', 'console', 'protocol', 'describe', 'run', 'maintenance'].includes(action)) fail('未知命令，请运行 qqbridge-framework help。');
+  if (!['start', 'stop', 'restart', 'status', 'doctor', 'logs', 'console', 'protocol', 'describe', 'run', 'maintenance'].includes(action)) fail('未知命令，请运行 qbf-cli help。');
   if (action === 'maintenance' ? rest.some(arg => arg !== '--apply') || rest.length > 1
     : action === 'describe' ? rest.length !== 1 || rest[0] !== '--json'
     : action === 'logs' ? rest.filter(value => value !== '-f').length > 1 || rest.filter(value => value === '-f').length > 1
-    : rest.length > 1) fail('命令参数无效，请运行 qqbridge-framework help。');
+    : rest.length > 1) fail('命令参数无效，请运行 qbf-cli help。');
   const config = await load();
   if (action === 'describe') {
     if (!Object.hasOwn(config.services, 'dsh')) fail('当前部署未配置受管 DSH 服务。');
@@ -462,22 +513,31 @@ async function main(): Promise<void> {
     return;
   }
   const ids = id ? [id] : selected(config);
-  for (const target of ids) {
-    const service = config.services[target]!;
-    if (action === 'console') { if (service.consoleUrl) console.log(`${target}: ${service.consoleUrl}`); }
-    else if (action === 'doctor') {
-      const healthy = await ready(service);
-      console.log(`${target}: ${healthy ? '就绪' : '未就绪'}`);
-      if (!healthy) process.exitCode = 1;
-    } else {
-      const active = (await sessions(service)).length > 0;
-      console.log(`${target}: ${active ? '运行中' : await listening(service) ? '外部监听中' : '已停止'}`);
-    }
-  }
+  if (action === 'console') { for (const target of ids) { const url = config.services[target]!.consoleUrl; if (url) console.log(`${target}: ${url}`); } return; }
+  const items = await Promise.all(ids.map(target => inspectService(target, config.services[target]!, action === 'doctor')));
+  let account: { state: 'online' | 'offline' | 'unknown'; reason: string | null } | null = null;
   if (action === 'doctor' && !id && config.accountCheck) {
     const result = await execute(config.accountCheck.command, config.accountCheck.args, { cwd: config.accountCheck.cwd ?? root, timeout: 8000 });
-    console.log(result.code === 0 ? 'QQ 账号：在线' : 'QQ 账号：未在线');
+    account = { state: result.code === 0 ? 'online' : 'unknown', reason: result.code === 0 ? null : 'account_check_failed' };
+    try {
+      const value: unknown = JSON.parse(result.output);
+      if (result.code !== 0 && record(value) && value.schema === 1 && value.state === 'unavailable' && value.reason === 'account_offline') {
+        account = { state: 'offline', reason: 'account_offline' };
+      }
+    } catch { /* No account response body is printed. */ }
     if (result.code !== 0) process.exitCode = 1;
+  }
+  if (items.some(item => action === 'doctor' ? item.health?.state !== 'ready'
+    : item.process === 'unknown' || item.port === false || item.process === 'stopped' && item.port !== true)) process.exitCode = 1;
+  if (json) console.log(JSON.stringify({ schema: 1, checkedAt: Date.now(), items, account }, null, 2));
+  else {
+    const states = { ready: '就绪', unavailable: '健康检查异常', unknown: '健康状态未确认', unverified: '健康未核验' };
+    for (const item of items) {
+      const processLabel = item.process === 'running' ? '进程运行中' : item.process === 'unknown' ? '进程状态未确认' : '无受管进程';
+      const portLabel = item.port === null ? '未配置端口检查' : item.port ? '端口已监听' : '端口未监听';
+      console.log(`${item.id}: ${item.health ? `${states[item.health.state]}；` : ''}${processLabel}；${portLabel}${item.health?.reason ? `（${item.health.reason}）` : ''}`);
+    }
+    if (account) console.log(account.state === 'online' ? 'QQ 账号：在线' : account.state === 'offline' ? 'QQ 账号：离线' : 'QQ 账号：在线状态未确认（account_check_failed）');
   }
 }
 

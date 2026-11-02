@@ -4,7 +4,7 @@ import { privatePermissions, securePermissions } from '../src/storage/file-secur
 import { parseNativeConversationDiagnostics } from '../src/contracts/native-diagnostics.ts';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, rmSync, unlinkSync, writeFileSync, type Stats } from 'node:fs';
+import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, rmSync, unlinkSync, writeFileSync, type Stats } from 'node:fs';
 import { connect, isIP } from 'node:net';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -22,6 +22,7 @@ import {
   type OneBotGatewayConfiguration
 } from '../src/host/onebot-gateway.ts';
 import { loadSelectedNativeBootstrap } from './bootstrap-loader.ts';
+import { printAdminHealth, readAdminHealth } from './admin-health.ts';
 import { runTestFiles } from './test-runner.ts';
 import { discoverTestFiles, parseTestShard, shardTestFiles, testConcurrency, testExecutionBatches, testNeedsBuild, TEST_SUITES, type TestShard, type TestSuite } from './test-discovery.ts';
 
@@ -42,7 +43,7 @@ const BROWSER_TARGETS = Object.freeze({
   'execution-journal': 'scripts/execution-journal-smoke.ts'
 });
 
-type CliCommand = 'init' | 'start' | 'status' | 'doctor' | 'test' | 'build' | 'install' | 'uninstall';
+type CliCommand = 'init' | 'start' | 'status' | 'doctor' | 'version' | 'test' | 'build' | 'install' | 'uninstall';
 type BrowserTarget = keyof typeof BROWSER_TARGETS;
 
 export interface ParsedCliArguments {
@@ -52,6 +53,7 @@ export interface ParsedCliArguments {
   readonly gatewayConfig?: string;
   readonly conversation?: string;
   readonly account?: string;
+  readonly json?: boolean;
   readonly serviceManager?: string;
   readonly bootstrap?: string;
   readonly host?: string;
@@ -74,6 +76,13 @@ export interface CliIo {
   readonly stderr: (message: string) => void;
 }
 
+/** Explicit service namespace plus unambiguous maintenance shortcuts. */
+export function serviceArguments(argumentsList: readonly string[]): string[] | null {
+  if (argumentsList[0] === 'service') return argumentsList.length === 1 ? ['help'] : argumentsList.slice(1);
+  return ['stop', 'restart', 'logs', 'console', 'protocol', 'extensions', 'maintenance', 'describe'].includes(argumentsList[0] ?? '')
+    ? [...argumentsList] : null;
+}
+
 class CliUsageError extends Error {}
 class CliOperationError extends Error {}
 
@@ -87,18 +96,29 @@ const DEFAULT_IO: CliIo = {
 const GENERAL_HELP = `QQ Bridge Framework 命令行
 
 用法：
-  npm run cli -- init [--config <管理配置>] [--service-manager <可信程序>] [--host <地址>] [--port <端口>]
-  npm run cli -- init --gateway-config <网关配置> [--config <管理配置>] [--service-manager <可信程序>] [--host <地址>] [--port <端口>]
-  npm run cli -- start [--config <管理配置>] [--admin-only] [--bootstrap <可信本机TS绝对路径>]
-  npm run cli -- status [--config <管理配置>]
-  npm run cli -- doctor --conversation <group:群号|private:QQ号> [--account <账号ID>] [--config <管理配置>]
-  npm run cli -- test [--suite all|fast|deadline|integration|artifacts] [--built] [--skip-build] [--shard <序号/总数>]
-  npm run cli -- test --browser [--target <项目>] [--with-deps]
-  npm run cli -- install --browser [--skip-browser-download] [--with-deps]
-  npm run cli -- uninstall --browser
-  npm run cli -- build
+  qbf-cli init [--config <管理配置>] [--service-manager <可信程序>] [--host <地址>] [--port <端口>]
+  qbf-cli init --gateway-config <网关配置> [--config <管理配置>] [--service-manager <可信程序>] [--host <地址>] [--port <端口>]
+  qbf-cli start [--config <管理配置>] [--admin-only] [--bootstrap <可信本机TS绝对路径>]
+  qbf-cli status [--config <管理配置>] [--account <账号ID>] [--json]
+  qbf-cli doctor [--conversation <group:群号|private:QQ号>] [--account <账号ID>] [--config <管理配置>] [--json]
+  qbf-cli service <start|stop|restart|status|doctor|logs|console|protocol> [组件] [--json]
+  qbf-cli restart [组件]
+  qbf-cli stop [组件]
+  qbf-cli logs [组件] [-f]
+  qbf-cli protocol [napcat|snowluma]
+  qbf-cli extensions [list|reload <插件标识>]
+  qbf-cli maintenance [--apply]
+  qbf-cli --version
+  qbf-cli test [--suite all|fast|deadline|integration|artifacts] [--built] [--skip-build] [--shard <序号/总数>]
+  qbf-cli test --browser [--target <项目>] [--with-deps]
+  qbf-cli install --browser [--skip-browser-download] [--with-deps]
+  qbf-cli uninstall --browser
+  qbf-cli build
 
-配置优先级：--config > QQ_BRIDGE_FRAMEWORK_CONFIG > runtime/admin/config.json
+配置优先级：--config > QQ_BRIDGE_FRAMEWORK_CONFIG > 已登记的本机配置 > 当前目录 runtime/admin/config.json
+qbf-cli 为统一入口；源码目录可用 npm run cli -- <命令>。start 为前台启动，service start 为本机后台服务启动。
+status 与不指定会话的 doctor 分别核对管理服务、网关、DSH、QQ、聊天及配置应用；某项读取失败仍显示其他项。
+doctor --conversation 读取所属会话的详细诊断；service status/doctor 可在管理服务不可用时独立检查各后台组件。
 init 默认创建独立的本机 OneBot HTTP 网关配置；--gateway-config 可复用已严格校验的高级网关配置。
 默认上游为 http://127.0.0.1:3000，网关监听 127.0.0.1:3131，管理端监听 127.0.0.1:3210。
 新配置不允许任何会话发送；请首次访问管理网页生成管理令牌，再显式配置外部 OneBot 和发送范围。
@@ -127,6 +147,10 @@ function optionValue(argumentsList: readonly string[], index: number, option: st
 export function parseCliArguments(argumentsList: readonly string[]): ParsedCliArguments {
   const first = argumentsList[0];
   if (first === undefined) usage('缺少命令。');
+  if (['--version', '-v', 'version'].includes(first)) {
+    if (argumentsList.length !== 1) usage('版本命令不接受其他参数。');
+    return { command: 'version', help: false, browser: false, withDeps: false, adminOnly: false };
+  }
   if (first === '--help' || first === '-h' || first === 'help') {
     if (argumentsList.length !== 1) usage('帮助命令不接受其他参数。');
     return { command: 'start', help: true, browser: false, withDeps: false, adminOnly: false };
@@ -141,7 +165,7 @@ export function parseCliArguments(argumentsList: readonly string[]): ParsedCliAr
       if (argumentsList.length !== 2) usage('帮助参数不能与其他参数同时使用。');
       return { command, help: true, browser: false, withDeps: false, adminOnly: false };
     }
-    if (['--browser', '--with-deps', '--admin-only', '--skip-browser-download', '--built', '--skip-build'].includes(argument)) {
+    if (['--browser', '--with-deps', '--admin-only', '--skip-browser-download', '--built', '--skip-build', '--json'].includes(argument)) {
       if (flags.has(argument)) usage(`参数 ${argument} 不能重复。`);
       flags.add(argument);
       continue;
@@ -158,8 +182,8 @@ export function parseCliArguments(argumentsList: readonly string[]): ParsedCliAr
   const allowed = command === 'init'
     ? new Set(['--config', '--gateway-config', '--service-manager', '--host', '--port'])
     : command === 'start' ? new Set(['--config', '--admin-only', '--bootstrap'])
-      : command === 'doctor' ? new Set(['--config', '--conversation', '--account'])
-      : command === 'status' ? new Set(['--config'])
+      : command === 'doctor' ? new Set(['--config', '--conversation', '--account', '--json'])
+      : command === 'status' ? new Set(['--config', '--account', '--json'])
       : command === 'test' ? new Set(['--browser', '--with-deps', '--target', '--suite', '--built', '--skip-build', '--shard'])
         : command === 'install' ? new Set(['--browser', '--with-deps', '--skip-browser-download'])
           : command === 'uninstall' ? new Set(['--browser']) : new Set<string>();
@@ -180,7 +204,7 @@ export function parseCliArguments(argumentsList: readonly string[]): ParsedCliAr
     usage(`--target 必须与 --browser 一起使用，可选：${Object.keys(BROWSER_TARGETS).join('、')}。`);
   }
   const conversation = values.get('--conversation');
-  if (command === 'doctor' && (!conversation || !/^(?:group|private):[1-9][0-9]{0,31}$/.test(conversation))) usage('doctor 需要 --conversation group:群号 或 private:QQ号。');
+  if (conversation !== undefined && !/^(?:group|private):[1-9][0-9]{0,31}$/.test(conversation)) usage('会话需要 group:群号 或 private:QQ号。');
   const account = values.get('--account');
   if (account !== undefined && !/^[0-9a-f]{64}$/.test(account)) usage('--account 需要账号管理中的完整账号ID。');
   const portText = values.get('--port');
@@ -195,6 +219,7 @@ export function parseCliArguments(argumentsList: readonly string[]): ParsedCliAr
   return {
     command,
     help: false,
+    ...(flags.has('--json') ? { json: true } : {}),
     ...(conversation === undefined ? {} : { conversation }),
     ...(account === undefined ? {} : { account }),
     ...(values.has('--config') ? { config: values.get('--config')! } : {}),
@@ -220,7 +245,9 @@ export function resolveConfigurationFilename(
   environment: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd()
 ): string {
-  const selected = explicit ?? environment.QQ_BRIDGE_FRAMEWORK_CONFIG ?? 'runtime/admin/config.json';
+  const live = resolve(PROJECT_ROOT, 'runtime/live/framework-admin.json');
+  const selected = explicit ?? environment.QQ_BRIDGE_FRAMEWORK_CONFIG
+    ?? (resolve(cwd) === resolve(PROJECT_ROOT) && existsSync(live) ? live : 'runtime/admin/config.json');
   if (selected.length === 0) usage('QQ_BRIDGE_FRAMEWORK_CONFIG 不能为空。');
   return resolve(cwd, selected);
 }
@@ -607,43 +634,14 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-async function status(configurationFilename: string, output: (message: string) => void): Promise<void> {
-  const configuration = loadGatewayAdminConfiguration(configurationFilename);
-  const address = gatewayAdminAddress(configuration);
-  let publicResponse: Response;
-  try {
-    publicResponse = await fetch(`${address}/health`, { redirect: 'error', signal: AbortSignal.timeout(5_000) });
-  } catch {
-    throw new CliOperationError('无法连接管理服务。');
-  }
-  const publicHealth = await readJson(publicResponse);
-  if (!publicResponse.ok || !isRecord(publicHealth) || publicHealth.ok !== true || publicHealth.mode !== 'framework') {
-    throw new CliOperationError('管理服务健康检查失败。');
-  }
-  if (!existsSync(configuration.tokenFile)) {
-    output(`管理服务可访问，等待首次网页初始化：${address}`);
-    return;
-  }
-  const token = readFileSync(configuration.tokenFile, 'utf8').trim();
-  let gatewayResponse: Response;
-  try {
-    gatewayResponse = await fetch(`${address}/api/gateway/health`, {
-      headers: { authorization: `Bearer ${token}` },
-      redirect: 'error',
-      signal: AbortSignal.timeout(5_000)
-    });
-  } catch {
-    throw new CliOperationError('无法读取网关健康状态。');
-  }
-  const gatewayHealth = await readJson(gatewayResponse);
-  if (!gatewayResponse.ok || !isRecord(gatewayHealth) || gatewayHealth.ok !== true
-    || gatewayHealth.mode !== 'gateway-live' || gatewayHealth.revision !== revision(configuration)) {
-    throw new CliOperationError('网关管理服务尚未就绪。');
-  }
-  output(`管理服务运行正常：${address}`);
+async function status(configurationFilename: string, output: (message: string) => void, account?: string, json = false): Promise<boolean> {
+  const report = await readAdminHealth(loadGatewayAdminConfiguration(configurationFilename), account);
+  if (json) output(JSON.stringify(report, null, 2));
+  else printAdminHealth(report, output);
+  return report.healthy;
 }
 
-async function doctor(configurationFilename: string, conversationId: string, output: (message: string) => void, account?: string): Promise<void> {
+async function doctor(configurationFilename: string, conversationId: string, output: (message: string) => void, account?: string): Promise<boolean> {
   const configuration = loadGatewayAdminConfiguration(configurationFilename);
   if (!existsSync(configuration.tokenFile)) throw new CliOperationError('请先完成管理端初始化，才能读取逐会话诊断。');
   const token = readFileSync(configuration.tokenFile, 'utf8').trim();
@@ -662,6 +660,7 @@ async function doctor(configurationFilename: string, conversationId: string, out
     throw new CliOperationError('逐会话诊断不可用，尚未确认会话正常。');
   }
   output(JSON.stringify(parsed, null, 2));
+  return parsed.state === 'ready';
 }
 
 async function start(configurationFilename: string, adminOnly: boolean, output: (message: string) => void,
@@ -756,6 +755,19 @@ async function prepareStartupAssets(): Promise<void> {
 }
 
 export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAULT_IO): Promise<number> {
+  const managed = serviceArguments(argumentsList);
+  if (managed) return new Promise<number>(resolvePromise => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./service-manager' + (import.meta.url.endsWith('.js') ? '.js' : '.ts'), import.meta.url)), ...managed],
+      { cwd: io.cwd, env: io.env, stdio: ['inherit', 'pipe', 'pipe'] });
+    child.stdout.on('data', (data: Buffer) => io.stdout(data.toString('utf8').replace(/\n$/, '')));
+    child.stderr.on('data', (data: Buffer) => io.stderr(data.toString('utf8').replace(/\n$/, '')));
+    const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
+    const handlers = new Map<NodeJS.Signals, () => void>();
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) { const handler = () => forward(signal); handlers.set(signal, handler); process.on(signal, handler); }
+    const finish = (code: number) => { for (const [signal, handler] of handlers) process.off(signal, handler); resolvePromise(code); };
+    child.once('error', () => { io.stderr('无法启动服务管理入口。'); finish(1); });
+    child.once('exit', code => finish(code ?? 1));
+  });
   let parsed: ParsedCliArguments;
   try {
     parsed = parseCliArguments(argumentsList);
@@ -768,29 +780,38 @@ export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAU
     io.stdout(GENERAL_HELP);
     return 0;
   }
+  const configurationFilename = () => {
+    const live = join(PROJECT_ROOT, 'runtime/live/framework-admin.json');
+    const explicit = parsed.config ?? (io === DEFAULT_IO && !io.env.QQ_BRIDGE_FRAMEWORK_CONFIG && existsSync(live) ? live : undefined);
+    return resolveConfigurationFilename(explicit, io.env, io.cwd);
+  };
   try {
-    if (parsed.command === 'init') {
-      const configurationFilename = resolveConfigurationFilename(parsed.config, io.env, io.cwd);
-      if (pathExists(configurationFilename)) {
+    if (parsed.command === 'version') {
+      const manifest: unknown = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf8'));
+      if (!isRecord(manifest) || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version)) throw new CliOperationError('版本信息不可读。');
+      io.stdout(`qbf-cli ${manifest.version}`);
+    } else if (parsed.command === 'init') {
+      const filename = resolveConfigurationFilename(parsed.config, io.env, io.cwd);
+      if (pathExists(filename)) {
         throw new CliOperationError('管理配置已存在，拒绝覆盖已有部署。');
       }
       const serviceManager = parsed.serviceManager === undefined
         ? undefined
         : trustedServiceManager(parsed.serviceManager, io.cwd);
-      preflightAbsent(adminInitializationFiles(configurationFilename));
+      preflightAbsent(adminInitializationFiles(filename));
       if (parsed.gatewayConfig === undefined) {
-        const standalone = standaloneGatewayFiles(configurationFilename);
+        const standalone = standaloneGatewayFiles(filename);
         preflightAbsent([standalone.configuration, standalone.token, standalone.store]);
       }
       const createdFiles: string[] = [];
       try {
         const gatewayConfigurationFilename = parsed.gatewayConfig !== undefined
           ? resolve(io.cwd, parsed.gatewayConfig)
-          : writeStandaloneGateway(configurationFilename, createdFiles);
+          : writeStandaloneGateway(filename, createdFiles);
         const gatewayConfiguration = loadOneBotGatewayConfiguration(gatewayConfigurationFilename);
         assertDistinctGatewayEndpoint(gatewayConfiguration);
         writeAdminConfiguration({
-          filename: configurationFilename,
+          filename,
           gatewayConfiguration: gatewayConfigurationFilename,
           ...(serviceManager === undefined ? {} : { serviceManager }),
           ...(parsed.host === undefined ? {} : { host: parsed.host }),
@@ -803,15 +824,17 @@ export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAU
         }
         throw error;
       }
-      io.stdout(`管理配置已创建：${configurationFilename}`);
-      const address = gatewayAdminAddress(loadGatewayAdminConfiguration(configurationFilename));
+      io.stdout(`管理配置已创建：${filename}`);
+      const address = gatewayAdminAddress(loadGatewayAdminConfiguration(filename));
       io.stdout(`启动后访问 ${address}，首次网页访问将生成管理令牌。`);
     } else if (parsed.command === 'start') {
-      await start(resolveConfigurationFilename(parsed.config, io.env, io.cwd), parsed.adminOnly, io.stdout, parsed.bootstrap);
+      await start(configurationFilename(), parsed.adminOnly, io.stdout, parsed.bootstrap);
     } else if (parsed.command === 'doctor') {
-      await doctor(resolveConfigurationFilename(parsed.config, io.env, io.cwd), parsed.conversation!, io.stdout, parsed.account);
+      const filename = configurationFilename();
+      if (parsed.conversation) return await doctor(filename, parsed.conversation, io.stdout, parsed.account) ? 0 : 1;
+      else return await status(filename, io.stdout, parsed.account, parsed.json) ? 0 : 1;
     } else if (parsed.command === 'status') {
-      await status(resolveConfigurationFilename(parsed.config, io.env, io.cwd), io.stdout);
+      return await status(configurationFilename(), io.stdout, parsed.account, parsed.json) ? 0 : 1;
     } else if (parsed.command === 'test') {
       await runTests(parsed, io);
     } else if (parsed.command === 'install') {
@@ -829,6 +852,10 @@ export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAU
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function invokedDirectly(): boolean {
+  try { return !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; }
+  catch { return false; }
+}
+if (invokedDirectly()) {
   process.exitCode = await runCli(process.argv.slice(2));
 }

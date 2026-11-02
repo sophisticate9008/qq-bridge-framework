@@ -19,7 +19,7 @@ export function createLocalDshMaintenance(serviceManager?: string) {
     const manager = await realpath(serviceManager)
     const metadata = await lstat(manager)
     assert(metadata.isFile() && metadata.nlink === 1 && (metadata.mode & 0o022) === 0 && (metadata.mode & 0o111) !== 0
-      && metadata.uid === process.getuid?.() && basename(manager) === 'qqbridge-framework' && basename(dirname(manager)) === 'ops',
+      && metadata.uid === process.getuid?.() && basename(manager) === 'qbf-cli' && basename(dirname(manager)) === 'ops',
     'LOCAL_DSH_MANAGER_UNSUPPORTED', 'The configured manager is not a supported local DSH manager.')
     const root = dirname(dirname(manager))
     for (const directory of [root, dirname(manager)]) {

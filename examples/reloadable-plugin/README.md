@@ -13,8 +13,8 @@ npm install /本机路径/qq-bridge-framework-sdk-1.7.0.tgz
 修改 `behavior/index.ts` 中的文案或业务处理，保留契约标识、版本和方法集合，再通过已有运维入口应用：
 
 ```sh
-qqbridge-framework extensions
-qqbridge-framework extensions reload reloadable-example
+qbf-cli extensions
+qbf-cli extensions reload reloadable-example
 ```
 
 新调用进入新行为；已经开始的工具或日程调用保留旧代直到完整 Promise 结束。导入、契约或方法校验失败时旧实现继续使用，重载状态记录错误。清理失败仍通过原扩展管理器保留排空状态，不能据此盲目重试写操作。

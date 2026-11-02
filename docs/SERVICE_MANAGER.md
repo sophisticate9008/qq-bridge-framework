@@ -1,30 +1,32 @@
 # 服务运维
 
-`ops/qqbridge-framework` 是框架自己的服务入口，实现位于 `scripts/service-manager.ts`。Linux 环境需要 Node.js 24.12+、`screen`、`flock` 和 `tail`；图形 QQ 客户端还需要自身的显示环境。启动命令、目录、环境变量和健康检查由本机私有清单提供，配置不提交到 Git。
+`qbf-cli` 是统一命令入口。`qbf-cli service` 管理本机后台服务，实现位于 `scripts/service-manager.ts`；`ops/qbf-cli` 供受控宿主维护调用。Linux 环境需要 Node.js 24.12+、`screen`、`flock` 和 `tail`；图形 QQ 客户端还需要自身的显示环境。启动命令、目录、环境变量和健康检查由本机私有清单提供，配置不提交到 Git。
 
 ## 常用命令
 
 | 命令 | 行为 |
 | --- | --- |
-| `qqbridge-framework start` | 按顺序启动当前协议端、框架和已启用的辅助服务；已有实例不重复启动 |
-| `qqbridge-framework restart framework-admin` | 只重启框架宿主，保留 DSH 和协议端进程 |
-| `qqbridge-framework restart dsh` | 重启模型宿主；正常聊天中优先使用网页的维护入口，以协调暂停和恢复 |
-| `qqbridge-framework stop` | 按逆序停止受管服务，包括两套协议端中仍在运行的实例 |
-| `qqbridge-framework status` | 查看进程与端口状态 |
-| `qqbridge-framework doctor` | 核对服务健康检查及可选的 QQ 登录状态；不发送消息或模型请求 |
-| `qqbridge-framework extensions` 或 `qqbridge-framework extensions list` | 查看已登记插件的版本、活动调用、排空及错误状态 |
-| `qqbridge-framework extensions reload <插件标识>` | 读取当前指纹后提交 CAS 代码重载，旧任务使用原实例继续完成 |
-| `qqbridge-framework logs [组件] [-f]` | 最近 100 行日志，默认组件为 `framework-admin` |
-| `qqbridge-framework console` | 显示当前配置中的控制台地址 |
-| `qqbridge-framework protocol` | 显示当前协议选择 |
-| `qqbridge-framework protocol napcat` | 切换到 NapCat，保留另一套安装及配置 |
-| `qqbridge-framework protocol snowluma` | 切换到 SnowLuma，保留另一套安装及配置 |
+| `qbf-cli service start` | 按顺序启动当前协议端、框架和已启用的辅助服务；已有实例不重复启动 |
+| `qbf-cli restart framework-admin` | 只重启框架宿主，保留 DSH 和协议端进程 |
+| `qbf-cli restart dsh` | 重启模型宿主；正常聊天中优先使用网页的维护入口，以协调暂停和恢复 |
+| `qbf-cli stop` | 按逆序停止受管服务，包括两套协议端中仍在运行的实例 |
+| `qbf-cli service status` | 查看进程与端口状态 |
+| `qbf-cli service doctor` | 核对服务健康检查及可选的 QQ 登录状态；不发送消息或模型请求 |
+| `qbf-cli extensions` 或 `qbf-cli extensions list` | 查看已登记插件的版本、活动调用、排空及错误状态 |
+| `qbf-cli extensions reload <插件标识>` | 读取当前指纹后提交 CAS 代码重载，旧任务使用原实例继续完成 |
+| `qbf-cli logs [组件] [-f]` | 最近 100 行日志，默认组件为 `framework-admin` |
+| `qbf-cli console` | 显示当前配置中的控制台地址 |
+| `qbf-cli protocol` | 显示当前协议选择 |
+| `qbf-cli protocol napcat` | 切换到 NapCat，保留另一套安装及配置 |
+| `qbf-cli protocol snowluma` | 切换到 SnowLuma，保留另一套安装及配置 |
 
-未安装系统命令时，在项目根目录使用 `./ops/qqbridge-framework` 或 `npm run ops -- status`。这些命令与前台 `npm start` 分工不同：前台 CLI 启动框架；运维入口管理配置中整组后台服务。
+未安装系统命令时，在项目根目录使用 `node scripts/cli.ts service <命令>` 或 `npm run ops -- <命令>`。`ops/qbf-cli` 是宿主使用的内部服务管理入口，不替代统一 CLI 的初始化、前台运行和分层诊断。
+
+`service status` 分别显示进程与端口；受管进程仍在但端口不监听时如实列出，不以“运行中”代替健康。`service doctor` 根据配置的 HTTP 或命令检查报告就绪、异常、未确认或未核验，并给出有界原因码；没有健康检查时不把端口开放当作已就绪。`--json` 仅适用于这两个只读命令。任一异常或未核验返回非零退出码，仍保留其他组件的结果。
 
 插件维护固定读取本项目 `runtime/live/framework-admin.json`，复用其中的管理地址和私有令牌文件；令牌只在内存中用于 HTTP 鉴权，不放入命令参数或输出。`extensions` 不需要另外填写地址、令牌或源码路径。重载只针对运行宿主中由 bootstrap 主动登记的插件；未接入管理器的旧插件不会自动获得重载能力。
 
-重载命令先查询当前 64 位内容指纹，再提交带期望指纹的请求。版本冲突、已有重载或旧实例仍在排空时明确失败。命令不自动重试写操作；连接中断或超时后运行 `qqbridge-framework extensions` 查询真实状态，再决定下一步。返回 `changed: false` 表示内容版本相同，`draining: true` 表示旧实例的任务或清理仍未结束。清理失败保留错误码，阻止继续堆积实例。
+重载命令先查询当前 64 位内容指纹，再提交带期望指纹的请求。版本冲突、已有重载或旧实例仍在排空时明确失败。命令不自动重试写操作；连接中断或超时后运行 `qbf-cli extensions` 查询真实状态，再决定下一步。返回 `changed: false` 表示内容版本相同，`draining: true` 表示旧实例的任务或清理仍未结束。清理失败保留错误码，阻止继续堆积实例。
 
 每个固定模块入口在同一宿主进程中最多保留 64 个源码代次，运行实例最多保留一代旧实例排空；模块上限达到后可按需重启 `framework-admin`。普通实现更新保持同一工具协议，工具 schema、名称、依赖或注册结构变化需要完整应用。扩展即时配置的生效方式由扩展自身约定。重载机制的开发约定见 [扩展开发](EXTENDING.md)。
 
@@ -65,9 +67,9 @@
 - `prepare` 可配置 `{ command, args, cwd? }`，仅创建新服务进程前执行，用于启动必要依赖。
 - `logFile` 可沿用已运行组件的原日志；未指定时使用 `logDirectory/<组件>.log`。
 - 顶层 `accountCheck` 可配置只读 QQ 在线检查命令。`doctor` 报告其结果；整套 `start` 遇到待登录只提示，不把已启动的服务判成启动失败。
-- `status` 与 `doctor` 展示当前清单选择的受管服务。自定义服务通过 `optional` 登记，专用健康检查由扩展提供，并通过 `ready.kind: "command"` 接入。
+- `service status` 与 `service doctor` 展示当前清单选择的受管服务。自定义服务通过 `optional` 登记，专用健康检查由扩展提供，并通过 `ready.kind: "command"` 接入。
 
-`scripts/service-health.ts dsh|qq` 提供 DSH 与 QQ 的鉴权健康检查，读取私有 `runtime/live/service-health.json`：
+`scripts/service-health.ts dsh|qq [--json]` 提供 DSH 与 QQ 的鉴权健康检查，读取私有 `runtime/live/service-health.json`：
 
 ```json
 {
@@ -87,7 +89,7 @@ DSH 和 QQ 鉴权从框架已保存的适配器配置读取，不输出令牌或
 node scripts/install-service-manager.ts --admin-config /绝对路径/framework-admin.json
 ```
 
-默认创建 `/usr/local/bin/qqbridge-framework`，并把管理配置的 `serviceManager` 指向本项目 `ops/qqbridge-framework`。可以用 `--bin-dir` 改变命令安装目录。已有进程继续运行，管理服务下次启动后使用新维护入口。
+默认创建 `/usr/local/bin/qbf-cli`，并把管理配置的 `serviceManager` 指向本项目 `ops/qbf-cli`。可以用 `--bin-dir` 改变命令安装目录。已有进程继续运行，管理服务下次启动后使用新维护入口。
 
 本机已有 `boot` 分发器时，可明确指定：
 
@@ -95,9 +97,9 @@ node scripts/install-service-manager.ts --admin-config /绝对路径/framework-a
 node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --admin-config /绝对路径/framework-admin.json
 ```
 
-安装器核对 `qqbridge-framework` 的启动、停止、状态和日志分发结构；先将 boot 配置为当前命令，再执行安装器。原管理配置与 boot 备份在 `runtime/ops-backups/`。已安装的协议端、DSH、凭据和会话不移动，原项目入口保留。
+安装器核对 `qbf-cli` 的启动、停止、状态和日志分发结构；先将 boot 配置为当前命令，再执行安装器。原管理配置与 boot 备份在 `runtime/ops-backups/`。已安装的协议端、DSH、凭据和会话不移动，原项目入口保留。
 
-本机 `boot` 的其他系统服务保持原有管理方式。`boot logs qqbridge-framework` 与 `boot logs framework-admin` 查看框架日志。
+本机 `boot` 的其他系统服务保持原有管理方式。`boot logs qbf-cli` 与 `boot logs framework-admin` 查看框架日志。
 
 ## 安装目录与数据归属
 
@@ -120,9 +122,13 @@ node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --a
 - 插件私有配置中的令牌文件、附件、输出目录，以及系统日志轮转目录和状态文件。
 - DSH 的默认 home 入口与会话工作目录。已有会话 ID、工作区 ID、绑定及历史正文应保持；若工作目录也改变，需要按所安装 DSH 版本同步其会话头、存储目录和工作区索引，派生缓存另行备份重建，不能对历史日志批量替换文本。
 
-恢复原先运行的服务后，用 `qqbridge-framework doctor` 核对健康与 QQ 登录状态，再确认聊天已启动、绑定和插件日程仍在。路径变化会改变配置版本，可能阻止自动恢复；应在核对新配置后启动聊天。保留迁移快照供回退，历史来源记录不作为当前运行路径改写。
+恢复原先运行的服务后，用 `qbf-cli service doctor` 核对健康与 QQ 登录状态，再确认聊天已启动、绑定和插件日程仍在。路径变化会改变配置版本，可能阻止自动恢复；应在核对新配置后启动聊天。保留迁移快照供回退，历史来源记录不作为当前运行路径改写。
 
 ## 生命周期与日志
+
+正常停止只向受管监督进程发送一次终止信号，由各层转发给自己的子进程，避免重复终止信号打断清理；最多留出二十秒正常退出时间，再在总停止期限内核对并处理未退出的原进程。screen 会话在业务进程结束后关闭。
+
+聊天状态单独投影运行锁：本实例持有、可用、存在待核对锁或无法读取。旧锁存在时不报告“可启动”；状态读取不删除或退役锁，也不清除执行记录。进程退出与外部执行结清仍须分别核对，恢复规则见[恢复手册](RECOVERY.md)。
 
 启停与协议切换持有互斥锁，后台服务不继承该锁。启动等待最多 90 秒，停止等待最多 30 秒；先发送终止信号，超时仅对已确认属于受管会话、且进程身份未变化的后代清理。停止未确认时不继续启动同一组件。
 

@@ -18,7 +18,7 @@ export function frameworkRuntimeManifest(value: unknown): Record<string, unknown
   assert(isRecord(value) && value.name === 'qq-bridge-framework' && typeof value.version === 'string'
     && isRecord(value.scripts) && isRecord(value.bin));
   return { ...value, scripts: { ...value.scripts, start: 'node dist/scripts/cli.js start', cli: 'node dist/scripts/cli.js' },
-    bin: { ...value.bin, 'qq-bridge-framework': 'dist/scripts/cli.js' } };
+    bin: { 'qbf-cli': 'dist/scripts/cli.js' } };
 }
 
 export async function packFrameworkRelease(options: {

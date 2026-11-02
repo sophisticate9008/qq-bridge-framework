@@ -43,6 +43,7 @@ import type { NativeMediaDiagnostics } from '../contracts/native-media-diagnosti
 import { readChatInputConfiguration } from './chat-input-configuration.ts'
 import { createNativeExecutionReconciliation } from './native-execution-reconciliation.ts'
 import { drainNativeRun, type NativeRunningRunResources } from './native-run-resources.ts'
+import { readNativeRuntimeLease } from './native-runtime-lease.ts'
 import { createNativeAgentCoordinator } from './native-agent-coordinator.ts'
 import { createNativeWorkFeedback } from './native-work-feedback.ts'
 import { createNativeReplyFreshness } from './native-reply-freshness.ts'
@@ -582,6 +583,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     const protocolConnected = socketConnected && protocol.accountOnline !== false && protocol.accountGood !== false
     const configurationIssues = [...current.missingReasons, ...configurationCompatibility.reasons]
     const missingReasons = [...configurationIssues]
+    const runtimeLease = await readNativeRuntimeLease(options.directory, releaseLease !== undefined)
+    if (runtimeLease.state === 'blocked') missingReasons.push('native_runtime_lease_blocked')
+    if (runtimeLease.state === 'unknown') missingReasons.push('native_runtime_lease_unknown')
     const configurationImpact = active ? analyzeNativeConfigurationImpact(active, current.configuration,
       { previousBindings: activePresetBindings, nextBindings: current.deployment.presetBindings }) : null
     if (configurationImpact && !configurationImpact.canContinue) missingReasons.push('configuration_changed')
@@ -600,7 +604,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     const chatReady = state === 'running' && missingReasons.length === 0 && host !== undefined && dsh !== undefined
     const taskDelegationAvailable = chatReady && work !== undefined && pluginEpoch !== null
       && (options.readWorkEnabled ? await options.readWorkEnabled(controlLifetime.signal) : workMissingReasons.length === 0)
-    return snapshot({ state, chatReady, runtimeConnected: chatReady, protocolConnected,
+    return snapshot({ state, chatReady, runtimeConnected: chatReady, protocolConnected, runtimeLease,
       configurationIssues, configurationCompatibility, configurationImpact, guard: configurationGuard.describe(),
       packages: packages?.describe() ?? [], services: packages?.services() ?? [], frameworkTools: frameworkTools?.describe() ?? null,
       stickerMechanisms: { pending: stickerLibrary?.pending() ?? 0 },
@@ -609,9 +613,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
       sessionMigration: { eligible: !closed && state === 'stopped' && !adapterOperation && !starting && !stopping
         && current.missingReasons.length === 0 && migrationReasons.length === 0,
         availability: 'requires-preview', requiresPreview: true, missingReasons: migrationReasons },
-      canStart: !closed && !starting && !stopping && !adapterOperation && !bootstrapUnknown && !packageUnknown && releaseLease === undefined
+      canStart: !closed && !starting && !stopping && !adapterOperation && !bootstrapUnknown && !packageUnknown && runtimeLease.state === 'available'
         && (state === 'stopped' || state === 'error') && configurationIssues.length === 0,
-      canApplyDeployment: !closed && !starting && !stopping && !adapterOperation && releaseLease === undefined
+      canApplyDeployment: !closed && !starting && !stopping && !adapterOperation && runtimeLease.state === 'available'
         && (state === 'stopped' || state === 'error'),
       missingReasons: [...new Set(missingReasons)], revisions: current.configuration.revisions,
       activeRevisions: active?.revisions ?? null, lastError,

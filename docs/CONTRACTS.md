@@ -265,7 +265,7 @@ DSH 未报告缓存读取时保持未知，不能凭输入、输出与总量恒�
 
 ## 本机服务管理
 
-`ops/qqbridge-framework` 使用私有 `runtime/live/services.json` 管理组件，命令参数不接受浏览器提供的可执行程序。`describe --json` 返回 `{ schema: 1, kind: "qq-bridge-framework", dshHome }`，其中 `dshHome` 必须与受管 DSH 的实际启动环境一致；不返回参数、账号或凭据。DSH 维护服务核对管理器文件归属、目录权限及自动发现的凭据路径，仅识别本框架管理器。`start/stop/restart/protocol` 使用互斥锁；启动等待最多 90 秒、停止等待最多 30 秒，未知端口占用不会被当作可终止的受管进程。停止仅针对配置的精确 screen 会话及其已核对身份的后代进程。协议切换成功后持久化当前选择，启动失败时恢复原选择并尝试恢复原协议端。
+`ops/qbf-cli` 使用私有 `runtime/live/services.json` 管理组件，命令参数不接受浏览器提供的可执行程序。`describe --json` 返回 `{ schema: 1, kind: "qq-bridge-framework", dshHome }`，其中 `dshHome` 必须与受管 DSH 的实际启动环境一致；不返回参数、账号或凭据。DSH 维护服务核对管理器文件归属、目录权限及自动发现的凭据路径，仅识别本框架管理器。`start/stop/restart/protocol` 使用互斥锁；启动等待最多 90 秒、停止等待最多 30 秒，未知端口占用不会被当作可终止的受管进程。停止仅针对配置的精确 screen 会话及其已核对身份的后代进程。协议切换成功后持久化当前选择，启动失败时恢复原选择并尝试恢复原协议端。
 
 ## QQ 基础交互与工作附件
 
@@ -364,7 +364,7 @@ DSH 桥接插件的 `pollFrameworkTools` 接受可选 `waitMs`（0–10000 毫�
 
 助手回传产物每个运行目录最多 512 个文件、128 MiB，单件沿用 8 MiB。文件有效期 24 小时；启动五秒后、每小时及发布新文件前清理。登记、读取与清理在同一队列串行，退出取消维护并排空队列；过期登记继续保留七天内的身份凭据，旧调用不能刷新有效期。写入失败留下的无登记文件按修改时间保留 24 小时后回收。
 
-`qqbridge-framework maintenance` 预览，`maintenance --apply` 回收未使用的旧部署、超过 30 天且不属于最新四轮的模拟目录。它复用运维互斥锁，仅在发现待删目录时核对进程引用，保护当前部署选择、运行进程及配置引用，不跟随目录符号链接。root 安装运维入口时设置每小时第 17 分钟执行，最近汇总保存在 `runtime/storage-maintenance.json`；文件仅含数量、字节与时间。
+`qbf-cli maintenance` 预览，`maintenance --apply` 回收未使用的旧部署、超过 30 天且不属于最新四轮的模拟目录。它复用运维互斥锁，仅在发现待删目录时核对进程引用，保护当前部署选择、运行进程及配置引用，不跟随目录符号链接。root 安装运维入口时设置每小时第 17 分钟执行，最近汇总保存在 `runtime/storage-maintenance.json`；文件仅含数量、字节与时间。
 
 DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架维护不扫描、不删除，也不在 DSH 启动前添加回收步骤。
 
@@ -389,3 +389,9 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 表情条目可附 `usage:{sentCount,lastSentAt}`，缺省兼容旧快照。发送次数从功能启用后按实际协议确认累计，账号隔离、发送键幂等；未发送或未知结果不计，独立存储不修改标注 revision。GIF 收藏与语义补标复用现有媒体 V1／V2 时间抽样与网格规则，附件合并保留每个实际抽样时间点；原 GIF 发送字节不变。
 
 表情库 `GET /api/chat/stickers/original?id=<图片摘要>` 按当前运行账号核验真实条目并读取原始字节，优先复用磁盘缓存，校验内容哈希与可用状态；只接受单个 id，不接受 URL 或文件路径。使用管理端现有鉴权，返回有界的 JPEG／PNG／GIF／WebP／AVIF 图片字节、正确 Content-Type、no-store 与同源资源策略，最多 8 MiB，每个表情库同时最多两个读取任务。不进行动画解码、抽帧、缩放或模型调用。管理端路由以 `responseType: "image"` 显式声明只读图片响应，普通 JSON 路由上限保持 4 MiB。前端图片悬停 500ms 或点按打开原图浮层，同一页面只挂载一张原图，关闭与页面滚动后卸载。
+
+## 独立服务健康与统一 CLI
+
+`GET /api/chat/dsh/health` 只读取当前账号的 DSH 连接配置并检查已鉴权的 `settings/describe` 接口，不依赖聊天实例、配置应用或会话记录。返回 `{schema:1,state,reason,checkedAt,scope:"authenticated-api",modelExecutionVerified:false}`；`state` 为 `ready/unavailable/disabled/unconfigured/unknown`，原因限定为公开枚举。检查有五秒期限，连接配置在检查期间变化时返回 unknown，不返回凭据、路径或外部响应正文。实际生成、工具通道及回复监听分别核验；GET 不启动聊天、不创建会话、不调用模型。多账号沿用 dispatch。
+
+统一入口为 `qbf-cli`，发行包 `bin` 指向编译后的同一 CLI。`status` 与不带会话的 `doctor` 并行读取管理、网关、DSH、QQ、聊天和应用证据，一项失败保留其他项；读取失败显示 unknown，不能据此宣称服务离线。`--json` 输出有界投影，异常、未知及未完成条件返回非零。逐会话 doctor 同样按实际诊断是否 ready 设置退出码。后台服务命令使用 `service` 命名空间，与前台 start 分开；进程、端口、专用健康检查分别呈现，没有专用检查时保持未核验。

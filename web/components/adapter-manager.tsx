@@ -14,6 +14,7 @@ import { ConnectPrompt, EmptyState, Field, PageHeading, SaveBar, Section, Status
 import { Button } from './ui/button.tsx';
 import { Input } from './ui/input.tsx';
 import { ChatRuntimeControls } from './chat-runtime-controls.tsx';
+import { DshHealthStatus } from './dsh-health-status.tsx';
 import { ReadOnlyDetails, TechnicalDetails } from './read-only-details.tsx';
 import { SettingsWindow } from './settings-window.tsx';
 
@@ -581,7 +582,8 @@ export function AdapterManager({ api, connected, connect, setDirty, navigate, co
       <section id={nativeFormMetadata.dsh.id} className="panel entity">
         <div className="row"><span className="avatar" aria-hidden="true">◇</span><div className="grow"><h2 className="panel-title">DSH 聊天引擎</h2><p className="muted small">{savedDsh.localAuthConfigured ? '本机自动发现与鉴权' : '聊天引擎连接'}</p></div><OutboundStatus adapter={savedDsh} /></div>
         <div className="meta"><span>连接{savedDsh.enabled ? '已启用' : '未启用'}</span><span>{savedDsh.localAuthConfigured ? '本机鉴权已配置' : savedDsh.credentialConfigured ? '访问凭据已保存' : '访问凭据未设置'}</span></div>
-        <div className="strip">配置就绪与运行状态分别显示；启动聊天时核对实际连接。</div>
+        <div className="row"><span className="small muted">DSH 服务检查</span><DshHealthStatus api={api} connected={connected} /></div>
+        <div className="strip">服务连接、聊天处理和模型请求结果分别核对。</div>
         <div className="actions">
           <SettingsWindow title="自动连接本机 DSH" label="自动连接本机" triggerVariant="default" description="自动发现本机服务地址并保存本机鉴权，连接后单独启动聊天。"><div className="stack"><div className="strip">将明确切换为本机自动发现的地址与鉴权；已有会话历史保留。</div>{dirty && <p className="small muted">先保存或撤销当前草稿，再自动连接。</p>}<Button disabled={disabled || dirty} onClick={() => void discoverLocalDsh()}><Plug className="size-3.5" />{controlling ? '正在处理…' : '自动连接本机 DSH'}</Button>{operationRecovery}{formError && <p className="text-xs text-destructive" role="alert">{formError}</p>}</div></SettingsWindow>
           <SettingsWindow title="手动或远程 DSH 连接" label="手动连接" description="填写服务地址与访问凭据。关闭保留常规草稿，保存后需重启聊天生效。" onOpenChange={open => { if (!open) setDraft(current => current ? clearCredentials(current) : current); }}>{dshEditor}</SettingsWindow>

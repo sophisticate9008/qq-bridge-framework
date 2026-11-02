@@ -4,7 +4,8 @@ import { readResource, writeResource } from '../lib/resource-reader.ts';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CircleAlert, LoaderCircle, Play, RefreshCw, Square } from 'lucide-react';
 import { errorMessage, type ApiClient } from '../lib/api.ts';
-import { chatRuntimeBadge, chatRuntimeCanApplyAndStart, chatRuntimeCanRecoverStoppedControl, chatRuntimeEngineReadiness, chatRuntimeLastError, chatRuntimeNeedsSessionMigration, chatRuntimeReason, chatRuntimeVisibleReasons, parseChatRuntimeStatus, type ChatRuntimeStatus } from '../lib/chat-runtime.ts';
+import { chatRuntimeBadge, chatRuntimeCanApplyAndStart, chatRuntimeCanRecoverStoppedControl, chatRuntimeLastError, chatRuntimeNeedsSessionMigration, chatRuntimeReason, chatRuntimeVisibleReasons, parseChatRuntimeStatus, type ChatRuntimeStatus } from '../lib/chat-runtime.ts';
+import { useDshHealth } from './dsh-health-status.tsx';
 import { applyAndStartChat, chatApplicationPhaseLabels } from '../lib/chat-application.ts';
 import type { PageProps } from '../lib/types.ts';
 import { StatusPill } from './management.tsx';
@@ -20,6 +21,7 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
 }) {
   const { application, state: applicationState, observationError, refresh: refreshApplication } = useChatApplication(api, connected);
   const restart = useDshRestart(api, connected);
+  const dshHealth = useDshHealth(api, connected);
   const [status, setStatus] = useState<ChatRuntimeStatus | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -124,7 +126,7 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   }
 
   if (!connected) return null;
-  const refreshControl = <Button variant="ghost" size="sm" disabled={active} onClick={() => { resource.refresh(); refreshApplication(); }}><RefreshCw className="size-3.5" />刷新状态</Button>;
+  const refreshControl = <Button variant="ghost" size="sm" disabled={active} onClick={() => { resource.refresh(); dshHealth.refresh(); refreshApplication(); }}><RefreshCw className="size-3.5" />刷新状态</Button>;
   const statusTone = status?.chatReady && !resource.error ? 'success' : uncertain || resource.error || applicationState.blocked ? 'warning' : 'neutral';
   const statusLabel = active ? '正在处理' : resource.error ? '运行状态待确认' : chatRuntimeBadge(status);
   const controlButton = running || status?.state === 'error'
@@ -135,7 +137,8 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
     {applicationState.blocked && <p role="status" className="small muted">先前应用或启动结果尚未确认，后续操作暂时锁定；刷新只读取状态。</p>}
   </>;
   const checks = <>
-    {status && <dl className="info"><dt>QQ 消息</dt><dd>{status.protocolConnected ? '已连接' : '未连接'}</dd><dt>DSH</dt><dd>{chatRuntimeEngineReadiness(status)}</dd><dt>聊天处理</dt><dd>{status.chatReady ? '已启用' : running ? '暂不可用' : '未启动'}</dd></dl>}
+    <dl className="info"><dt>QQ 消息</dt><dd>{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '尚未确认'}</dd><dt>DSH 服务</dt><dd><StatusPill tone={dshHealth.tone}>{dshHealth.label}</StatusPill></dd><dt>聊天处理</dt><dd>{resource.error ? '读取失败' : !status ? '尚未确认' : status.chatReady ? '已启用' : running ? '暂不可用' : status.state === 'stopped' ? '已停止' : status.state === 'error' ? '启动或运行失败' : '正在处理'}</dd></dl>
+    <p className="small muted">{dshHealth.description}</p>
     {visibleReasons.length > 0 && <ul className="stack">{visibleReasons.map(reason => {
       const item = chatRuntimeReason(reason);
       return <li key={reason} className="row"><span className="grow text-xs">{item.text}</span><Button variant="ghost" size="sm" onClick={() => navigate(item.page, item.target)}>去设置</Button></li>;
@@ -155,7 +158,7 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   if (compact) return controlBody;
   return <section id="chat-runtime" className="panel entity">
     <div className="row"><span className="avatar" aria-hidden="true">▷</span><div className="grow"><h2 className="panel-title">聊天运行</h2><p className="muted small">已授权的 QQ 会话</p></div><StatusPill tone={statusTone}>{statusLabel}</StatusPill></div>
-    <div className="meta"><span>QQ 消息：{status ? status.protocolConnected ? '已连接' : '未连接' : '待确认'}</span><span>DSH：{status ? chatRuntimeEngineReadiness(status) : '待确认'}</span></div>
+    <div className="meta"><span>QQ 消息：{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '待确认'}</span><span>DSH 服务：{dshHealth.label}</span></div>
     <div className={`strip ${uncertain || applicationState.blocked || resource.error ? 'warn' : ''}`} role="status">{!status ? loading ? '正在读取聊天运行状态。' : '暂时无法确认聊天运行状态，请刷新读取。' : active ? '正在更新聊天运行状态，请等待原操作。' : dirty ? '连接草稿尚未保存；请保存后再启动聊天。' : uncertain || applicationState.blocked ? '启停结果未确认，先核对停止与排空状态。' : status?.configurationChanged ? '有已保存设置等待应用，请查看详情中的具体运行条件。' : running ? status.chatReady ? '正在处理白名单内消息；停止会保留聊天历史和发送记录。' : '聊天正在运行，当前接收条件需要处理。' : status.state === 'error' ? '聊天运行需要处理，请查看详情。' : '聊天已停止；可检查条件后明确启动。'}</div>
     <div className="actions">
       <SettingsWindow title={running ? '停止聊天' : '启动与检查聊天'} label={running ? '停止聊天' : '启动聊天'} description="检查真实运行状态后执行；停止保留历史，启动沿当前配置继续。">{controlBody}</SettingsWindow>

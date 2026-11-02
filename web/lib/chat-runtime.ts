@@ -132,6 +132,8 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
   onebot_account_offline: { text: 'QQ 已离线，请在协议端重新登录。', page: 'adapters' },
   onebot_account_unhealthy: { text: 'QQ 接入服务状态异常，请检查协议端运行状态。', page: 'adapters' },
   runtime_not_started: { text: '聊天尚未启动，完成设置后点击启动聊天。', page: 'adapters' },
+  native_runtime_lease_blocked: { text: '聊天运行锁仍存在，需核对原实例是否退出及原执行是否结清；不要删除锁或重复启动。', page: 'adapters' },
+  native_runtime_lease_unknown: { text: '无法读取聊天运行锁，尚未确认能安全启动；请检查存储与权限。', page: 'adapters' },
   configuration_changed: { text: '已保存设置有变更，请停止聊天后重新启动以应用。', page: 'adapters' },
   authorization_budget_unavailable: { text: '消息授权已用完或过期，请到访问范围检查。', page: 'access' },
   agent_follow_unavailable: { text: '引擎回复连接已中断。新消息处理前必须重新建立跟随；不会重放旧请求。', page: 'adapters' },
@@ -143,6 +145,9 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
 
 export function chatRuntimeLastError(code: string): string {
   const messages: Readonly<Record<string, string>> = {
+    AGENT_FOLLOW_TERMINATED: '会话回复监听已中断；DSH 服务连接需单独检查，请核对聊天链路状态。',
+    TOOL_CHANNEL_UNKNOWN: '框架工具通道结果尚未确认；请查看对应执行记录，DSH 服务状态单独显示。',
+    NATIVE_CHAT_LEASE_HELD: '聊天运行锁尚未释放，启动被阻止。请核对原实例和排空记录；DSH 服务状态单独显示。',
     NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE: 'DSH 的请求关联插件尚未安装、加载或通过认证。请在 DSH 中安装并启用请求关联插件后重新检查；不会自动安装或重启引擎。',
     NATIVE_CHAT_SESSION_CONFIGURATION_CONFLICT: '当前聊天设置与已有会话不一致，已保留上下文并停止启动。请核对原方案，不要通过清空会话强行重试。',
     NATIVE_CHAT_PERSONA_VERSION_MIGRATION_REQUIRED: '已有会话的人设版本需要显式迁移，已保留历史与资源。请先核对迁移方式，不会自动覆盖人设或重新建会话。',

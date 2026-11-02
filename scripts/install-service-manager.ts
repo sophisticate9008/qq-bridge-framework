@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
-    console.log('安装 qqbridge-framework：node scripts/install-service-manager.ts [--bin-dir /usr/local/bin] [--admin-config /绝对路径/config.json] [--boot /绝对路径/service-boot.sh]\n先配置 runtime/live/services.json；--boot 核对 qqbridge-framework 的启动、停止、状态和日志分发。');
+    console.log('安装 qbf-cli：node scripts/install-service-manager.ts [--bin-dir /usr/local/bin] [--admin-config /绝对路径/config.json] [--boot /绝对路径/service-boot.sh]\n先配置 runtime/live/services.json；--boot 核对 qbf-cli 的启动、停止、状态和日志分发。');
     return;
   }
   const options = new Map<string, string>();
@@ -24,8 +24,9 @@ async function main(): Promise<void> {
   const binDirectory = options.get('--bin-dir') ?? '/usr/local/bin';
   const adminPath = options.get('--admin-config') ?? join(root, 'runtime/live/framework-admin.json');
   const bootPath = options.get('--boot');
-  const target = join(root, 'ops/qqbridge-framework');
-  const cli = join(binDirectory, 'qqbridge-framework');
+  const target = join(root, 'ops/qbf-cli');
+  const cliTarget = join(root, 'scripts/cli.ts');
+  const cli = join(binDirectory, 'qbf-cli');
   if (!/^\/[A-Za-z0-9_./-]+$/.test(cli)) throw new InstallError('命令安装路径不支持空格或特殊字符。');
   const adminSource = await readFile(adminPath, 'utf8');
   const admin: unknown = JSON.parse(adminSource);
@@ -36,14 +37,14 @@ async function main(): Promise<void> {
     if (isRecord(error) && error.code === 'ENOENT') return null;
     throw error;
   });
-  if (originalLink && (!originalLink.isSymbolicLink() || resolve(binDirectory, await readlink(cli)) !== resolve(target))) throw new InstallError('qqbridge-framework 已被其他程序占用。');
+  if (originalLink && (!originalLink.isSymbolicLink() || resolve(binDirectory, await readlink(cli)) !== resolve(cliTarget))) throw new InstallError('qbf-cli 已被其他程序占用。');
 
   let bootSource: string | undefined;
   let bootNext: string | undefined;
   if (bootPath) {
     bootSource = await readFile(bootPath, 'utf8');
     bootNext = bootSource;
-    for (const action of ['start', 'stop', 'status', 'logs']) {
+    for (const action of ['service start', 'stop', 'service status', 'logs']) {
       if (!bootNext.includes(`${cli} ${action}`)) throw new InstallError('boot 不包含已支持的运维分发入口，未修改。');
     }
   }
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
   const replace = async (filename: string, before: string, after: string, mode: number): Promise<void> => {
     if (before === after) return;
     if (await readFile(filename, 'utf8') !== before) throw new InstallError('配置在安装期间被修改，停止覆盖。');
-    const temporary = join(dirname(filename), `.qqbridge-framework-${randomUUID()}.tmp`);
+    const temporary = join(dirname(filename), `.qbf-cli-${randomUUID()}.tmp`);
     try {
       await writeFile(temporary, after, { mode, flag: 'wx' });
       await rename(temporary, filename);
@@ -67,7 +68,13 @@ async function main(): Promise<void> {
   };
   await mkdir(binDirectory, { recursive: true });
   await chmod(target, 0o755);
-  if (!originalLink) await symlink(target, cli);
+  await chmod(cliTarget, 0o755);
+  if (!originalLink) await symlink(cliTarget, cli);
+  for (const [name, ownedTarget] of [['qq-bridge-framework', cliTarget], ['qqbridge-framework', join(root, 'ops/qqbridge-framework')]]) {
+    const old = join(binDirectory, name!);
+    const information = await lstat(old).catch(error => { if (isRecord(error) && error.code === 'ENOENT') return null; throw error; });
+    if (information?.isSymbolicLink() && resolve(binDirectory, await readlink(old)) === resolve(ownedTarget!)) await unlink(old);
+  }
   await replace(adminPath, adminSource, `${JSON.stringify({ ...admin, serviceManager: target }, null, 2)}\n`, 0o600);
   if (bootPath && bootSource !== undefined && bootNext !== undefined) {
     const mode = (await lstat(bootPath)).mode & 0o777;
@@ -80,7 +87,7 @@ async function main(): Promise<void> {
     await writeFile('/etc/cron.d/qq-bridge-framework-storage',
       `# Managed runtime retention; the service manager owns the operation lock.\n17 * * * * root ${quote(process.execPath)} ${quote(join(root, 'scripts/service-manager.ts'))} maintenance --apply >> ${quote(join(logDirectory, 'storage-maintenance.log'))} 2>&1\n`, { mode: 0o644 });
   }
-  console.log('已安装 qqbridge-framework 并更新管理配置。' + (bootPath ? ' boot 已切换到本框架运维入口。' : ''));
+  console.log('已安装 qbf-cli 并更新管理配置。' + (bootPath ? ' boot 已切换到本框架运维入口。' : ''));
   console.log('已有进程保持运行；管理服务下次启动时读取新的维护入口。备份位于 runtime/ops-backups。');
 }
 

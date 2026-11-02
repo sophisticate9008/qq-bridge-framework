@@ -7,6 +7,7 @@ import { AutomaticMaintenanceStatus } from '../components/automatic-maintenance-
 import { ChatAssistantManager } from '../components/chat-assistant-manager.tsx';
 import { ChatPlanManager } from '../components/chat-plan-manager.tsx';
 import { ChatRuntimeControls } from '../components/chat-runtime-controls.tsx';
+import { useDshHealth } from '../components/dsh-health-status.tsx';
 import { HelpTip } from '../components/help-tip.tsx';
 import { ConnectPrompt, PageHeading, Section, StatusPill } from '../components/management.tsx';
 import { PackageConfigurationManager } from '../components/package-configuration-manager.tsx';
@@ -47,6 +48,7 @@ export function OverviewPage(props: PageProps) {
   const access = useReadResource(api, '/api/chat/access', connected, parseAccessSummary, { intervalMs: 5_000 });
   const sessions = useReadResource(api, sessionPagePath(), connected, parseSessionSnapshot, { intervalMs: 15_000 });
   const inbox = useReadResource(api, '/api/chat/inbox', connected, parseNativeInboxSummary, { intervalMs: 5_000 });
+  const dshHealth = useDshHealth(api, connected);
   const status = runtime.error ? null : runtime.snapshot;
   const planCatalog = plans.error ? null : plans.snapshot;
   const selectedPlan = planCatalog?.plans.find(plan => plan.id === planCatalog.activePlanId);
@@ -60,7 +62,8 @@ export function OverviewPage(props: PageProps) {
     <TechnicalDetails fields={[
       { label: '聊天方案', value: selectedPlan?.name ?? (plans.error ? '读取失败' : '尚未确认') },
       { label: 'QQ 连接', value: status ? status.protocolConnected ? '已连接' : '未连接' : '尚未确认' },
-      { label: '聊天引擎', value: runtime.error ? '读取失败' : chatRuntimeEngineReadiness(status) },
+      { label: 'DSH 服务', value: dshHealth.label },
+      { label: '聊天处理', value: runtime.error ? '读取失败' : chatRuntimeEngineReadiness(status) },
       { label: '会话绑定', value: bound ? `${bound.next ? '至少 ' : ''}${bound.sessions.length} 个` : '尚未确认' },
     ]} />
     {reasons.length > 0 && <div className="strip warn">{reasons.map((reason, index) => <p key={index}>{reason.text}</p>)}</div>}
@@ -76,7 +79,7 @@ export function OverviewPage(props: PageProps) {
     </> : <p className="small muted">{inbox.error ? '收件状态读取失败。' : '正在读取收件状态…'}</p>}
   </section>;
 
-  const reload = () => { runtime.refresh(); plans.refresh(); assistant.refresh(); access.refresh(); sessions.refresh(); inbox.refresh(); void refresh(); };
+  const reload = () => { runtime.refresh(); dshHealth.refresh(); plans.refresh(); assistant.refresh(); access.refresh(); sessions.refresh(); inbox.refresh(); void refresh(); };
   return <div className="page-stack" data-page="overview">
     <PageHeading title="连接与概览" description="查看连接、调整当前聊天、处理运行问题" actions={<><HelpTip label="启动检查">启动只检查连接和配置，不调用模型；聊天就绪即可使用。</HelpTip><Button variant="ghost" size="sm" disabled={!connected || runtime.loading} onClick={reload}><RefreshCw className="size-3.5" />刷新</Button></>} />
     {!connected ? <ConnectPrompt connect={connect} /> : <>
@@ -88,10 +91,10 @@ export function OverviewPage(props: PageProps) {
           <div className="actions"><Button variant="outline" size="sm" onClick={() => navigate('adapters', { kind: 'section', sectionId: 'adapter-onebotHttp', title: 'QQ 连接' })}>查看连接</Button><ReadOnlyDetails title="聊天运行详情" description="当前方案、连接与会话状态。"><div className="stack">{runtimeDetails}{rawRuntime}</div></ReadOnlyDetails><OverviewSettings title="QQ 连接设置" label="设置">{active => <AdapterManager {...props} compact="onebot" active={active} />}</OverviewSettings><span className="push"><OverviewSettings title="聊天运行" label="运行控制">{() => <ChatRuntimeControls compact api={api} connected={connected} dirty={localDirty} navigate={navigate} />}</OverviewSettings></span></div>
         </section>
         <section className="entity">
-          <div className="row"><span className="avatar"><Cpu className="size-5" /></span><div><h2 className="font-semibold">聊天引擎</h2><p className="small muted">DSH · 模型会话</p></div><span className="push"><StatusPill tone={status?.chatReady ? 'success' : runtime.error || status?.state === 'error' ? 'warning' : 'neutral'}>{runtime.error ? '读取失败' : chatRuntimeEngineReadiness(status)}</StatusPill></span></div>
+          <div className="row"><span className="avatar"><Cpu className="size-5" /></span><div><h2 className="font-semibold">DSH 服务</h2><p className="small muted">鉴权接口 · 独立连接检查</p></div><span className="push"><StatusPill tone={dshHealth.tone}>{dshHealth.label}</StatusPill></span></div>
           <div className="meta"><span>{planCatalog ? `${planCatalog.plans.length} 个聊天方案` : '方案待读取'}</span><span>保持已有会话上下文</span></div>
-          <div className="strip">{status?.configurationChanged ? '有已保存设置等待应用。' : '模型请求通过 DSH 处理。'}</div>
-          <div className="actions"><Button variant="outline" size="sm" disabled={runtime.loading} onClick={runtime.refresh}>检查状态</Button><ReadOnlyDetails title="引擎详情" description="当前聊天引擎与配置载入状态。"><div className="stack">{runtimeDetails}{rawRuntime}</div></ReadOnlyDetails><span className="push"><OverviewSettings title="聊天引擎设置" label="设置">{active => <AdapterManager {...props} compact="dsh" active={active} />}</OverviewSettings></span></div>
+          <div className="strip">{dshHealth.description}</div>
+          <div className="actions"><Button variant="outline" size="sm" disabled={dshHealth.loading} onClick={dshHealth.refresh}>检查 DSH</Button><ReadOnlyDetails title="引擎详情" description="DSH 服务检查与聊天运行分别显示。"><div className="stack">{runtimeDetails}{rawRuntime}</div></ReadOnlyDetails><span className="push"><OverviewSettings title="聊天引擎设置" label="设置">{active => <AdapterManager {...props} compact="dsh" active={active} />}</OverviewSettings></span></div>
         </section>
         <section className="entity">
           <div className="row"><span className="avatar"><Bot className="size-5" /></span><div><h2 className="font-semibold">后台助手</h2><p className="small muted">独立工作模式</p></div><span className="push"><StatusPill tone={assistantValue?.executionAvailable || assistantValue?.state === 'configured' && assistantValue.configuration.mode === 'chat-assistant' ? 'success' : assistantValue?.configuration.mode === 'chat-only' ? 'neutral' : 'warning'}>{assistantValue ? assistantValue.configuration.mode === 'chat-only' ? '已关闭' : assistantValue.state === 'configured' ? '已开启' : assistantValue.executionAvailable ? '已启用' : '待就绪' : assistant.error ? '读取失败' : '读取中'}</StatusPill></span></div>

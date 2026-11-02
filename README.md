@@ -58,6 +58,8 @@ npm start
 
 ## 文档
 
+统一命令为 `qbf-cli`：`status` / `doctor` 查看分层健康，`service start` 启动本机后台服务，`restart`、`logs`、`protocol` 和 `extensions` 执行维护。`start` 为前台运行；未安装全局命令时可用 `npm run cli -- <命令>`。完整说明见[运行手册](docs/OPERATIONS.md)。
+
 | 需要做什么 | 文档 |
 | --- | --- |
 | 从零安装、准备依赖和首次连接 | [安装教程](docs/INSTALL.md) |
@@ -84,4 +86,4 @@ npm start
 源码采用 [MIT 许可](LICENSE)。第三方来源、致谢及独立素材许可集中在 [NOTICE.md](NOTICE.md)；上游许可证原文保留原语言。
 
 
-聊天资源清理与容量规则见 [资源回收契约](docs/CONTRACTS.md#聊天资源回收)。运维命令 `qqbridge-framework maintenance` 可预览可回收内容，加 `--apply` 执行；当前部署、仍被历史引用的附件及未核清的执行证据受保护。
+聊天资源清理与容量规则见 [资源回收契约](docs/CONTRACTS.md#聊天资源回收)。运维命令 `qbf-cli maintenance` 可预览可回收内容，加 `--apply` 执行；当前部署、仍被历史引用的附件及未核清的执行证据受保护。

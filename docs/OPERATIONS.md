@@ -19,26 +19,36 @@ npm start
 
 ## 常用命令
 
+命令统一为 `qbf-cli`；源码目录也可用 `npm run cli -- <命令>`。`start` 在前台运行，`service start` 按本机服务清单启动后台组件。全局命令未安装时可执行 `node scripts/cli.ts <命令>`，发行包使用 `node dist/scripts/cli.js <命令>`。
+
 | 命令 | 行为 |
 |---|---|
 | `npm start` | 启动管理端并启动或复用配置匹配的网关 |
 | `npm run cli -- start --admin-only` | 仅启动管理界面 |
 | `npm run cli -- start --config /绝对路径/config.json` | 使用明确的管理配置 |
 | `npm run cli -- start --bootstrap /绝对路径/extension.ts` | 本次启动选择可信本机扩展；未指定时读取管理配置旁的固定版本选择 |
-| `npm run cli -- status` | 查看当前配置对应的服务状态 |
+| `qbf-cli status` 或 `qbf-cli doctor` | 分层读取管理服务、发送网关、DSH 鉴权接口、QQ 协议连接、聊天处理及配置应用状态 |
+| `qbf-cli status --json` | 输出不含凭据的结构化状态，异常或未确认时退出码为 1 |
+| `qbf-cli service status [组件] [--json]` | 独立读取受管进程与端口，管理服务宕机时仍可使用 |
+| `qbf-cli service doctor [组件] [--json]` | 独立运行各服务健康检查；没有专用检查时显示健康未核验 |
+| `qbf-cli --version` | 显示 CLI 所属安装的框架版本 |
 | `npm run cli -- doctor --conversation group:123456` | 对一个合成示例群会话执行已鉴权只读诊断 |
 | `npm run cli -- doctor --conversation private:123456 --account <64位注册ID>` | 在明确账号下诊断会话 |
 | `npm run cli -- --help` | 查看当前参数说明 |
 
 将示例会话替换为需要诊断的会话。doctor 不发送消息，也不在输出中展开凭据。多账号注册 ID 可从账号管理状态取得，不是 QQ 号。
 
-停止进程使用 Ctrl+C、SIGINT 或 SIGTERM，等待清理结果；CLI 没有 `stop` 子命令。控制台的停止聊天只控制聊天运行状态，不等于停止管理进程。若关闭或取消结果未知，按 [恢复手册](RECOVERY.md) 处理，不能直接把未知记录当作已清理。
+前台进程使用 Ctrl+C、SIGINT 或 SIGTERM，等待清理结果；受管后台组件使用 `qbf-cli stop [组件]`、`qbf-cli restart [组件]`。控制台的停止聊天只控制聊天运行状态，不等于停止管理进程。若关闭或取消结果未知，按 [恢复手册](RECOVERY.md) 处理，不能直接把未知记录当作已清理。
+
+健康读取互不替代：DSH 鉴权接口可用时，聊天仍可能停止、工具通道异常或应用结果待核对。某项接口失败不清空其他项，也不把未知显示成已离线。状态查询不创建会话、不调用模型、不重启服务；“DSH 服务可连接”不证明模型供应商生成成功。多账号可用 `status/doctor --account <注册ID>` 查看对应账号。
+
+配置优先级为显式 `--config`、`QQ_BRIDGE_FRAMEWORK_CONFIG`；本机已登记安装默认使用 `runtime/live/framework-admin.json`，其余使用当前目录的 `runtime/admin/config.json`。旧的两个 CLI 命令已统一为 `qbf-cli`，已有部署需同步全局链接、boot 与管理配置中的 `serviceManager`，保留原配置和会话。
 
 ## 本机 boot 接入
 
-本机 `boot` 通过本框架的 `qqbridge-framework start` 启动所选协议端、DSH、已启用的辅助服务及框架网关和宿主。入口为 `ops/qqbridge-framework`，实现为 `scripts/service-manager.ts`，服务清单位于私有的 `runtime/live/services.json`。NapCat / SnowLuma 两套安装与登录数据保留，`qqbridge-framework protocol napcat|snowluma` 管理当前选择。框架宿主沿用已选择的部署入口和私有配置，按已保存的运行意图恢复原生聊天。
+本机 `boot` 通过本框架的 `qbf-cli service start` 启动所选协议端、DSH、已启用的辅助服务及框架网关和宿主。入口为 `ops/qbf-cli`，实现为 `scripts/service-manager.ts`，服务清单位于私有的 `runtime/live/services.json`。NapCat / SnowLuma 两套安装与登录数据保留，`qbf-cli protocol napcat|snowluma` 管理当前选择。框架宿主沿用已选择的部署入口和私有配置，按已保存的运行意图恢复原生聊天。
 
-`qqbridge-framework restart framework-admin` 单独重启框架；`boot logs qqbridge-framework`、`boot logs framework-admin` 和 `qqbridge-framework logs` 均查看框架日志。`boot logs qqbridge` 保留为日志别名。`qqbridge-framework status` 展示当前选中的服务，`qqbridge-framework doctor` 只读核对配置的健康检查与 QQ 在线状态。启动或停止失败时返回非零退出码，停止未完成时不继续重启。服务安装目录可以独立配置，运维命令不调用其他项目的启动脚本。配置格式、安装与常用命令见 [服务运维](SERVICE_MANAGER.md)。
+`qbf-cli restart framework-admin` 单独重启框架；`boot logs qbf-cli`、`boot logs framework-admin` 和 `qbf-cli logs` 均查看框架日志。`boot logs qqbridge` 保留为日志别名。`qbf-cli service status` 展示当前选中的服务，`qbf-cli service doctor` 只读核对配置的健康检查与 QQ 在线状态。启动或停止失败时返回非零退出码，停止未完成时不继续重启。服务安装目录可以独立配置，运维命令不调用其他项目的启动脚本。配置格式、安装与常用命令见 [服务运维](SERVICE_MANAGER.md)。
 
 ## 需要区分的默认值
 
@@ -104,7 +114,7 @@ npm run test:sdk
 ## 升级与备份
 
 
-升级前核对本地修改，并按部署方式停止框架管理进程；使用 `qqbridge-framework` 的部署执行 `qqbridge-framework stop framework-admin`，前台 CLI 等待 Ctrl+C 完成。停止结果未知时先核对排空，不继续覆盖运行文件。
+升级前核对本地修改，并按部署方式停止框架管理进程；使用 `qbf-cli` 的部署执行 `qbf-cli stop framework-admin`，前台 CLI 等待 Ctrl+C 完成。停止结果未知时先核对排空，不继续覆盖运行文件。
 
 备份私有配置、账号目录、SQLite 与其有效 WAL、关联资源和外部 DSH 配置，保留文件权限。不要只复制单个数据库文件；运行中备份使用支持一致快照的工具。
 
@@ -116,7 +126,7 @@ npm ci
 npm run build
 ```
 
-继续使用原管理配置启动；受管部署使用 `qqbridge-framework start framework-admin`，前台使用原 `npm start` 命令及参数。升级不重新运行 `init`，不重置会话。DSH 桥接插件是独立安装，按 [DSH 接入](DSH.md) 重新构建、安装并加载相应版本。版本记录与已知限制见 [发布说明](RELEASE_NOTES.md)。
+继续使用原管理配置启动；受管部署使用 `qbf-cli service start framework-admin`，前台使用原 `npm start` 命令及参数。升级不重新运行 `init`，不重置会话。DSH 桥接插件是独立安装，按 [DSH 接入](DSH.md) 重新构建、安装并加载相应版本。版本记录与已知限制见 [发布说明](RELEASE_NOTES.md)。
 
 ## 自动保留
 
