@@ -178,8 +178,22 @@ try {
   assert.equal(initialized.status, 200);
   const token = (await readFile(resolve(dirname(configuration), saved.tokenFile), 'utf8')).trim();
   assert(token.length >= 24);
-  const status = await run(process.execPath, [cli, 'status'], { cwd, env, timeout: 15000 });
-  assert.match(status.stdout, /运行正常/);
+  // A fresh install has a working admin/gateway but no QQ or DSH configured.
+  // Require the real diagnostic exit status and independently verify every domain.
+  const status = await run(process.execPath, [cli, 'status', '--json'], { cwd, env, timeout: 15000 })
+    .then(result => ({ stdout: result.stdout, code: 0 }), (error: unknown) => {
+      assert(error instanceof Error && 'code' in error && error.code === 1
+        && 'stdout' in error && typeof error.stdout === 'string', 'Status failed without a diagnostic result');
+      return { stdout: error.stdout, code: 1 };
+    });
+  assert.equal(status.code, 1, 'An unconfigured chat must not be reported as healthy');
+  const report: unknown = JSON.parse(status.stdout);
+  assert(isRecord(report) && report.schema === 1 && report.healthy === false && Array.isArray(report.checks));
+  assert.deepEqual(report.checks.map((check: unknown) => {
+    assert(isRecord(check) && typeof check.id === 'string' && typeof check.state === 'string');
+    return { id: check.id, state: check.state };
+  }), [{ id: 'admin', state: 'ready' }, { id: 'gateway', state: 'ready' }, { id: 'dsh', state: 'disabled' },
+    { id: 'protocol', state: 'unavailable' }, { id: 'chat', state: 'blocked' }, { id: 'application', state: 'ready' }]);
   checkpoint('restart');
   await stop();
   evidence.initializationAndRestart = true;
