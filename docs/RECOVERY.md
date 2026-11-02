@@ -36,7 +36,7 @@ GET /api/chat/application?id=<原 operationId>
 
 `POST /api/chat/application/reconcile` 的 body 为 `{ "operationId": "<原 UUID>" }`，界面入口为“核对并继续更新”。对于原 apply 阶段的 unknown，或 blocked/pending_reload，它核对原配置 revision、DSH 实际预设和完整来源证据；满足条件后，保存同一操作的 running 状态并在后台继续 start，立即返回供页面查询。不会再次 stop、prepare 或 apply，也不创建另一份操作。
 
-停止阶段未知且当前已证实安全停止时，核对可以把原操作记为 blocked 并要求新的明确更新，即使当前配置版本已经变化。原 operationId、请求版本和阶段证据保持不变；它不续跑旧请求，也不执行新的应用。准备阶段未知仅在其他依赖版本未变化、至多 deployment 版本变化时采用这一路径；apply 或 migrate 跨版本未知不能据此解除。
+停止或启动阶段未知且当前已证实安全停止时，核对可以把原操作记为 blocked 并要求新的明确更新，即使当前配置版本已经变化。原 operationId、请求版本和阶段证据保持不变；它不续跑旧请求，也不执行新的应用。准备阶段未知仅在其他依赖版本未变化、至多 deployment 版本变化时采用这一路径；apply 或 migrate 跨版本未知不能据此解除。
 
 安全停止需要实际状态为 stopped、允许应用，生命周期、控制命令、执行、引擎队列和发送等均无待排空工作，bootstrap 与功能包没有未知状态。历史 `activeRevisions` 可以继续保留，它不是在途运行证据，也不必清空。
 

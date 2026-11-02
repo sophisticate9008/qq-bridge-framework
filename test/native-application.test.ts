@@ -249,8 +249,8 @@ test('cancelled reload observation leaves unknown evidence and cannot start or a
   assert.deepEqual(f.calls, ['stop', 'prepare', 'apply']);
 });
 
-test('quiescent stopped and preparation intents can finish across safe version changes without rewriting old evidence', async t => {
-  for (const phase of [null, 'stop', 'prepare'] as const) {
+test('quiescent stopped, preparation and failed start intents can finish across safe version changes without rewriting old evidence', async t => {
+  for (const phase of [null, 'stop', 'prepare', 'start'] as const) {
     const storage = createNativeApplicationStorage(await directory(t)); const f = fixture();
     const latest = { ...revisions, [phase === 'prepare' ? 'deployment' : 'plans']: 'd'.repeat(64) };
     f.setStatus({ state: 'stopped', canApplyDeployment: true, canStart: true, chatReady: false, revisions: latest, quiescent: true });
@@ -260,6 +260,9 @@ test('quiescent stopped and preparation intents can finish across safe version c
     const coordinator = createNativeApplicationCoordinator({ storage, ports: f.ports, signal: new AbortController().signal });
     const settled = await coordinator.reconcile(id);
     assert.equal(settled.state, 'blocked'); assert.deepEqual(settled.revisions, revisions);
+    const retained = (await storage.read()).value.records[0];
+    assert.deepEqual(retained?.request, { operationId: id, revisions, deploy: true });
+    assert.equal(settled.phase, phase); assert.equal(settled.phaseState, 'in-flight');
     assert.deepEqual(settled.reasons, [phase === 'prepare' ? 'application_preparation_saved_new_intent_required' : 'application_stopped_verified_new_intent_required']);
     assert.deepEqual(f.calls, []);
     await coordinator.create({ operationId: randomUUID(), revisions: latest, deploy: false }); await coordinator.drain();
@@ -268,7 +271,7 @@ test('quiescent stopped and preparation intents can finish across safe version c
 });
 
 test('same-version stopped evidence never bypasses quiescence and preparation cannot retire an unrelated changed intent', async t => {
-  for (const phase of [null, 'stop', 'prepare'] as const) {
+  for (const phase of [null, 'stop', 'prepare', 'start'] as const) {
     const storage = createNativeApplicationStorage(await directory(t)); const f = fixture();
     f.setStatus({ state: 'stopped', canApplyDeployment: true, canStart: true, chatReady: false, quiescent: false });
     const id = randomUUID(); const prior = await storage.read();

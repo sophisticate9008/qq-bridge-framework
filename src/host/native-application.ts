@@ -253,7 +253,9 @@ export function createNativeApplicationCoordinator(options: {
         const onlyPreparedDeploymentChanged = isNativeConfigurationRevisions(observed.revisions)
           && NATIVE_CONFIGURATION_REVISION_KEYS.every(key => key === 'deployment' || observed.revisions[key] === current.revisions[key]);
         const safelyStopped = observed.state === 'stopped' && observed.quiescent === true;
-        const stoppedIntent = current.phase === null || current.phase === 'stop';
+        // A settled failed start has no remaining lifecycle effect to replay.
+        // Retain its original evidence and require a new explicit intent.
+        const stoppedIntent = current.phase === null || current.phase === 'stop' || current.phase === 'start';
         const preparedIntent = current.phase === 'prepare' && onlyPreparedDeploymentChanged;
         if (safelyStopped && (stoppedIntent || preparedIntent)) {
           const settled: NativeApplicationSnapshot = { ...current, state: 'blocked', updatedAt: now(), reasons: [preparedIntent
