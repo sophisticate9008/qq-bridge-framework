@@ -3,22 +3,25 @@ import { isRecord } from './values.ts'
 export type StickerLibraryConfiguration = {
   readonly enabled: boolean
   readonly triggerProbabilityPercent: number
-  readonly collectProbabilityPercent: number
   readonly accountNearFullAt: number
 }
 export const DEFAULT_STICKER_LIBRARY_CONFIGURATION: StickerLibraryConfiguration = Object.freeze({
-  enabled: true, triggerProbabilityPercent: 15, collectProbabilityPercent: 15, accountNearFullAt: 500,
+  enabled: true, triggerProbabilityPercent: 15, accountNearFullAt: 500,
 })
 export function validateStickerLibraryConfiguration(value: unknown): StickerLibraryConfiguration {
-  if (!isRecord(value) || Object.keys(value).length !== 4
+  // Ignore the retired post-annotation probability in existing saved configurations.
+  if (!isRecord(value) || !Object.keys(value).every(key => Object.hasOwn(DEFAULT_STICKER_LIBRARY_CONFIGURATION, key) || key === 'collectProbabilityPercent')
     || !Object.keys(DEFAULT_STICKER_LIBRARY_CONFIGURATION).every(key => Object.hasOwn(value, key))
     || typeof value.enabled !== 'boolean'
-    || ![value.triggerProbabilityPercent, value.collectProbabilityPercent].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100)
+    || typeof value.triggerProbabilityPercent !== 'number' || !Number.isFinite(value.triggerProbabilityPercent)
+    || value.triggerProbabilityPercent < 0 || value.triggerProbabilityPercent > 100
+    || value.collectProbabilityPercent !== undefined && (typeof value.collectProbabilityPercent !== 'number'
+      || !Number.isFinite(value.collectProbabilityPercent) || value.collectProbabilityPercent < 0 || value.collectProbabilityPercent > 100)
     || !Number.isSafeInteger(value.accountNearFullAt) || Number(value.accountNearFullAt) < 1 || Number(value.accountNearFullAt) > 10000) {
     throw new TypeError('Invalid sticker library configuration')
   }
   return { enabled: value.enabled, triggerProbabilityPercent: Number(value.triggerProbabilityPercent),
-    collectProbabilityPercent: Number(value.collectProbabilityPercent), accountNearFullAt: Number(value.accountNearFullAt) }
+    accountNearFullAt: Number(value.accountNearFullAt) }
 }
 export interface StickerLibraryFacets {
   readonly emotions: readonly string[]

@@ -10,12 +10,13 @@ const item = { id: 'a'.repeat(64), revision: 1, name: '招手', description: '�
 const snapshot = { schema: 1, accountCollection: 'confirmed', capacity: { count: 1, nearFullAt: 240, capacityKnown: false },
   items: [item], limited: false, pending: 0 }
 
-test('sticker settings use two separate 15 percent defaults and accept fractional percentages', () => {
+test('sticker settings keep the trigger probability and ignore the retired collection probability', () => {
   assert.equal(DEFAULT_STICKER_LIBRARY_CONFIGURATION.triggerProbabilityPercent, 15)
-  assert.equal(DEFAULT_STICKER_LIBRARY_CONFIGURATION.collectProbabilityPercent, 15)
+  for (const collectProbabilityPercent of [0, 15, 100]) assert.deepEqual(validateStickerLibraryConfiguration({
+    ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, collectProbabilityPercent }), DEFAULT_STICKER_LIBRARY_CONFIGURATION)
   assert.deepEqual(validateStickerLibraryConfiguration({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION,
     triggerProbabilityPercent: 0.5, collectProbabilityPercent: 99.9 }), { ...DEFAULT_STICKER_LIBRARY_CONFIGURATION,
-    triggerProbabilityPercent: 0.5, collectProbabilityPercent: 99.9 })
+    triggerProbabilityPercent: 0.5 })
   for (const invalid of [-1, 101, Infinity, NaN, '15']) assert.throws(() => validateStickerLibraryConfiguration({
     ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, triggerProbabilityPercent: invalid }))
   assert.throws(() => validateStickerLibraryConfiguration({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, accountNearFullAt: 1.5 }))

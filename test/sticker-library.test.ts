@@ -23,15 +23,16 @@ function model(run: PluginModelClient['run']): PluginModelClient {
     bind: async () => { throw new Error('No explicit bind expected') }, create: async () => { throw new Error('run owns binding creation') } }
 }
 async function fixture(t: TestContext, settings: { nearFull?: boolean; add?: 'full' | 'unknown'; filter?: boolean; probabilities?: number;
-  triggerProbability?: number; collectProbability?: number; random?: number } = {}) {
+  triggerProbability?: number; random?: number; randomValues?: readonly number[] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'qbf-sticker-library-'))
   const store = createSqliteStore({ filename: ':memory:' })
   const bytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: 'blue' } }).png().toBuffer()
   const md5 = createHash('md5').update(bytes).digest('hex')
   const calls: PluginModelRunRequest[] = [], writes: string[] = []
+  let randomCalls = 0
   let imageReads = 0
   let roster: readonly OneBotSticker[] = settings.nearFull ? [{ id: 'other', stickerId: 'other', md5: 'a'.repeat(32), url: 'https://media.example/other' }] : []
-  let classify: (request: PluginModelRunRequest) => Promise<string> = async () => JSON.stringify({ isSticker: !settings.filter, safeToShare: !settings.filter, ...annotation })
+  let classify: (request: PluginModelRunRequest) => Promise<string> = async () => JSON.stringify({ shouldCollect: !settings.filter, isSticker: !settings.filter, safeToShare: !settings.filter, ...annotation })
   const collector = model(async request => { calls.push(request); return { requestId: 'classify', sessionId: 'bound-collector',
     text: await classify(request), usage: null } })
   const port: OneBotStickerPort = {
@@ -48,10 +49,10 @@ async function fixture(t: TestContext, settings: { nearFull?: boolean; add?: 'fu
   const library = createStickerLibrary({ directory, store, accountId: '999', port, reader: { async read() { imageReads++; return { status: 'confirmed', data: bytes, mediaType: 'image/png' } } },
     collector, signal: signal(), configuration: async () => ({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION,
       triggerProbabilityPercent: settings.triggerProbability ?? settings.probabilities ?? 100,
-      collectProbabilityPercent: settings.collectProbability ?? settings.probabilities ?? 100, accountNearFullAt: settings.nearFull ? 1 : 240 }),
+      accountNearFullAt: settings.nearFull ? 1 : 240 }),
     async authorize(conversationId) { assert.equal(conversationId, 'group:123') }, context: () => ['one', 'two', 'three', 'four', 'five'],
     async register(id, conversationId, current) { current.throwIfAborted(); assert.equal(conversationId, 'group:123'); writes.push('register'); return `media-${id}` },
-    random: () => settings.random ?? 0,
+    random: () => settings.randomValues?.[randomCalls++] ?? settings.random ?? 0,
   })
   function asset(id: string, url = 'https://media.example/image', file?: string) {
     store.write('native-chat.media', id, { schema: 1, accountId: '999', conversationId: 'group:123', kind: 'image', expiresAt: Date.now() + 60_000,
@@ -59,7 +60,7 @@ async function fixture(t: TestContext, settings: { nearFull?: boolean; add?: 'fu
   }
   asset('incoming')
   t.after(async () => { await library.stop(); store.close(); await rm(directory, { recursive: true, force: true }) })
-  return { library, store, bytes, calls, writes, asset, port, imageReads: () => imageReads, setClassifier: (next: typeof classify) => { classify = next },
+  return { library, store, bytes, calls, writes, asset, port, imageReads: () => imageReads, randomCalls: () => randomCalls, setClassifier: (next: typeof classify) => { classify = next },
     setRoster: (items: readonly OneBotSticker[]) => { roster = items },
     seed() { const item = { id: 'known', stickerId: 'known', md5, url: 'https://media.example/image' }; roster = [item]; createStickerSemanticCache(store, '999').remember(item, annotation) } }
 }
@@ -74,7 +75,7 @@ test('an account image discovered after tagging reuses collection and exposes it
     f.setClassifier(async () => {
       // The account becomes visible only on the forced refresh after annotation.
       f.setRoster([item])
-      return JSON.stringify({ isSticker: true, safeToShare: true, ...annotation })
+      return JSON.stringify({ shouldCollect: true, isSticker: true, safeToShare: true, ...annotation })
     })
     assert.deepEqual(await f.library.collect('incoming', 'group:123', true, signal()), { status: 'confirmed', reused: true, quiet: true })
     assert.deepEqual(f.writes, [], 'an already collected image must not be added again')
@@ -202,7 +203,7 @@ test('both unique and ambiguous action candidates require model approval', async
   }
 })
 
-test('manual collection bypasses both probability gates, filters in a persistent helper and deduplicates across incoming aliases', async t => {
+test('manual collection bypasses the trigger probability, filters in a persistent helper and deduplicates across incoming aliases', async t => {
   const f = await fixture(t, { probabilities: 0 })
   assert.deepEqual(await f.library.collect('incoming', 'group:123', false, signal()), { status: 'skipped', reason: 'probability', quiet: true })
   assert.equal(f.calls.length, 0)
@@ -226,7 +227,7 @@ test('manual requests cannot bypass image filtering', async t => {
 test('collection never trusts model-asserted confirmation and applies account appearance rules as inference', async t => {
   const f = await fixture(t)
   createStickerCharacterRecognition(f.store, '999').remember({ character: '白猫角色', aliases: ['小白'], entities: ['白猫'], evidence: '账号确认的角色关联规则' })
-  f.setClassifier(async () => JSON.stringify({ isSticker: true, safeToShare: true, ...annotation,
+  f.setClassifier(async () => JSON.stringify({ shouldCollect: true, isSticker: true, safeToShare: true, ...annotation,
     visual: { colors: ['白色'], styles: ['Q版'], entities: ['白猫'] },
     identity: { character: '伪造网页确认', aliases: [], source: 'web', references: [{ url: 'https://example.com/invented', title: '模型编造来源' }] } }))
   await f.library.collect('incoming', 'group:123', true, signal())
@@ -308,7 +309,7 @@ test('manual collection accepts immediately and tagging stays in the background 
   assert.equal(await f.library.choose('开心', 'group:123', signal(), Date.now() + 10_000), null)
   assert(Date.now() - waitingAt < 100, 'an unfinished classification does not delay selection')
   assert.deepEqual(f.writes, [])
-  release(JSON.stringify({ isSticker: true, safeToShare: true, ...annotation }))
+  release(JSON.stringify({ shouldCollect: true, isSticker: true, safeToShare: true, ...annotation }))
   for (let attempt = 0; attempt < 100 && f.library.pending(); attempt++) await new Promise(resolve => setTimeout(resolve, 5))
   assert.equal(f.library.pending(), 0)
   assert.deepEqual(f.writes, ['add'])
@@ -321,7 +322,6 @@ test('only protocol-marked sticker images trigger automatic collection and perce
   const message = { receivedAt: Date.now(), directed: false, isSelf: false, id: 'message', userId: '123', conversationId: 'group:123', content: [{ type: 'image' as const, assetId: 'photo' }, { type: 'image' as const, assetId: 'sticker' }] }
   assert.deepEqual(stickerMessageAssets(message, { message: [{ type: 'image', data: {} }, { type: 'image', data: { sub_type: 1 } }] }), ['sticker'])
   assert.equal(validateStickerLibraryConfiguration({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, triggerProbabilityPercent: 0.5 }).triggerProbabilityPercent, 0.5)
-  assert.equal(DEFAULT_STICKER_LIBRARY_CONFIGURATION.collectProbabilityPercent, 15)
   assert.throws(() => validateStickerLibraryConfiguration({ ...DEFAULT_STICKER_LIBRARY_CONFIGURATION, collectProbabilityPercent: NaN }))
 })
 
@@ -337,13 +337,13 @@ test('a Tencent-style MD5 file hint does not collide with its own collection res
 })
 
 for (const uncertain of [false, true]) test(`an explicit request upgrades a running automatic collection without a second writer${uncertain ? ' or unknown-result retry' : ''}`, async t => {
-  const f = await fixture(t, { triggerProbability: 100, collectProbability: 0, random: 0.5, ...(uncertain ? { add: 'unknown' } : {}) })
+  const f = await fixture(t, { triggerProbability: 100, random: 0.5, ...(uncertain ? { add: 'unknown' } : {}) })
   let entered!: () => void, release!: () => void
   const classifying = new Promise<void>(resolve => { entered = resolve })
   const proceed = new Promise<void>(resolve => { release = resolve })
   f.setClassifier(async () => {
     entered(); await proceed
-    return JSON.stringify({ isSticker: true, safeToShare: true, ...annotation })
+    return JSON.stringify({ shouldCollect: true, isSticker: true, safeToShare: true, ...annotation })
   })
   const automatic = f.library.collect('incoming', 'group:123', false, signal())
   await classifying
@@ -353,21 +353,21 @@ for (const uncertain of [false, true]) test(`an explicit request upgrades a runn
   const result = await automatic
   assert(isRecord(result)); assert.equal(result.status, uncertain ? 'unknown' : 'confirmed')
   assert.equal(f.calls.length, 1)
-  assert.deepEqual(f.writes, ['add'], 'the explicit request bypasses automatic collectProbability=0')
+  assert.deepEqual(f.writes, ['add'], 'automatic and explicit requests share the same accepted model decision')
   await f.library.collect('incoming', 'group:123', true, signal())
   assert.deepEqual(f.writes, ['add'], 'confirmed and unknown writes are never repeated')
 })
 
 test('manual aliases upgrade the running content hash reservation while keeping image filtering', async t => {
   for (const suitable of [true, false]) {
-    const f = await fixture(t, { triggerProbability: 100, collectProbability: 0, random: 0.5 })
+    const f = await fixture(t, { triggerProbability: 100, random: 0.5 })
     f.asset('alias', 'https://media.example/another-signed-url')
     let entered!: () => void, release!: () => void
     const classifying = new Promise<void>(resolve => { entered = resolve })
     const proceed = new Promise<void>(resolve => { release = resolve })
     f.setClassifier(async () => {
       entered(); await proceed
-      return JSON.stringify({ isSticker: suitable, safeToShare: suitable, ...annotation })
+      return JSON.stringify({ shouldCollect: suitable, isSticker: suitable, safeToShare: suitable, ...annotation })
     })
     const automatic = f.library.collect('incoming', 'group:123', false, signal())
     await classifying
@@ -414,7 +414,7 @@ test('background tagging that started earlier cannot replace a later manual anno
   const initial = (await f.library.snapshot(signal())).items[0]!
   let entered!: () => void, release!: () => void
   const classifying = new Promise<void>(resolve => { entered = resolve }), proceed = new Promise<void>(resolve => { release = resolve })
-  f.setClassifier(async () => { entered(); await proceed; return JSON.stringify({ isSticker: true, safeToShare: true, ...annotation,
+  f.setClassifier(async () => { entered(); await proceed; return JSON.stringify({ shouldCollect: true, isSticker: true, safeToShare: true, ...annotation,
     visual: { colors: ['蓝色'], styles: [], entities: ['蓝猫'] } }) })
   f.library.warm('group:123'); await classifying
   const manual = { description: '手动纠正', tags: ['无语'], avoid: '安慰',
@@ -446,4 +446,31 @@ test('omitting the role during a full manual edit preserves its inferred source 
   const after = (await f.library.snapshot(signal())).items[0]!
   assert.deepEqual(after.identity, before.identity); assert.equal(after.description, ''); assert.deepEqual(after.visual, empty.visual)
   assert.equal(f.calls.length, 0, 'manual edits do not call a model or upgrade its source to user')
+})
+
+
+test('automatic collection draws only before image analysis and saves accepted model labels directly', async t => {
+  const f = await fixture(t, { triggerProbability: 100, randomValues: [0, 0.9999] })
+  const result = await f.library.collect('incoming', 'group:123', false, signal())
+  assert(isRecord(result)); assert.equal(result.status, 'confirmed')
+  assert.equal(f.randomCalls(), 1, 'no second random draw after paying for image analysis')
+  assert.equal(f.calls.length, 1)
+  assert(f.calls[0]!.prompt.includes('shouldCollect'))
+  assert.deepEqual(f.writes, ['add'])
+  assert.equal((await f.library.snapshot(signal())).items[0]!.description, annotation.description)
+})
+
+test('the image model can decline a safe sticker and invalid or unsafe acceptance never collects', async t => {
+  for (const decision of [
+    { shouldCollect: false, isSticker: true, safeToShare: true },
+    { isSticker: true, safeToShare: true },
+    { shouldCollect: true, isSticker: false, safeToShare: true },
+    { shouldCollect: true, isSticker: true, safeToShare: false },
+  ]) {
+    const f = await fixture(t)
+    f.setClassifier(async () => JSON.stringify({ ...decision, ...annotation }))
+    const result = await f.library.collect('incoming', 'group:123', false, signal())
+    assert(isRecord(result)); assert.equal(result.status, 'skipped'); assert.equal(result.reason, 'filtered')
+    assert.equal(f.calls.length, 1); assert.deepEqual(f.writes, [])
+  }
 })
