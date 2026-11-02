@@ -70,11 +70,6 @@ async function main(): Promise<void> {
   await chmod(target, 0o755);
   await chmod(cliTarget, 0o755);
   if (!originalLink) await symlink(cliTarget, cli);
-  for (const [name, ownedTarget] of [['qq-bridge-framework', cliTarget], ['qqbridge-framework', join(root, 'ops/qqbridge-framework')]]) {
-    const old = join(binDirectory, name!);
-    const information = await lstat(old).catch(error => { if (isRecord(error) && error.code === 'ENOENT') return null; throw error; });
-    if (information?.isSymbolicLink() && resolve(binDirectory, await readlink(old)) === resolve(ownedTarget!)) await unlink(old);
-  }
   await replace(adminPath, adminSource, `${JSON.stringify({ ...admin, serviceManager: target }, null, 2)}\n`, 0o600);
   if (bootPath && bootSource !== undefined && bootNext !== undefined) {
     const mode = (await lstat(bootPath)).mode & 0o777;

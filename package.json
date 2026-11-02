@@ -9,7 +9,9 @@
     "node": ">=24.12.0"
   },
   "bin": {
-    "qbf-cli": "scripts/cli.ts"
+    "qbf-cli": "scripts/cli.ts",
+    "qq-bridge-framework": "scripts/cli.ts",
+    "qqbridge-framework": "scripts/legacy-service-cli.ts"
   },
   "scripts": {
     "start": "node scripts/cli.ts start",

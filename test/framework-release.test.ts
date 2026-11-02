@@ -19,6 +19,7 @@ test('the runtime archive uses compiled commands without changing the source man
   const saved = structuredClone(original), runtime = frameworkRuntimeManifest(original);
   assert.deepEqual(original, saved);
   assert.deepEqual(runtime.scripts, { ...original.scripts, start: 'node dist/scripts/cli.js start', cli: 'node dist/scripts/cli.js' });
-  assert.deepEqual(runtime.bin, { 'qbf-cli': 'dist/scripts/cli.js' });
+  assert.deepEqual(runtime.bin, { 'qbf-cli': 'dist/scripts/cli.js', 'qq-bridge-framework': 'dist/scripts/cli.js',
+    'qqbridge-framework': 'dist/scripts/legacy-service-cli.js' });
   assert.deepEqual(runtime.dependencies, original.dependencies);
 });

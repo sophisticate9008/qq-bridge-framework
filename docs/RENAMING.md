@@ -46,6 +46,6 @@ npm run release:pack
 
 ## CLI 入口统一
 
-统一命令为 `qbf-cli`，仓库和 npm 包名保持 `qq-bridge-framework`。旧的 `qq-bridge-framework`、`qqbridge-framework` 命令入口已合并。初始化和前台运行使用 `qbf-cli init/start`；后台服务启停使用 `qbf-cli service start/stop/restart`，日志、协议、重载、维护也在同一入口。
+统一命令为 `qbf-cli`，仓库和 npm 包名保持 `qq-bridge-framework`。原 `qq-bridge-framework` 前台命令和 `qqbridge-framework` 服务命令保留兼容入口，已有脚本可继续使用；新文档统一使用 `qbf-cli`。初始化和前台运行使用 `qbf-cli init/start`；后台服务启停使用 `qbf-cli service start/stop/restart`，日志、协议、重载、维护也在同一入口。
 
-已有本机部署同步管理配置的 `serviceManager` 为 `ops/qbf-cli`，全局 `qbf-cli` 链接到统一 CLI，boot 使用 `qbf-cli service start` 和 `qbf-cli service status`。只移除归属本安装的旧命令链接，配置、凭据、会话与后台进程保留。`qbf-cli --help`、`qbf-cli service --help` 查看当前支持范围；`--version` 显示本次调用所属安装的版本。
+已有本机部署同步管理配置的 `serviceManager` 为 `ops/qbf-cli`，全局 `qbf-cli` 链接到统一 CLI，boot 使用 `qbf-cli service start` 和 `qbf-cli service status`。安装器保留已有旧命令链接，配置、凭据、会话与后台进程保留。`qbf-cli --help`、`qbf-cli service --help` 查看当前支持范围；`--version` 显示本次调用所属安装的版本。
