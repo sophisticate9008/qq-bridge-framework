@@ -253,11 +253,11 @@ async function ensureProtocol(config: Configuration, service: Service): Promise<
       && ((await sessions(other)).length > 0 || await listening(other))) fail('另一协议端仍在运行，请使用 qbf-cli protocol 切换。');
   }
 }
-async function startOne(config: Configuration, id: string, deadline: number): Promise<void> {
+async function startOne(config: Configuration, id: string, deadline: number, listenerOnly = false): Promise<void> {
   const service = component(config, id, true);
   await ensureProtocol(config, service);
   const running = (await sessions(service)).length > 0;
-  if (!running && await ready(service, remaining(deadline, 8000))) {
+  if (!listenerOnly && !running && await ready(service, remaining(deadline, 8000))) {
     console.log(service.ready ? `${id} 已就绪（外部进程）。` : `${id} 已监听（外部进程，健康未核验）。`);
     return;
   }
@@ -281,7 +281,10 @@ async function startOne(config: Configuration, id: string, deadline: number): Pr
   }
   while (Date.now() < deadline) {
     if ((await sessions(service)).length === 0) fail(`${id} 进程已退出，请查看日志。`);
-    if (await ready(service, remaining(deadline, 8000))) { console.log(service.ready ? `${id} 已就绪。` : `${id} 已启动（健康未核验）。`); return; }
+    if (listenerOnly ? !service.port || await listening(service) : await ready(service, remaining(deadline, 8000))) {
+      console.log(listenerOnly ? `${id} 进程与管理监听已启动，正在恢复依赖。` : service.ready ? `${id} 已就绪。` : `${id} 已启动（健康未核验）。`);
+      return;
+    }
     await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
   }
   fail(`${id} 等待就绪超时，请查看日志。`);
@@ -527,14 +530,19 @@ async function main(): Promise<void> {
       // Recheck every target: only this proof permits editing abandoned configuration controllers.
       for (const id of targets) if ((await sessions(config.services[id]!)).length > 0 || await listening(config.services[id]!)) fail('受管服务尚未全部停止。');
     } else {
-      let failed = false;
-      const deadline = Date.now() + 140_000;
-      // Bring back the UI even when a dependency cannot start. Saved running intent is suppressed by the worker.
-      for (const id of ['framework-admin', ...targets.filter(id => id !== 'framework-admin' && config.services[id]!.enabled !== false)]) {
-        try { await startOne(config, id, Math.min(deadline, Date.now() + 60_000)); }
-        catch { failed = true; console.error(`${id} 恢复启动尚未就绪。`); }
-      }
-      if (failed) fail('部分受管服务尚未恢复，管理页面可查看恢复状态。');
+      const { startRepairServices } = await import('./repair-service-start.ts');
+      const starts = targets.filter(id => config.services[id]!.enabled !== false);
+      await startRepairServices(starts, Date.now() + 140_000, {
+        bootstrapAdministrator: deadline => startOne(config, 'framework-admin', deadline, true),
+        start: (id, deadline) => startOne(config, id, deadline),
+        async ready(id, deadline) {
+          const service = config.services[id]!;
+          const current = (await sessions(service)).length > 0;
+          return current && (!service.port || await listening(service)) && await ready(service, remaining(deadline, 8000));
+        },
+        pending(id) { console.error(`${id} 恢复启动尚未就绪，继续恢复其他组件并最终重新核验。`); }
+      });
+      console.log('所有受管服务已通过最终就绪核验。');
     }
     return;
   }
