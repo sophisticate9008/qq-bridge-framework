@@ -38,6 +38,18 @@ test('runtime UI separates startup prerequisites from expected stopped diagnosti
   assert.equal(parsed.canApplyDeployment, false);
 });
 
+test('follow diagnostics distinguish current interruption from a retained historical error', () => {
+  const interrupted = parseChatRuntimeStatus({ ...status, state: 'running', canStart: false,
+    protocolConnected: true, missingReasons: ['agent_follow_unavailable'], lastError: 'AGENT_FOLLOW_TERMINATED' });
+  assert(interrupted);
+  assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED', interrupted), /有会话.*后续新请求.*尝试重新连接/);
+  assert.match(chatRuntimeReason('agent_follow_unavailable').text, /旧请求不会自动重发/);
+  const restored = { ...interrupted, chatReady: true, missingReasons: [] };
+  assert.equal(chatRuntimeBadge(restored), '聊天已启用');
+  assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED', restored), /曾中断.*当前聊天链路已就绪/);
+  assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED'), /最近记录过.*当前是否恢复/);
+});
+
 test('running runtime does not repeat stopped startup guidance beside a real authorization problem', () => {
   const running = parseChatRuntimeStatus({ ...status, state: 'running', canStart: false,
     missingReasons: ['authorization_budget_unavailable', 'runtime_not_started'] });
@@ -71,7 +83,7 @@ test('configuration IDs use getRandomValues on non-secure local-network pages wi
 test('runtime UI does not describe budget exhaustion or follow failure as a protocol outage', () => {
   for (const [reason, badge, page] of [
     ['authorization_budget_unavailable', '授权需要处理', 'security'],
-    ['agent_follow_unavailable', '引擎回复连接中断', 'adapters'],
+    ['agent_follow_unavailable', '会话回复监听中断', 'adapters'],
     ['host_not_ready', '聊天暂不可用', 'adapters'],
     ['configuration_changed', '设置等待应用', 'adapters'],
   ]) {

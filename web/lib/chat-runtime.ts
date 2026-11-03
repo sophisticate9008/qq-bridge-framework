@@ -136,16 +136,20 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
   native_runtime_lease_unknown: { text: '无法读取聊天运行锁，尚未确认能安全启动；请检查存储与权限。', page: 'adapters' },
   configuration_changed: { text: '已保存设置有变更，请停止聊天后重新启动以应用。', page: 'adapters' },
   authorization_budget_unavailable: { text: '消息授权已用完或过期，请到访问范围检查。', page: 'access' },
-  agent_follow_unavailable: { text: '引擎回复连接已中断。新消息处理前必须重新建立跟随；不会重放旧请求。', page: 'adapters' },
+  agent_follow_unavailable: { text: '有会话的 DSH 回复监听中断；该会话后续新请求会先尝试重新连接。旧请求不会自动重发，未确认的结果请到会话详情核对。', page: 'adapters' },
   host_not_ready: { text: '聊天处理链路尚未就绪，请检查服务状态。', page: 'adapters' },
   host_fault: { text: '聊天处理出现故障，请检查服务状态；不要重复发送未确认的请求。', page: 'adapters' },
   execution_controller_unavailable: { text: '请求状态记录暂不可用，聊天已暂停保护；请检查服务和存储，不要重复提交未确认的请求。', page: 'adapters' },
   trusted_dsh_binding_missing: { text: '尚未确认聊天方案与 DSH 的实际配置对应，请先预览、应用并检查加载结果。', page: 'adapters' },
 };
 
-export function chatRuntimeLastError(code: string): string {
+export function chatRuntimeLastError(code: string, status: ChatRuntimeStatus | null = null): string {
+  if (code === 'AGENT_FOLLOW_TERMINATED') {
+    if (status?.missingReasons.includes('agent_follow_unavailable')) return reasons.agent_follow_unavailable!.text;
+    if (status?.chatReady) return '会话回复监听曾中断，当前聊天链路已就绪。';
+    return '最近记录过会话回复监听中断；当前是否恢复请查看聊天运行状态。';
+  }
   const messages: Readonly<Record<string, string>> = {
-    AGENT_FOLLOW_TERMINATED: '会话回复监听已中断；DSH 服务连接需单独检查，请核对聊天链路状态。',
     TOOL_CHANNEL_UNKNOWN: '框架工具通道结果尚未确认；请查看对应执行记录，DSH 服务状态单独显示。',
     NATIVE_CHAT_LEASE_HELD: '聊天运行锁尚未释放，启动被阻止。请核对原实例和排空记录；DSH 服务状态单独显示。',
     NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE: 'DSH 的请求关联插件尚未安装、加载或通过认证。请在 DSH 中安装并启用请求关联插件后重新检查；不会自动安装或重启引擎。',
@@ -168,7 +172,7 @@ export function chatRuntimeBadge(status: ChatRuntimeStatus | null): string {
   if (status.missingReasons.includes('authorization_budget_unavailable')
     || status.missingReasons.includes('explicit_authorization_missing')) return '授权需要处理';
   if (status.configurationChanged) return '设置等待应用';
-  if (status.missingReasons.includes('agent_follow_unavailable')) return '引擎回复连接中断';
+  if (status.missingReasons.includes('agent_follow_unavailable')) return '会话回复监听中断';
   return '聊天暂不可用';
 }
 

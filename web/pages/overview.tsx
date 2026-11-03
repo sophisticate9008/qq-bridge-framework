@@ -67,7 +67,7 @@ export function OverviewPage(props: PageProps) {
       { label: '会话绑定', value: bound ? `${bound.next ? '至少 ' : ''}${bound.sessions.length} 个` : '尚未确认' },
     ]} />
     {reasons.length > 0 && <div className="strip warn">{reasons.map((reason, index) => <p key={index}>{reason.text}</p>)}</div>}
-    {status?.lastError && <div className="strip warn">{chatRuntimeLastError(status.lastError)}</div>}
+    {status?.lastError && <div className={`strip ${status.chatReady ? '' : 'warn'}`}>{chatRuntimeLastError(status.lastError, status)}</div>}
     {runtime.error && <div className="strip warn">运行状态读取失败，请稍后刷新。</div>}
   </div>;
   const rawRuntime = <div className="border-t pt-2"><RawDetails title="运行技术记录" label="查看技术记录" value={{ runtime: runtime.snapshot, inbox: inbox.snapshot, runtimeReadError: runtime.error ? String(runtime.error) : null, inboxReadError: inbox.error ? String(inbox.error) : null }} /></div>;
@@ -116,7 +116,7 @@ export function OverviewPage(props: PageProps) {
       </div>
       <Section title="需要关注" className="[&>.panel-body]:py-1.5" actions={<ReadOnlyDetails title="运行与收件状态" description="当前运行情况与各会话的消息排队状态。"><div className="stack">{runtimeDetails}{inboxDetails}{rawRuntime}</div></ReadOnlyDetails>}>
         <div className="grid divide-y">
-          {runtime.error ? <div className="row py-1"><StatusPill tone="warning">读取失败</StatusPill><span className="grow">运行状态暂时不可用。</span><Button size="sm" variant="outline" onClick={runtime.refresh}>重新读取</Button></div> : status?.lastError ? <div className="row py-1"><StatusPill tone="warning">运行异常</StatusPill><span className="grow">{chatRuntimeLastError(status.lastError)}</span><Button size="sm" variant="outline" onClick={() => navigate('adapters')}>查看连接</Button></div> : null}
+          {runtime.error ? <div className="row py-1"><StatusPill tone="warning">读取失败</StatusPill><span className="grow">运行状态暂时不可用。</span><Button size="sm" variant="outline" onClick={runtime.refresh}>重新读取</Button></div> : status?.lastError ? <div className="row py-1"><StatusPill tone={status.chatReady ? 'neutral' : 'warning'}>{status.chatReady ? '历史记录' : '运行异常'}</StatusPill><span className="grow">{chatRuntimeLastError(status.lastError, status)}</span><Button size="sm" variant="outline" onClick={() => navigate('adapters')}>查看连接</Button></div> : null}
           {!status?.chatReady && reasons.map((reason, index) => <div className="row py-1" key={index}><StatusPill tone="warning">需要设置</StatusPill><span className="grow">{reason.text}</span><Button size="sm" variant="outline" onClick={() => navigate(reason.page)}>去处理</Button></div>)}
           {inboxValue?.items.filter(item => item.state === 'blocked').map(item => <div className="row py-1" key={item.conversationId}><StatusPill tone="warning">结果待核对</StatusPill><strong className="text-xs">{item.conversationId}</strong><span className="grow text-xs">检测到旧排队记录，聊天启动时会自动整理。</span><Button size="sm" variant="outline" onClick={() => navigate('sessions')}>核对状态</Button></div>)}
           {inbox.error && <p className="text-xs text-destructive py-1">收件状态暂时无法读取。<Button size="xs" variant="link" onClick={inbox.refresh}>重新读取</Button></p>}
