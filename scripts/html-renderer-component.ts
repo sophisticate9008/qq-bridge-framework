@@ -8,7 +8,7 @@ export async function htmlRendererBuildHash(root: string): Promise<string> {
   for (const name of ['tools/html-renderer/config.json', 'tools/html-renderer/Cargo.lock',
     'tools/html-renderer/main.rs', 'tools/html-renderer/prepare.ts', 'tools/html-renderer/package.ts',
     'tools/blitz-probe/prepare.ts']) {
-    hash.update(name + '\0').update(await readFile(join(root, name))).update('\0');
+    hash.update(name + '\0').update((await readFile(join(root, name), 'utf8')).replace(/\r\n/g, '\n')).update('\0');
   }
   return hash.digest('hex');
 }
