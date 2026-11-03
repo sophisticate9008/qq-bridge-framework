@@ -104,3 +104,22 @@ test('withheld input survives ordinary chatter rolling the original messages out
   assert.equal(next.unsentReplyRequests?.[0]?.text, '原始明确问题')
   assert.equal(next.unsentReplyRequests?.[0]?.actor, '123')
 })
+
+test('a queued explicit source is retained in the snapshot ahead of newer ordinary chatter', async context => {
+  const f = fixture(context)
+  const messages = [{ id: 'explicit', actor: '123', receivedAt: 100,
+    content: [{ type: 'text' as const, text: '需要保留的原题' }] },
+  ...Array.from({ length: 45 }, (_, index) => ({ id: `ordinary-${index}`, actor: '789', receivedAt: 101 + index,
+    content: [{ type: 'text' as const, text: '普通闲聊' }] }))]
+  for (const item of messages) f.append(item.id, item.actor)
+  f.freshness.prepare(f.binding, '789', 'ordinary-44', {
+    addressedMessages: [{ messageId: 'explicit', actor: '123' }],
+    contextMessageIds: messages.map(item => item.id), contextMessages: messages })
+  f.waiting('123')
+  assert.equal(await f.freshness.hold(f.event('ordinary-44')), true)
+  const next = f.freshness.prepare(f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
+  assert.equal(next.unsentReplyMessageIds?.length, 32)
+  assert(next.unsentReplyMessageIds?.includes('explicit'))
+  assert.equal(next.unsentReplyRequests?.find(item => item.id === 'explicit')?.text, '需要保留的原题')
+  assert(next.unsentReplyMessageIds?.includes('ordinary-44'))
+})

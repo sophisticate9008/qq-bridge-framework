@@ -307,3 +307,22 @@ test('retained reply budgets trim background text before an explicit question', 
   assert.match(text, new RegExp(`"text":"${'明确问题'.repeat(100)}","truncated":false`));
   assert(Buffer.byteLength(JSON.stringify(parts)) <= 60 * 1024);
 });
+
+test('a queued explicit question survives more than 32 newer ordinary messages within the input budget', () => {
+  const entries: HistoryMessage[] = [{ id: 'explicit-question', actor: '123', receivedAt: 100,
+    content: [{ type: 'text', text: '明确原题：请在苹果和梨之间给一个建议' }] },
+  ...Array.from({ length: 45 }, (_, index) => ({ id: `chatter-${index}`, actor: '789', receivedAt: 101 + index,
+    content: [{ type: 'text' as const, text: '旁人的普通闲聊'.repeat(100) }] }))];
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '789',
+    data: { content: [{ type: 'text', text: '群里又来一条闲聊' }] } };
+  const parts = prepareNativeChatInput(event, entries, { owner: null, partial: false, participation: 'continuation',
+    maxHistoryCharacters: 2000, groupWake: [{ messageId: 'explicit-question', actor: '123', reason: 'direct' }] });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  const facts = JSON.parse(text.slice('会话事实：\n'.length, text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n'))) as {
+    recent: { id: string; text: string }[]; historyTruncated: boolean;
+  };
+  assert.equal(facts.recent[0]?.id, 'explicit-question');
+  assert.match(facts.recent[0]!.text, /明确原题/);
+  assert(facts.recent.length <= 32);
+  assert.equal(facts.historyTruncated, true);
+});

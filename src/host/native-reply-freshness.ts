@@ -4,7 +4,7 @@ import type { createBridgeHost } from './bridge.ts'
 import { digest, object } from './data.ts'
 import { isRecord } from '../core/values.ts'
 import type { HistoryMessage } from './history.ts'
-import { nativeUnsentReplyRequest, type NativeUnsentReplyRequest } from './native-chat-input.ts'
+import { nativeUnsentReplyRequest, selectNativeChatMessages, type NativeUnsentReplyRequest } from './native-chat-input.ts'
 
 const namespace = 'native-chat.unsent-replies'
 
@@ -52,7 +52,8 @@ export function createNativeReplyFreshness(options: {
       const messageIds = Array.isArray(ids) ? ids.filter((value): value is string => typeof value === 'string') : []
       if (!messageIds.includes(source.id)) {
         options.store.write(namespace, id, { schema: 1,
-          messageIds: [...new Set([...messageIds, ...(preparation?.contextMessageIds ?? []), source.id])].slice(-32),
+          messageIds: selectNativeChatMessages([...new Set([...messageIds, ...(preparation?.contextMessageIds ?? []), source.id])]
+            .map(id => ({ id })), preparation?.addressedMessageIds ?? []).map(item => item.id),
           addressedMessageIds: [...(preparation?.addressedMessageIds ?? [])],
           requests: (preparation?.contextRequests ?? []).map(item => ({ ...item })) },
           { expectedRevision: previous?.revision ?? null, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 })
@@ -83,8 +84,8 @@ export function createNativeReplyFreshness(options: {
       modes.set(requestId, { mode: record ? 'preserved'
         : binding.conversationId.startsWith('group:') && !addressedMessageIds.length ? 'group-observation' : 'same-speaker',
         actors: [...new Set(input.addressedMessages.map(item => item.actor))],
-        contextMessageIds: input.contextMessageIds.slice(-32),
-        contextRequests: (input.contextMessages ?? []).slice(-32).map(nativeUnsentReplyRequest),
+        contextMessageIds: selectNativeChatMessages(input.contextMessageIds.map(id => ({ id })), addressedMessageIds).map(item => item.id),
+        contextRequests: selectNativeChatMessages(input.contextMessages ?? [], addressedMessageIds).map(nativeUnsentReplyRequest),
         source: { id: messageId, actor: userId }, addressedMessageIds, held: false })
       if (!record || !ids.length) return { addressedMessageIds }
       if (prepared.size >= 256) prepared.delete(prepared.keys().next().value!)

@@ -89,6 +89,18 @@ export function nativeUnsentReplyRequest(message: HistoryMessage): NativeUnsentR
     text: full.slice(0, 800), truncated: full.length > 800 };
 }
 
+/** Keep explicit sources within the same bound, then fill with the newest context. */
+export function selectNativeChatMessages<T extends { readonly id: string }>(messages: readonly T[],
+  priorityIds: readonly string[], limit = 32): readonly T[] {
+  const priority = new Set(priorityIds);
+  const selected = new Set(messages.filter(item => priority.has(item.id)).slice(-limit).map(item => item.id));
+  for (const item of messages.slice().reverse()) {
+    if (selected.size >= limit) break;
+    selected.add(item.id);
+  }
+  return messages.filter(item => selected.has(item.id));
+}
+
 /** Zero is the legacy sentinel for an unavailable quoted-message timestamp. */
 function messageTime(value: number | null | undefined): string | null {
   return value !== undefined && value !== null && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15
@@ -179,16 +191,31 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const wake = wakeKind ? { kind: wakeKind, mode: unreadMessages.length > 0 ? 'read-unread' : 'greet' } : undefined;
   const consumedWakeIds = new Set(wake?.mode === 'read-unread'
     ? [event.id, ...history.filter(entry => nativeChatWakeKind(entry.id, entry.content, options.selfId) !== null).map(entry => entry.id)] : []);
-  for (const entry of unreadMessages.slice().reverse()) {
+  const selectedUnread = selectNativeChatMessages(unreadMessages, addressedMessageIds);
+  const priorityIds = new Set(addressedMessageIds);
+  const recentItem = (entry: HistoryMessage, textLimit: number) => {
     const full = contentText(entry.content);
-    const item = { id: entry.id, actor: entry.actor, at: messageTime(entry.receivedAt), localAt: localTime(entry.receivedAt),
-      text: full.slice(0, 800), truncated: full.length > 800,
+    return { id: entry.id, actor: entry.actor, at: messageTime(entry.receivedAt), localAt: localTime(entry.receivedAt),
+      text: full.slice(0, textLimit), truncated: full.length > textLimit,
       unread: options.unread?.ids.includes(entry.id) ?? false,
       ...(group && entry.content.some(part => part.type === 'reply' || part.type === 'mention') ? { addressing: addressing(entry.content, entry.id) } : {}) };
-    const length = JSON.stringify(item).length;
-    if (size + length > budget || recent.length >= 32) { historyTruncated = true; break; }
-    recent.unshift(item); size += length;
+  };
+  let priorityTextLimit = 800;
+  const priorityMessages = selectedUnread.filter(entry => priorityIds.has(entry.id));
+  let priorityItems = priorityMessages.map(entry => recentItem(entry, priorityTextLimit));
+  while (priorityTextLimit > 0 && priorityItems.reduce((sum, item) => sum + JSON.stringify(item).length, 0) > budget) {
+    priorityTextLimit = Math.floor(priorityTextLimit / 2);
+    priorityItems = priorityMessages.map(entry => recentItem(entry, priorityTextLimit));
   }
+  for (const item of [...priorityItems, ...selectedUnread.filter(entry => !priorityIds.has(entry.id))
+    .slice().reverse().map(entry => recentItem(entry, 800))]) {
+    const length = JSON.stringify(item).length;
+    if (size + length > budget) { historyTruncated = true; continue; }
+    recent.push(item); size += length;
+  }
+  const unreadOrder = new Map(unreadMessages.map((entry, index) => [entry.id, index]));
+  recent.sort((left, right) => unreadOrder.get(left.id)! - unreadOrder.get(right.id)!);
+  if (recent.length < unreadMessages.length) historyTruncated = true;
   const quoted = original.filter(part => part.type === 'reply').slice(0, 4).map(part => {
     const entry = history.find(candidate => candidate.id === part.messageId)
       ?? options.quotedMessages?.find(candidate => candidate.id === part.messageId);
@@ -275,11 +302,15 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   let parts = build(length);
   const imageParts = images.map(assetId => ({ type: 'image' as const, assetId }));
   while (Buffer.byteLength(JSON.stringify([...parts, ...imageParts]), 'utf8') > 60 * 1024 || parts.length + imageParts.length > 8) {
-    if (recent.length > 0) {
-      recent.shift(); historyTruncated = true;
-    } else {
-      assert(length > 0, 'INVALID_INPUT_BUDGET', 'Context metadata exceeds the input budget.');
+    const ordinaryIndex = recent.findIndex(item => !priorityIds.has(item.id));
+    if (ordinaryIndex !== -1) {
+      recent.splice(ordinaryIndex, 1); historyTruncated = true;
+    } else if (length > 0) {
       length = Math.floor(length * 0.8);
+    } else {
+      const item = recent.find(candidate => candidate.text.length > 0);
+      assert(item, 'INVALID_INPUT_BUDGET', 'Context metadata exceeds the input budget.');
+      item.text = item.text.slice(0, Math.floor(item.text.length / 2)); item.truncated = true;
     }
     parts = build(length);
   }
