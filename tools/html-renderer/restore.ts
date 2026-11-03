@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { htmlRendererBuildHash } from '../../scripts/html-renderer-component.ts';
 
 // Public release assets survive Actions cache and artifact expiry. A miss simply builds.
@@ -17,11 +17,10 @@ try {
   const temporary = resolve('runtime/html-renderer-download');
   await mkdir(temporary,{recursive:true});
   execFileSync('gh',['release','download',release.tag_name,'--repo',String(process.env.GITHUB_REPOSITORY),'--pattern',filename,'--dir',temporary,'--clobber'],{stdio:['ignore','pipe','pipe']});
-  const archive = join(temporary,filename);
-  const entries = execFileSync('tar',['-tzf',archive],{encoding:'utf8'}).trim().split('\n');
+  const entries = execFileSync('tar',['-tzf',filename],{cwd:temporary,encoding:'utf8'}).trim().split('\n');
   if (!entries.every(name => !name.startsWith('/') && !name.includes('\\') && !name.split('/').includes('..'))) throw new Error('Invalid component archive');
   await mkdir(destination,{recursive:true});
-  execFileSync('tar',['-xzf',archive,'-C',destination],{stdio:['ignore','pipe','pipe']});
+  execFileSync('tar',['-xzf',filename,'-C',destination],{cwd:temporary,stdio:['ignore','pipe','pipe']});
   console.log(`Reused release component ${target} (${digest})`);
 } catch {
   await rm(destination,{recursive:true,force:true});
