@@ -42,12 +42,14 @@ test('follow diagnostics distinguish current interruption from a retained histor
   const interrupted = parseChatRuntimeStatus({ ...status, state: 'running', canStart: false,
     protocolConnected: true, missingReasons: ['agent_follow_unavailable'], lastError: 'AGENT_FOLLOW_TERMINATED' });
   assert(interrupted);
-  assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED', interrupted), /有会话.*后续新请求.*尝试重新连接/);
+  assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED', interrupted), /有会话.*退避间隔重连.*重新连接聊天或重启框架/);
   assert.match(chatRuntimeReason('agent_follow_unavailable').text, /旧请求不会自动重发/);
   const restored = { ...interrupted, chatReady: true, missingReasons: [] };
   assert.equal(chatRuntimeBadge(restored), '聊天已启用');
   assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED', restored), /曾中断.*当前未报告监听故障/);
   assert.match(chatRuntimeLastError('DSH_FOLLOW_TRANSPORT_UNKNOWN', restored), /曾中断.*当前未报告监听故障/);
+  assert.match(chatRuntimeLastError('DSH_FOLLOW_TRANSPORT_UNKNOWN', { ...restored, chatReady: false,
+    missingReasons: ['interaction_channel_unavailable'] }), /曾中断.*当前未报告监听故障/);
   assert.match(chatRuntimeLastError('AGENT_FOLLOW_TERMINATED'), /最近记录过.*当前是否恢复/);
 });
 

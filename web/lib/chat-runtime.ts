@@ -138,7 +138,7 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
   native_runtime_lease_unknown: { text: '无法读取聊天运行锁，尚未确认能安全启动；请检查存储与权限。', page: 'adapters' },
   configuration_changed: { text: '已保存设置有变更，请停止聊天后重新启动以应用。', page: 'adapters' },
   authorization_budget_unavailable: { text: '消息授权已用完或过期，请到访问范围检查。', page: 'access' },
-  agent_follow_unavailable: { text: '有会话的 DSH 回复监听中断，框架正在按退避间隔重连；持续失败可重新连接聊天或重启框架。旧请求不自动重发，未确认结果请到会话详情核对。', page: 'adapters' },
+  agent_follow_unavailable: { text: '有会话的 DSH 回复监听中断，框架正在按退避间隔重连；持续失败可重新连接聊天或重启框架。旧请求不会自动重发，未确认结果请到会话详情核对。', page: 'adapters' },
   framework_tool_channel_unavailable: { text: '框架工具通道中断。只读轮询会尝试重连；若结果仍未确认，请查看执行记录并重启聊天或框架，旧工具不自动重做。', page: 'adapters' },
   execution_correlation_unavailable: { text: 'DSH 桥接插件的请求关联已失效。DSH 接口恢复后重启聊天或框架，以重新核验插件；未确认请求不重发。', page: 'adapters' },
   interaction_channel_unavailable: { text: 'DSH 模型提问通道中断，请重新连接聊天或重启框架。旧提问按原记录核对，不重复答复。', page: 'adapters' },
@@ -153,7 +153,7 @@ export function chatRuntimeLastError(code: string, status: ChatRuntimeStatus | n
     'DSH_FOLLOW_OPEN_TIMEOUT', 'DSH_FOLLOW_PONG_TIMEOUT', 'DSH_FOLLOW_INVALID_FRAME', 'DSH_FOLLOW_SEQUENCE_GAP',
     'DSH_FOLLOW_BACKPRESSURE', 'DSH_FOLLOW_CALLBACK_FAILED'].includes(code)) {
     if (status?.missingReasons.includes('agent_follow_unavailable')) return reasons.agent_follow_unavailable!.text;
-    if (status?.chatReady) return '会话回复监听曾中断，当前未报告监听故障。';
+    if (status?.state === 'running') return '会话回复监听曾中断，当前未报告监听故障。';
     return '最近记录过会话回复监听中断；当前是否恢复请查看聊天运行状态。';
   }
   const messages: Readonly<Record<string, string>> = {
