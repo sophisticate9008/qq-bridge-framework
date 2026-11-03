@@ -395,3 +395,5 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 `GET /api/chat/dsh/health` 只读取当前账号的 DSH 连接配置并检查已鉴权的 `settings/describe` 接口，不依赖聊天实例、配置应用或会话记录。返回 `{schema:1,state,reason,checkedAt,scope:"authenticated-api",modelExecutionVerified:false}`；`state` 为 `ready/unavailable/disabled/unconfigured/unknown`，原因限定为公开枚举。检查有五秒期限，连接配置在检查期间变化时返回 unknown，不返回凭据、路径或外部响应正文。实际生成、工具通道及回复监听分别核验；GET 不启动聊天、不创建会话、不调用模型。多账号沿用 dispatch。
 
 统一入口为 `qbf-cli`，发行包 `bin` 指向编译后的同一 CLI。`status` 与不带会话的 `doctor` 并行读取管理、网关、DSH、QQ、聊天和应用证据，一项失败保留其他项；读取失败显示 unknown，不能据此宣称服务离线。`--json` 输出有界投影，异常、未知及未完成条件返回非零。逐会话 doctor 同样按实际诊断是否 ready 设置退出码。后台服务命令使用 `service` 命名空间，与前台 start 分开；进程、端口、专用健康检查分别呈现，没有专用检查时保持未核验。
+
+后台进程的管理权限独立于连接配置与健康。私有服务清单默认仅托管 `framework-admin` 和 `framework-gateway`；其他本机条目必须显式 `managed: true` 才参与整套或指定组件启停、内部监督与协议切换，`managed: false` 排除默认框架组件。`group`、`enabled`、安装发现与通信鉴权不授予进程管理权限；远程连接不授予远程生命周期管理权限。未托管条目可显式读取状态与日志，默认服务列表只展示受管条目。

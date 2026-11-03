@@ -24,6 +24,7 @@ interface Service {
   consoleUrl?: string;
   group: Group;
   enabled?: boolean;
+  managed?: boolean;
 }
 interface Configuration {
   schema: 1;
@@ -82,6 +83,7 @@ function decode(value: unknown): Configuration {
       || !string(service.screen, 64) || !identifier.test(service.screen)
       || !['core', 'napcat', 'snowluma', 'optional'].includes(String(service.group))
       || (service.enabled !== undefined && typeof service.enabled !== 'boolean')
+      || (service.managed !== undefined && typeof service.managed !== 'boolean')
       || (service.logFile !== undefined && !absolute(service.logFile))
       || (service.consoleUrl !== undefined && !safeUrl(service.consoleUrl, false))
       || (service.prepare !== undefined && !command(service.prepare))) fail('服务配置格式无效。');
@@ -220,15 +222,20 @@ async function inspectService(id: string, service: Service, probe: boolean) {
 function ordered(config: Configuration): string[] {
   return [...(config.order ?? []), ...Object.keys(config.services).filter(id => !config.order?.includes(id))];
 }
+function managed(config: Configuration, id: string): boolean {
+  return config.services[id]!.managed ?? (id === 'framework-admin' || id === 'framework-gateway');
+}
 function selected(config: Configuration, stop = false): string[] {
   return ordered(config).filter(id => {
+    if (!managed(config, id)) return false;
     const service = config.services[id]!;
     if (service.group === 'napcat' || service.group === 'snowluma') return stop || (service.group === config.activeProtocol && service.enabled !== false);
     return service.group === 'optional' ? service.enabled === true : service.enabled !== false;
   });
 }
-function component(config: Configuration, id: string): Service {
+function component(config: Configuration, id: string, requireManaged = false): Service {
   if (!identifier.test(id) || !Object.hasOwn(config.services, id)) fail('未知组件，请用 qbf-cli status 查看配置。');
+  if (requireManaged && !managed(config, id)) fail(`${id} 属于外部服务，未登记为框架受管组件。`);
   return config.services[id]!;
 }
 function remaining(deadline: number, maximum: number): number {
@@ -239,13 +246,14 @@ function remaining(deadline: number, maximum: number): number {
 async function ensureProtocol(config: Configuration, service: Service): Promise<void> {
   if (service.group !== 'napcat' && service.group !== 'snowluma') return;
   if (service.group !== config.activeProtocol) fail('请使用 qbf-cli protocol 切换协议端。');
-  for (const other of Object.values(config.services)) {
+  for (const [id, other] of Object.entries(config.services)) {
+    if (!managed(config, id)) continue;
     if ((other.group === 'napcat' || other.group === 'snowluma') && other.group !== service.group
       && ((await sessions(other)).length > 0 || await listening(other))) fail('另一协议端仍在运行，请使用 qbf-cli protocol 切换。');
   }
 }
 async function startOne(config: Configuration, id: string, deadline: number): Promise<void> {
-  const service = component(config, id);
+  const service = component(config, id, true);
   await ensureProtocol(config, service);
   const running = (await sessions(service)).length > 0;
   if (!running && await ready(service, remaining(deadline, 8000))) {
@@ -302,7 +310,7 @@ async function signal(item: ProcessIdentity, value: NodeJS.Signals): Promise<voi
   try { process.kill(item.pid, value); } catch { /* The process may have just exited. */ }
 }
 async function stopOne(config: Configuration, id: string, deadline: number): Promise<void> {
-  const service = component(config, id);
+  const service = component(config, id, true);
   const running = await sessions(service);
   if (running.length === 0) {
     if (await listening(service)) fail(`${id} 由外部进程占用，无法安全停止。`);
@@ -351,9 +359,9 @@ async function validateLaunchFiles(id: string, service: Service): Promise<void> 
 }
 async function switchProtocol(config: Configuration, target: Protocol): Promise<void> {
   const previous = config.activeProtocol;
-  const protocolIds = ordered(config).filter(id => ['napcat', 'snowluma'].includes(config.services[id]!.group));
+  const protocolIds = ordered(config).filter(id => managed(config, id) && ['napcat', 'snowluma'].includes(config.services[id]!.group));
   const targets = protocolIds.filter(id => config.services[id]!.group === target && config.services[id]!.enabled !== false);
-  if (targets.length === 0) fail('目标协议端尚未配置。');
+  if (targets.length === 0) fail('目标协议端未登记为框架受管组件，请在外部协议端管理连接。');
   for (const id of targets) await validateLaunchFiles(id, config.services[id]!);
   const previouslyRunning: string[] = [];
   for (const id of protocolIds) if ((await sessions(config.services[id]!)).length > 0) previouslyRunning.push(id);
@@ -377,7 +385,7 @@ async function switchProtocol(config: Configuration, target: Protocol): Promise<
 }
 
 async function supervise(config: Configuration, id: string): Promise<void> {
-  const service = component(config, id);
+  const service = component(config, id, true);
   const environment = { ...process.env, ...service.env };
   delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
   const child = spawn(service.command, service.args, { cwd: service.cwd, env: environment, shell: false, stdio: 'inherit', detached: true });
@@ -416,9 +424,9 @@ async function supervise(config: Configuration, id: string): Promise<void> {
 function help(): void {
   console.log(`qbf-cli service [start|stop|restart|status|doctor|logs|console|protocol|help] [组件]
 
-service start：启动框架、当前协议端与已启用的辅助服务。
+service start：启动框架宿主、网关及明确登记的本机受管服务。
 start [组件]       启动并等待就绪，接管已有 screen 会话
-stop [组件]        停止配置中的组件；省略组件时包含两套协议端
+stop [组件]        停止受管组件；外部协议端与其他外部服务独立管理
 restart [组件]     停止后启动；可只重启 framework-admin 或 dsh
 status [组件] [--json]  分别查看受管进程与端口；不据此宣称健康
 doctor [组件] [--json]  独立检查各服务；未配置健康检查时显示未核验
@@ -463,7 +471,7 @@ async function main(): Promise<void> {
     : rest.length > 1) fail('命令参数无效，请运行 qbf-cli help。');
   const config = await load();
   if (action === 'describe') {
-    if (!Object.hasOwn(config.services, 'dsh')) fail('当前部署未配置受管 DSH 服务。');
+    if (!Object.hasOwn(config.services, 'dsh') || !managed(config, 'dsh')) fail('当前部署未配置受管 DSH 服务。');
     console.log(JSON.stringify({ schema: 1, kind: 'qq-bridge-framework', dshHome: config.dshHome }));
     return;
   }
@@ -477,7 +485,7 @@ async function main(): Promise<void> {
     return;
   }
   const id = action === 'logs' ? rest.find(value => value !== '-f') : rest[0];
-  if (id && action !== 'protocol') component(config, id);
+  if (id && action !== 'protocol') component(config, id, ['start', 'stop', 'restart', 'run'].includes(action));
   if (['start', 'stop', 'restart', 'protocol'].includes(action) && process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') {
     await lockAndRun(config, argumentsList);
     return;

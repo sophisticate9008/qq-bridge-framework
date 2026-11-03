@@ -46,7 +46,7 @@ npm start
 
 ## 本机 boot 接入
 
-本机 `boot` 通过本框架的 `qbf-cli service start` 启动所选协议端、DSH、已启用的辅助服务及框架网关和宿主。入口为 `ops/qbf-cli`，实现为 `scripts/service-manager.ts`，服务清单位于私有的 `runtime/live/services.json`。NapCat / SnowLuma 两套安装与登录数据保留，`qbf-cli protocol napcat|snowluma` 管理当前选择。框架宿主沿用已选择的部署入口和私有配置，按已保存的运行意图恢复原生聊天。
+本机 `boot` 通过本框架的 `qbf-cli service start` 启动框架网关、宿主及明确登记的本机受管服务。入口为 `ops/qbf-cli`，实现为 `scripts/service-manager.ts`，服务清单位于私有的 `runtime/live/services.json`。默认受管范围仅为 `framework-admin` 与 `framework-gateway`；本机 DSH 等额外服务须以 `managed: true` 明确委托，外部协议端与独立应用由各自的入口管理。`qbf-cli protocol napcat|snowluma` 仅适用于明确托管协议进程的部署。连接远程 DSH 或 OneBot 只建立通信，不管理远程进程。框架宿主沿用已选择的部署入口和私有配置，按已保存的运行意图恢复原生聊天。
 
 `qbf-cli restart framework-admin` 单独重启框架；`boot logs qbf-cli`、`boot logs framework-admin` 和 `qbf-cli logs` 均查看框架日志。`boot logs qqbridge` 保留为日志别名。`qbf-cli service status` 展示当前选中的服务，`qbf-cli service doctor` 只读核对配置的健康检查与 QQ 在线状态。启动或停止失败时返回非零退出码，停止未完成时不继续重启。服务安装目录可以独立配置，运维命令不调用其他项目的启动脚本。配置格式、安装与常用命令见 [服务运维](SERVICE_MANAGER.md)。
 

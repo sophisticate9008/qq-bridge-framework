@@ -6,10 +6,10 @@
 
 | 命令 | 行为 |
 | --- | --- |
-| `qbf-cli service start` | 按顺序启动当前协议端、框架和已启用的辅助服务；已有实例不重复启动 |
+| `qbf-cli service start` | 按顺序启动框架宿主、网关及明确登记的本机受管服务；已有实例不重复启动 |
 | `qbf-cli restart framework-admin` | 只重启框架宿主，保留 DSH 和协议端进程 |
-| `qbf-cli restart dsh` | 重启模型宿主；正常聊天中优先使用网页的维护入口，以协调暂停和恢复 |
-| `qbf-cli stop` | 按逆序停止受管服务，包括两套协议端中仍在运行的实例 |
+| `qbf-cli restart dsh` | 重启明确登记为受管的本机模型宿主；正常聊天中优先使用网页的维护入口，以协调暂停和恢复 |
+| `qbf-cli stop` | 按逆序停止受管服务 |
 | `qbf-cli service status` | 查看进程与端口状态 |
 | `qbf-cli service doctor` | 核对服务健康检查及可选的 QQ 登录状态；不发送消息或模型请求 |
 | `qbf-cli extensions` 或 `qbf-cli extensions list` | 查看已登记插件的版本、活动调用、排空及错误状态 |
@@ -17,8 +17,8 @@
 | `qbf-cli logs [组件] [-f]` | 最近 100 行日志，默认组件为 `framework-admin` |
 | `qbf-cli console` | 显示当前配置中的控制台地址 |
 | `qbf-cli protocol` | 显示当前协议选择 |
-| `qbf-cli protocol napcat` | 切换到 NapCat，保留另一套安装及配置 |
-| `qbf-cli protocol snowluma` | 切换到 SnowLuma，保留另一套安装及配置 |
+| `qbf-cli protocol napcat` | 在已明确托管协议进程的部署中切换到 NapCat |
+| `qbf-cli protocol snowluma` | 在已明确托管协议进程的部署中切换到 SnowLuma |
 
 未安装系统命令时，在项目根目录使用 `node scripts/cli.ts service <命令>` 或 `npm run ops -- <命令>`。`ops/qbf-cli` 是宿主使用的内部服务管理入口，不替代统一 CLI 的初始化、前台运行和分层诊断。
 
@@ -32,7 +32,9 @@
 
 ## 私有服务清单
 
-固定读取 `runtime/live/services.json`，文件须为当前用户所有的私有普通文件，建议权限 `0600`。下面展示字段结构；路径需要替换为实际安装位置，并补齐协议端、网关与管理服务。
+固定读取 `runtime/live/services.json`，文件须为当前用户所有的私有普通文件，建议权限 `0600`。下面展示额外委托本机 DSH 的字段结构；路径需要替换为实际安装位置，并补齐框架网关与管理服务。
+
+默认只管理清单中的 `framework-admin` 和 `framework-gateway`。DSH、OneBot 协议端及其他独立程序由各自的进程管理器维护；连接地址、自动发现、`group`、`enabled` 或已有 screen 会话均不代表框架拥有其启停权限。需要明确委托 CLI 管理某个本机服务时，才在该条目设置 `managed: true`；`managed: false` 也可排除框架组件。未托管条目的显式启停与内部 `run` 同样被拒绝，协议切换只操作受管协议条目。升级后，原来仅凭分组参与启停的额外服务需要明确登记；远程服务不会因填写连接地址而成为受管进程。本机私有清单不随仓库或发行包提供。
 
 ```json
 {
@@ -50,6 +52,7 @@
       "env": { "DSH_HOME": "/srv/dsh/home", "DSH_INSTALL_MODULES": "/srv/dsh/runtime/node_modules" },
       "screen": "qq-dsh",
       "group": "core",
+      "managed": true,
       "port": { "host": "127.0.0.1", "port": 3080 },
       "ready": { "kind": "http", "url": "http://127.0.0.1:3080/" },
       "consoleUrl": "http://127.0.0.1:3080"
@@ -58,7 +61,8 @@
 }
 ```
 
-- `group` 为 `core`、`napcat`、`snowluma` 或 `optional`。默认启动 core 与当前协议；optional 需 `enabled: true`。`enabled: false` 排除默认启动，仍可显式管理。
+- `managed` 决定本机进程是否委托框架管理；非框架组件缺省为 `false`。以下分组与启用规则仅作用于受管条目。
+- `group` 为 `core`、`napcat`、`snowluma` 或 `optional`。受管条目中默认启动 core 与当前协议；optional 还需 `enabled: true`。`enabled: false` 排除默认启动，仍可显式管理受管条目。
 - `order` 决定启动顺序；未列出的服务按清单顺序追加，停止采用逆序。
 - `command`、`cwd`、`logFile` 为绝对路径；`args` 是参数数组，不执行 shell 表达式。`env` 只覆盖该服务的环境。
 - `screen` 是精确的会话名。`screenAliases` 可接管同一组件已有的历史名称；不同服务不能共享名称。不会按模糊进程名批量终止程序。
@@ -113,7 +117,7 @@ node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --a
 | DSH 程序、配置、会话与附件 | `/srv/qq-services/dsh/runtime/`、`/srv/qq-services/dsh/home/` |
 | 协议端及其登录数据 | 独立安装目录；各协议端分别登记，可保留备用安装 |
 
-本机复用的组件源码及其依赖也应有独立、明确的部署位置；服务启动不能依赖参考仓库仍然存在。扩展辅助进程的配置、输出目录和 DSH 附件目录需要随部署一起更新。原有安装已独立存在时，可以直接登记真实路径，无须为了统一目录再次搬迁。
+本机复用的组件源码及其依赖也应有独立、明确的部署位置；服务启动不能依赖参考仓库仍然存在。扩展辅助进程的配置、输出目录和 DSH 附件目录需要随部署一起更新。原有安装已独立存在且明确委托管理时，可以登记真实路径，无须为了统一目录再次搬迁。
 
 迁移安装位置前，保存服务清单、私有配置与数据快照，记录原先运行的服务和聊天状态。暂停聊天并确认助手及扩展任务已结束，再停止受管服务，保留文件权限和所有者。需要同步核对：
 
