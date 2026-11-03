@@ -250,3 +250,60 @@ test('real direct calls remain addressed with third-party quotes and batch calls
   assert.match(batchText, /"mode":"addressed"/)
   assert.match(batchText, /"addressedMessageIds":\["earlier-call"\]/)
 })
+
+test('nickname calls and retained explicit sources remain addressed without assigning the latest speaker a request', () => {
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '789',
+    data: { content: [{ type: 'text', text: '伙伴，问个问题' }] } };
+  const nickname = prepareNativeChatInput(event, history, { owner: null, partial: false, participation: 'nickname' });
+  assert.match(JSON.stringify(nickname), /addressed/);
+  assert.match(nickname.flatMap(part => part.type === 'text' ? [part.text] : []).join(''), /"currentAddressing":\{"target":"assistant"/);
+  const retained = prepareNativeChatInput({ ...event, data: { content: [{ type: 'image', assetId: 'unrelated-image' }] } }, history,
+    { owner: null, partial: false, participation: 'continuation', attachImages: true,
+      unsentReplyMessageIds: ['first'], unsentAddressedMessageIds: ['first'] });
+  const text = retained.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  assert.match(text, /"mode":"addressed"/);
+  assert.match(text, /"addressedMessageIds":\["first"\]/);
+  assert.match(text, /"currentAddressing":\{"target":"unspecified"/);
+  assert.match(text, /后续普通闲聊和图片不取消它/);
+  assert.equal(retained.some(part => part.type === 'image'), false);
+});
+
+test('retained original requests have a bounded budget even with heavily escaped text', () => {
+  const entries: HistoryMessage[] = Array.from({ length: 32 }, (_, index) => ({ id: `pending-${index}`, actor: '123',
+    receivedAt: 100, content: [{ type: 'text', text: '\u0001'.repeat(800) }] }));
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '789',
+    data: { content: [{ type: 'text', text: 'current' }] } };
+  const parts = prepareNativeChatInput(event, entries, { owner: null, partial: false, participation: 'continuation',
+    unsentReplyMessageIds: entries.map(item => item.id), unsentAddressedMessageIds: ['pending-0'] });
+  assert(Buffer.byteLength(JSON.stringify(parts)) <= 60 * 1024);
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  assert.match(text, /pending-0/);
+  assert.match(text, /pending-31/);
+  assert.match(text, /"truncated":true/);
+});
+
+test('preserved request snapshots remain visible after their rolling history was removed', () => {
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '789',
+    data: { content: [{ type: 'text', text: '普通群聊' }] } };
+  const parts = prepareNativeChatInput(event, [], { owner: null, partial: true, participation: 'continuation',
+    unsentReplyMessageIds: ['original'], unsentAddressedMessageIds: ['original'],
+    unsentReplyRequests: [{ id: 'original', actor: '123', displayName: '请求者', receivedAt: 100,
+      text: '原始问题即使被滚动历史裁剪仍需处理', truncated: false }] });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  assert.match(text, /原始问题即使被滚动历史裁剪仍需处理/);
+  assert.match(text, /"userId":"123","displayName":"请求者"/);
+  assert.match(text, /"senderId":"789"/);
+  assert.match(text, /"mode":"addressed"/);
+});
+
+test('retained reply budgets trim background text before an explicit question', () => {
+  const entries: HistoryMessage[] = Array.from({ length: 32 }, (_, index) => ({ id: `pending-${index}`, actor: '123',
+    receivedAt: 100, content: [{ type: 'text', text: index === 0 ? '明确问题'.repeat(100) : '\u0001'.repeat(800) }] }));
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '789',
+    data: { content: [{ type: 'text', text: 'current' }] } };
+  const parts = prepareNativeChatInput(event, entries, { owner: null, partial: false, participation: 'continuation',
+    maxHistoryCharacters: 0, unsentReplyMessageIds: entries.map(item => item.id), unsentAddressedMessageIds: ['pending-0'] });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  assert.match(text, new RegExp(`"text":"${'明确问题'.repeat(100)}","truncated":false`));
+  assert(Buffer.byteLength(JSON.stringify(parts)) <= 60 * 1024);
+});

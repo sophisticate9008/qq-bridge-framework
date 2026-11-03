@@ -7,6 +7,15 @@ import type { NativeMemoryContext } from '../contracts/native-memory.ts';
 import { normalizeSenderDisplayName } from '../contracts/sender-display-name.ts';
 import { nativeChatWakeKind } from './native-chat-wake.ts';
 
+export interface NativeUnsentReplyRequest {
+  readonly id: string;
+  readonly actor: string;
+  readonly receivedAt: number;
+  readonly displayName?: string;
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
 export type NativeParticipationReason = 'direct' | 'nickname' | 'reply' | 'probability' | 'continuation' | 'ambient';
 export interface NativeParticipationOptions {
   readonly names: readonly string[];
@@ -72,6 +81,14 @@ function contentText(content: readonly MessageContent[], attachedImages: Readonl
   }).join('\n');
 }
 
+/** Retain bounded original message facts independently of the rolling history. */
+export function nativeUnsentReplyRequest(message: HistoryMessage): NativeUnsentReplyRequest {
+  const full = contentText(message.content);
+  return { id: message.id, actor: message.actor, receivedAt: message.receivedAt,
+    ...(message.displayName === undefined ? {} : { displayName: message.displayName }),
+    text: full.slice(0, 800), truncated: full.length > 800 };
+}
+
 /** Zero is the legacy sentinel for an unavailable quoted-message timestamp. */
 function messageTime(value: number | null | undefined): string | null {
   return value !== undefined && value !== null && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15
@@ -90,6 +107,8 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   readonly participation?: NativeParticipationReason;
   readonly groupWake?: readonly { readonly messageId: string; readonly actor: string; readonly reason: NativeParticipationReason }[];
   readonly unsentReplyMessageIds?: readonly string[];
+  readonly unsentReplyRequests?: readonly NativeUnsentReplyRequest[];
+  readonly unsentAddressedMessageIds?: readonly string[];
   readonly sentWhileQueued?: readonly HistoryMessage[];
   readonly quotedMessages?: readonly HistoryMessage[];
   readonly unread?: { readonly ids: readonly string[]; readonly readThrough: number; readonly through: number; readonly partial: boolean };
@@ -124,15 +143,16 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const participation = options.participation ?? (event.data.directed === true ? 'direct' : 'ambient');
   const group = event.conversationId.startsWith('group:');
   const addressedMessageIds = [...new Set([
-    ...(['direct', 'reply'].includes(participation) ? [event.id] : []),
-    ...(options.groupWake ?? []).filter(item => item.reason === 'direct' || item.reason === 'reply').map(item => item.messageId),
-  ])].slice(-16);
+    ...(['direct', 'nickname', 'reply'].includes(participation) ? [event.id] : []),
+    ...(options.groupWake ?? []).filter(item => ['direct', 'nickname', 'reply'].includes(item.reason)).map(item => item.messageId),
+    ...(options.unsentAddressedMessageIds ?? []),
+  ])].slice(-32);
   const addressing = (content: readonly MessageContent[], id: string) => nativeMessageAddressing(content, history,
     { selfId: options.selfId, addressed: addressedMessageIds.includes(id), quotedMessages: options.quotedMessages });
   const currentAddressing = addressing(original, event.id);
   // Observation is not an instruction to analyze every picture posted by a third
   // party or another bot. Relevant images remain available through normal media tools.
-  const directlyAddressed = participation === 'direct' || participation === 'reply';
+  const directlyAddressed = ['direct', 'nickname', 'reply'].includes(participation);
   const observeOnly = group && !directlyAddressed
     && (!['nickname', 'probability'].includes(participation) || currentAddressing.target === 'others');
   const images = options.attachImages && !observeOnly
@@ -142,8 +162,7 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const recentWindow = currentTime === undefined ? [] : history.filter(message => message.receivedAt <= currentTime
     && message.receivedAt > currentTime - 120_000);
   const groupParticipation = group ? {
-    mode: participation === 'direct' || participation === 'reply'
-      || options.groupWake?.some(item => item.reason === 'direct' || item.reason === 'reply') ? 'addressed' : 'observe-and-select',
+    mode: addressedMessageIds.length ? 'addressed' : 'observe-and-select',
     currentAddressing, addressedMessageIds,
     sentMessagesInTwoMinutes: recentWindow.filter(message => message.actor === 'assistant').length,
     receivedMessagesInTwoMinutes: recentWindow.filter(message => message.actor !== 'assistant' && message.actor !== 'system').length,
@@ -180,7 +199,7 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   // Names are scoped observations, never lookup keys or authorization facts. Include each relevant
   // account once instead of repeating its display text on every history and quote item.
   const displayNames = new Map<string, string>();
-  for (const entry of [...(options.quotedMessages ?? []), ...history]) {
+  for (const entry of [...(options.unsentReplyRequests ?? []), ...(options.quotedMessages ?? []), ...history]) {
     const displayName = normalizeSenderDisplayName(entry.displayName);
     if (displayName !== undefined && entry.actor !== 'assistant' && entry.actor !== 'system') displayNames.set(entry.actor, displayName);
   }
@@ -190,19 +209,38 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     ...quoted.map(item => item.actor),
     ...currentAddressing.mentions, ...currentAddressing.replies.map(item => item.actor),
     ...recent.flatMap(item => [...(item.addressing?.mentions ?? []), ...(item.addressing?.replies.map(reply => reply.actor) ?? [])]),
-    ...history.filter(item => options.unsentReplyMessageIds?.includes(item.id)).slice(-4).map(item => item.actor),
+    ...history.filter(item => options.unsentReplyMessageIds?.includes(item.id)).slice(-32).map(item => item.actor),
+    ...(options.unsentReplyRequests?.map(item => item.actor) ?? []),
     ...(options.groupWake?.map(item => item.actor) ?? [])])]
     .filter((actor): actor is string => typeof actor === 'string' && actor !== 'assistant' && actor !== 'system' && actor !== options.selfId);
   const participants = relevantActors.slice(0, 32).map(userId => ({ userId, displayName: displayNames.get(userId) ?? null }));
+  const retainedRequests = new Map((options.unsentReplyRequests ?? []).map(item => [item.id, item]));
+  const historyRequests = new Map(history.filter(item => options.unsentReplyMessageIds?.includes(item.id))
+    .map(item => [item.id, nativeUnsentReplyRequest(item)]));
+  const unsentMessages = (options.unsentReplyMessageIds ?? []).slice(-32)
+    .flatMap(id => { const item = retainedRequests.get(id) ?? historyRequests.get(id); return item ? [item] : []; });
+  let unsentTextLimit = 400;
+  let addressedTextLimit = 400;
+  const pendingRequests = () => unsentMessages.map(item => {
+    const limit = addressedMessageIds.includes(item.id) ? addressedTextLimit : unsentTextLimit;
+    return { id: item.id, actor: item.actor, at: messageTime(item.receivedAt), localAt: localTime(item.receivedAt),
+      text: item.text.slice(0, limit), truncated: item.truncated || item.text.length > limit };
+  });
+  let unsentRequests = pendingRequests();
+  while ((unsentTextLimit > 0 || addressedTextLimit > 0) && Buffer.byteLength(JSON.stringify(unsentRequests)) > 12_000) {
+    // Reduce surrounding chatter before trimming the actual explicit request.
+    if (unsentTextLimit > 0) unsentTextLimit = Math.floor(unsentTextLimit / 2);
+    else addressedTextLimit = Math.floor(addressedTextLimit / 2);
+    unsentRequests = pendingRequests();
+  }
   const envelope = (currentTruncated: boolean) => JSON.stringify({ schema: 1, conversationId: event.conversationId, messageId: event.id, time,
     ...(options.sentWhileQueued?.length ? { replyTiming: {
       sentAfterCurrentMessage: options.sentWhileQueued.slice(-4).map(message => ({ id: message.id, at: messageTime(message.receivedAt), localAt: localTime(message.receivedAt), text: contentText(message.content).slice(0, 200) })),
       note: '当前消息先到达，以上回复随后才发送。模型处理顺序不等于群聊发言顺序，不能把当前消息当成对这些回复的反馈。'
     } } : {}),
     ...(options.unsentReplyMessageIds?.length ? { replyDelivery: { unsentFor: options.unsentReplyMessageIds,
-      requests: history.filter(item => options.unsentReplyMessageIds?.includes(item.id)).slice(-4)
-        .map(item => ({ id: item.id, actor: item.actor, at: messageTime(item.receivedAt), localAt: localTime(item.receivedAt), text: contentText(item.content).slice(0, 400) })),
-      note: '这些旧消息的模型回复尚未发送，因为会话有新消息需要结合理解。先合并原请求与后续纠正，保留数量等未被修改的要求；其他人的顺嘴闲聊不是新的答复任务。此前模型回复未送达，不能把其中新编的玩笑、称呼、约定或事实当成双方共同语境，也不能把后续消息当作对这些草稿的回应。重新依据真实用户消息与已确认发送的内容判断；已执行的其他工具动作仍以真实结果为准，不重复执行。' } } : {}),
+      requests: unsentRequests,
+      note: '这些旧消息的模型回复尚未发送，因为会话有新消息需要结合理解。先合并原请求与后续纠正，保留数量等未被修改的要求；明确找你的未完成请求仍需处理，后续普通闲聊和图片不取消它。按真实发言账号理解追加、纠正或取消：原请求人的明确取消才撤销其请求，不把其他人的话当作撤销；受控工作变更仍按工具权限核验。其他人的顺嘴闲聊不是新的答复任务。此前模型回复未送达，不能把其中新编的玩笑、称呼、约定或事实当成双方共同语境，也不能把后续消息当作对这些草稿的回应。重新依据真实用户消息与已确认发送的内容判断；已执行的其他工具动作仍以真实结果为准，不重复执行。' } } : {}),
     senderId: event.userId ?? null, senderIsConfiguredOwner: options.owner !== null && event.userId === options.owner,
     participants, ...(relevantActors.length > participants.length ? { participantsLimited: true } : {}),
     participation, ...(groupParticipation ? {

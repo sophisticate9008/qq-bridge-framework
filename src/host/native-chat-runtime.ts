@@ -1218,15 +1218,25 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               const visibleHistory = history.messages.filter(item => item.sequence <= through)
               const historyPartial = unread.partial || history.partial || source?.sequence !== through
               const binding = host.sessions.get(event.conversationId)
-              const unsentReplyMessageIds = binding && event.userId
-                ? replyFreshness?.prepare(binding, event.userId, event.id,
-                  ['direct', 'reply'].includes(inbound.participation(digest([event.conversationId, event.id, 'prompt'])) ?? '')
-                  || inbound.groupWake(digest([event.conversationId, event.id, 'prompt']))?.some(item => ['direct', 'reply'].includes(item.reason)) === true) : undefined
+              const requestId = digest([event.conversationId, event.id, 'prompt'])
+              const participation = inbound.participation(requestId)
+              const groupWake = inbound.groupWake(requestId)
+              const addressedMessages = [...(groupWake ?? []).filter(item => ['direct', 'nickname', 'reply'].includes(item.reason)),
+                ...(['direct', 'nickname', 'reply'].includes(participation ?? '') && event.userId
+                  ? [{ messageId: event.id, actor: event.userId }] : [])]
+              const replyContext = binding && event.userId
+                ? replyFreshness?.prepare(binding, event.userId, event.id, { addressedMessages,
+                  contextMessageIds: unread.messages.filter(item => item.sequence <= through
+                    && item.actor !== 'assistant' && item.actor !== 'system').map(item => item.id),
+                  contextMessages: unread.messages.filter(item => item.sequence <= through
+                    && item.actor !== 'assistant' && item.actor !== 'system') }) : undefined
               const owner = active.access.owner
               const quotedMessages = await quotedContext?.read({ conversationId: event.conversationId,
                 content: normalizeContent(event.data.content) }, visibleHistory, execution.signal)
               inbound.preparedReadCursor(digest([event.conversationId, event.id, 'prompt']), through)
-              return prepareNativeChatInput(event, visibleHistory, { owner, selfId, partial: historyPartial, unsentReplyMessageIds,
+              return prepareNativeChatInput(event, visibleHistory, { owner, selfId, partial: historyPartial,
+                unsentReplyMessageIds: replyContext?.unsentReplyMessageIds, unsentReplyRequests: replyContext?.unsentReplyRequests,
+                unsentAddressedMessageIds: replyContext?.addressedMessageIds,
                 previousInputAcceptedAt: unread.lastReadAt,
                 sentWhileQueued: history.messages.filter(item => item.actor === 'assistant' && item.sequence > through).slice(-4),
                 attachImages: active.deployment.modelSettings?.inputModalities?.includes('image') !== false,

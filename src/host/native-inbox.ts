@@ -160,7 +160,7 @@ export function createNativeInbox(options: {
     const groupObservation = conversationId.startsWith('group:');
     const end = groupObservation ? -1 : queue.entries.findIndex(entry => entry.message.userId !== first.message.userId);
     const batch = queue.entries.slice(0, end === -1 ? queue.entries.length : end);
-    const includesExplicitCall = groupObservation && batch.some(entry => entry.trigger !== 'continuation' && entry.trigger !== 'observation');
+    const includesExplicitCall = groupObservation && batch.some(entry => entry.trigger === undefined || entry.trigger === 'mention' || entry.trigger === 'nickname' || entry.trigger === 'reply');
     const quietMs = groupObservation && !includesExplicitCall ? groupContinuationCoalesceMs : coalesceMs;
     if (now() < Math.min(first.admittedAt + (groupObservation && !includesExplicitCall ? 1500 : 500),
       batch.at(-1)!.admittedAt + quietMs)) return;

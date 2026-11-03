@@ -122,3 +122,21 @@ test('disabled probability, private messages, denied groups, self echoes and rea
   assert.equal(f.draws(), 0)
   assert.equal(f.inbox.list().flatMap(queue => queue.entries).some(entry => entry.trigger === 'probability'), false)
 })
+
+test('each new real mention resets the window while ordinary input and duplicate mentions do not', async context => {
+  const f = await fixture(context)
+  f.probability(0)
+  let now = 1_800_000_000_000
+  context.mock.method(Date, 'now', () => now)
+  await f.message(80, { mention: true })
+  f.inbound.speakDecision('group:456', 'first-reply', now)
+  now += 80_000
+  await f.message(81)
+  assert.equal(f.inbound.observationActive('group:456', 90_000, now + 10_501), false)
+  await f.message(82, { mention: true })
+  assert.equal(f.inbound.observationActive('group:456', 90_000, now + 90_000), true)
+  now += 89_000
+  await f.message(82, { mention: true })
+  assert.equal(f.inbound.observationActive('group:456', 90_000, now + 1_001), false)
+  assert.equal(f.draws(), 0)
+})

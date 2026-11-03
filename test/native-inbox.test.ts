@@ -373,3 +373,20 @@ test('a corrupt queued account identity is rejected before dispatch', async () =
     assert.throws(() => inbox.list(), { code: 'NATIVE_INBOX_CORRUPT' });
   } finally { await inbox.stop(); store.close(); }
 });
+
+test('probability observations use the quiet window while real explicit calls dispatch promptly', async () => {
+  for (const trigger of ['probability', 'mention', 'nickname', 'reply'] as const) {
+    const store = createSqliteStore({ filename: ':memory:' });
+    let clock = 1000;
+    let calls = 0;
+    const inbox = createNativeInbox({ store, clock: () => clock, coalesceMs: 120, groupContinuationCoalesceMs: 800,
+      readiness: () => 'ready', async deliver() { calls++; return { status: 'accepted' }; } });
+    try {
+      inbox.enqueue({ ...entry(trigger, '123', clock), trigger });
+      clock = 1120; await inbox.tick();
+      assert.equal(calls, trigger === 'probability' ? 0 : 1);
+      clock = 1800; await inbox.tick();
+      assert.equal(calls, 1);
+    } finally { await inbox.stop(); store.close(); }
+  }
+});
