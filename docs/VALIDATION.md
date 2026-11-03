@@ -8,9 +8,9 @@
 
 SDK 验证在独立项目安装组件包、严格编译并运行；DSH 桥接插件的测试使用实际 SDK 与隔离服务，不连接使用者的生产账号。浏览器场景使用隔离配置，不能据此宣称真实模型质量已经通过。
 
-## 当前发行包
+## 发行包验证记录
 
-v1.9.0 对应提交 `ea597f27de3f6ef526b99c673af780e70eb1c31a`。该提交的[框架验证](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41436815231)与[发行包安装验收](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41436815350)均成功。
+已核对的 v1.9.0 对应提交 `ea597f27de3f6ef526b99c673af780e70eb1c31a`。该提交的[框架验证](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41436815231)与[发行包安装验收](https://github.com/sophisticate9008/qq-bridge-framework/actions/runs/41436815350)均成功。
 
 框架 TAR 与 Windows ZIP、SDK 和 DSH 桥接插件包由同一候选源码构建，附件使用 `SHA256SUMS` 校验。平台验收分别使用真实 Windows x64、Linux x64 与 Linux ARM64 runner，覆盖依赖安装、初始化、中文原生排版、网页资源、令牌保留及重启。发行包保留源码，但运行入口使用预编译后端；安装验收不要求开发机环境。
 

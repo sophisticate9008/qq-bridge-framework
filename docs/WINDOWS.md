@@ -6,7 +6,7 @@ Windows 使用预构建 ZIP、控制台启动脚本和浏览器中的现有 WebU
 
 ## 安装与启动
 
-1. 从 [v1.9.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.9.0) 下载 `qq-bridge-framework-1.9.0-windows-x64.zip` 与 `SHA256SUMS`。
+1. 从 [v1.9.1 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.9.1) 下载 `qq-bridge-framework-1.9.1-windows-x64.zip` 与 `SHA256SUMS`。
 2. 用 PowerShell `Get-FileHash <压缩包> -Algorithm SHA256` 核对校验文件中的对应项，解压到自己可写的本地 NTFS 文件夹。
 3. 双击根目录 `start-windows.cmd`。首次启动联网安装锁定的生产依赖，创建配置，然后启动管理端；后续启动复用依赖与原配置。
 4. 保持控制台窗口打开，在浏览器打开日志给出的本机地址（默认 `http://127.0.0.1:3210`），完成首次初始化和 QQ／DSH 连接设置。DSH 使用高级手动地址及鉴权；Linux 的进程自动发现与 screen 运维不适用于 Windows。
