@@ -572,7 +572,7 @@ export function AdapterManager({ api, connected, connect, setDirty, navigate, co
     {operationRecovery}
     {loadError && <div className="strip bad" role="alert">读取失败，保留当前快照与草稿：{loadError}</div>}
     {loading && <div className="summaryline" role="status">正在读取连接状态，当前草稿保留。</div>}
-    <div className="grid3">
+    <div className="grid3 connection-grid">
       <section id={nativeFormMetadata.onebot.id} className="panel entity">
         <div className="row"><span className="avatar" aria-hidden="true">↔</span><div className="grow"><h2 className="panel-title">QQ 消息连接</h2><p className="muted small">OneBot · HTTP 发送 / WebSocket 接收</p></div><span data-protocol-connection-state={snapshot.connection?.state}><StatusPill tone={protocol?.statusTone ?? 'neutral'}>{protocol?.statusLabel ?? '连接状态未知'}</StatusPill></span></div>
         <div className="meta"><span>HTTP 发送：{!snapshot.outbound.onebotHttp.enabled ? '未启用' : sendHealth ? chatHealthLayerLabel(sendHealth) : '待检查'}</span><span>消息接收：{snapshot.websocket.enabled ? 'WebSocket' : snapshot.webhook.enabled ? 'Webhook' : '未启用'}</span><span>账号：{snapshot.connection?.selfId ?? '尚未识别'}</span></div>

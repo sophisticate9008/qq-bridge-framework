@@ -176,6 +176,7 @@
   .grid2,.editorgrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .grid3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .grid3>.entity { height:100%; }
+  .connection-grid>.entity { height:auto; }
   .split { grid-template-columns:minmax(0,1.45fr) minmax(0,1fr); }
   .overview-activity-layout { align-items:stretch; }
   .recent-activity { display:flex; flex-direction:column; }
