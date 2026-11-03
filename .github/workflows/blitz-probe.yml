@@ -32,6 +32,7 @@ jobs:
       BLITZ_REV: 16ebc29363826d43917d2e3cb91d37f7d2156fdd
       CARGO_TERM_COLOR: always
       CARGO_BUILD_JOBS: '2'
+      RUSTFLAGS: ${{ matrix.platform == 'win32' && '-C target-feature=+crt-static' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -65,6 +66,15 @@ jobs:
       - name: Linux 动态依赖
         if: runner.os == 'Linux'
         run: ldd runtime/blitz-probe/package/qbf-html-probe | tee runtime/blitz-probe/dynamic-dependencies.txt
+      - name: Windows 动态依赖
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $locator = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $dumpbin = & $locator -latest -products '*' -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { throw 'MSVC dumpbin was not found' }
+          & $dumpbin /dependents runtime/blitz-probe/package/qbf-html-probe.exe | Tee-Object runtime/blitz-probe/dynamic-dependencies.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency inspection failed' }
       - name: 保存组件、样图与小型报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

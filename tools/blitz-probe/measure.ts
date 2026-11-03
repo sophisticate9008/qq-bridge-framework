@@ -31,8 +31,9 @@ for (const name of ['color', 'long']) {
 }
 const binaryContent = await readFile(binary);
 const archive = resolve(output, `blitz-probe-${process.platform}-${process.arch}.tar.gz`);
-const compressed = spawnSync('tar', ['-czf', archive, '-C', packaged, '.'], { encoding: 'utf8', timeout: 30_000 });
-if (compressed.status !== 0) throw new Error(compressed.stderr);
+// Use a relative archive name: GNU tar in Git Bash treats a drive colon as a remote host.
+const compressed = spawnSync('tar', ['-czf', `../${basename(archive)}`, '.'], { cwd: packaged, encoding: 'utf8', timeout: 30_000 });
+if (compressed.error || compressed.status !== 0) throw new Error(compressed.error?.message ?? compressed.stderr);
 const report = {
   frameworkCommit: process.env.GITHUB_SHA ?? null,
   blitzCommit: process.env.BLITZ_REV ?? null,
