@@ -8,10 +8,14 @@ import { isRecord } from '../contracts/values.ts'
 import { ensurePrivateDirectory, readPrivateJson, replacePrivateJson, PrivateJsonStorageError } from './private-json.ts'
 import { privatePermissions } from './file-security.ts'
 
+export interface ChatRepairProcessIdentity { readonly pid: number; readonly started: string | null }
 export interface ChatRepairRecord {
   readonly operation: ChatRepairOperation
   readonly applicationId?: string
-  readonly worker: { readonly pid: number; readonly started: string | null } | null
+  readonly worker: ChatRepairProcessIdentity | null
+  readonly guardian?: ChatRepairProcessIdentity
+  readonly guardianRecoveryComplete?: boolean
+  readonly rescueAttempts?: number
 }
 interface Journal { readonly schema: 1; readonly records: readonly ChatRepairRecord[]; readonly retired: readonly string[] }
 function validate(value: unknown): Journal {
@@ -22,13 +26,18 @@ function validate(value: unknown): Journal {
   const records = value.records.map((entry: unknown): ChatRepairRecord => {
     if (!isRecord(entry)) throw new Error('chat_repair_storage_invalid')
     const operation = parseChatRepairOperation(entry.operation)
-    const worker = entry.worker
-    if (!operation || seen.has(operation.id) || entry.applicationId !== undefined && !isNativeApplicationId(entry.applicationId) || worker !== null && (!isRecord(worker) || typeof worker.pid !== 'number'
-      || !Number.isSafeInteger(worker.pid) || worker.pid < 1 || worker.started !== null && (typeof worker.started !== 'string' || !/^\d+$/.test(worker.started)))) {
-      throw new Error('chat_repair_storage_invalid')
-    }
+    const identity = (value: unknown): value is ChatRepairProcessIdentity => isRecord(value) && typeof value.pid === 'number'
+      && Number.isSafeInteger(value.pid) && value.pid > 0 && (value.started === null || typeof value.started === 'string' && /^\d+$/.test(value.started))
+    if (!operation || seen.has(operation.id) || entry.applicationId !== undefined && !isNativeApplicationId(entry.applicationId)
+      || entry.worker !== null && !identity(entry.worker) || entry.guardian !== undefined && !identity(entry.guardian)
+      || entry.guardianRecoveryComplete !== undefined && typeof entry.guardianRecoveryComplete !== 'boolean'
+      || entry.rescueAttempts !== undefined && (typeof entry.rescueAttempts !== 'number' || !Number.isSafeInteger(entry.rescueAttempts)
+        || entry.rescueAttempts < 0 || entry.rescueAttempts > 2)) throw new Error('chat_repair_storage_invalid')
     seen.add(operation.id)
-    return { operation, ...(entry.applicationId === undefined ? {} : { applicationId: entry.applicationId as string }), worker: worker as ChatRepairRecord['worker'] }
+    return { operation, ...(entry.applicationId === undefined ? {} : { applicationId: entry.applicationId as string }), worker: entry.worker as ChatRepairRecord['worker'],
+      ...(entry.guardian === undefined ? {} : { guardian: entry.guardian as ChatRepairProcessIdentity }),
+      ...(entry.guardianRecoveryComplete === undefined ? {} : { guardianRecoveryComplete: entry.guardianRecoveryComplete as boolean }),
+      ...(entry.rescueAttempts === undefined ? {} : { rescueAttempts: entry.rescueAttempts as number }) }
   })
   return { schema: 1, records, retired: value.retired }
 }
@@ -41,7 +50,7 @@ export async function chatRepairProcessStart(pid: number): Promise<string | null
   if (!started || !/^\d+$/.test(started)) throw new Error('chat_repair_process_identity_invalid')
   return started
 }
-async function processAlive(worker: NonNullable<ChatRepairRecord['worker']>): Promise<boolean> {
+export async function chatRepairProcessAlive(worker: ChatRepairProcessIdentity): Promise<boolean> {
   try {
     process.kill(worker.pid, 0)
     return worker.started === null || await chatRepairProcessStart(worker.pid) === worker.started
@@ -52,10 +61,16 @@ async function processAlive(worker: NonNullable<ChatRepairRecord['worker']>): Pr
 }
 export async function chatRepairWorkerAlive(record: ChatRepairRecord): Promise<boolean> {
   if (!record.worker) return Date.now() - record.operation.createdAt < 15_000
-  return processAlive(record.worker)
+  return chatRepairProcessAlive(record.worker)
 }
 export async function projectChatRepair(record: ChatRepairRecord): Promise<ChatRepairOperation> {
-  return record.operation.state === 'running' && !await chatRepairWorkerAlive(record)
+  if (record.operation.state === 'completed') return record.operation
+  const workerAlive = await chatRepairWorkerAlive(record)
+  if ((!workerAlive || record.operation.state === 'failed') && record.guardian && record.guardianRecoveryComplete !== true
+    && await chatRepairProcessAlive(record.guardian)) {
+    return { ...record.operation, state: 'running', phase: 'starting-services', reasons: [] }
+  }
+  return record.operation.state === 'running' && !workerAlive
     ? { ...record.operation, state: 'failed', updatedAt: Date.now(), reasons: ['chat_repair_worker_interrupted'] } : record.operation
 }
 
@@ -108,7 +123,7 @@ export function createChatRepairStorage(directory: string) {
             const owner: unknown = JSON.parse(content)
             if (!isRecord(owner) || !Number.isSafeInteger(owner.pid) || typeof owner.pid !== 'number' || owner.pid < 1
               || owner.started !== null && (typeof owner.started !== 'string' || !/^\d+$/.test(owner.started))) throw new Error('chat_repair_lock_invalid')
-            if (await processAlive({ pid: owner.pid, started: owner.started as string | null })) throw new Error('chat_repair_busy')
+            if (await chatRepairProcessAlive({ pid: owner.pid, started: owner.started as string | null })) throw new Error('chat_repair_busy')
           }
           const current = await lstat(lockname)
           if (current.ino !== before.ino || current.dev !== before.dev || current.mtimeMs !== before.mtimeMs) throw new Error('chat_repair_busy')

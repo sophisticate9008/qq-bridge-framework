@@ -779,8 +779,11 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     await closeServer(server);
     throw error;
   }
+  const rescueOnly = /^[a-f0-9-]{36}$/.test(process.env.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE ?? '');
   const startupController = new AbortController();
   const startup = (async () => {
+    // Guardian rescue restores the management surface; saved intent cannot start chat or apply assistant settings here.
+    if (rescueOnly) return;
     const maintenance = await createNativeDshRestartStorage(directory).read();
     if (maintenance.value.records.some(record => record.operation.state === 'running' || record.operation.state === 'unknown')) return;
     const registered = await accounts.read();
@@ -843,7 +846,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
   let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   let recoveryTask: Promise<void> | undefined;
   function scheduleConnectionRecovery() {
-    if (startupController.signal.aborted) return;
+    if (startupController.signal.aborted || rescueOnly) return;
     recoveryTimer = setTimeout(() => {
       recoveryTask = (async () => {
         const registered = await accounts.read();

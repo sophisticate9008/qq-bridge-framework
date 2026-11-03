@@ -14,7 +14,7 @@ import { parseNativeAccountRegistry } from '../src/contracts/native-accounts.ts'
 import { isRecord } from '../src/contracts/values.ts'
 import { parseChatHealth } from '../src/contracts/chat-health.ts'
 import type { ChatRepairOperation } from '../src/contracts/chat-repair.ts'
-import { createChatRepairStorage, chatRepairProcessStart, chatRepairWorkerAlive } from '../src/storage/chat-repair.ts'
+import { createChatRepairStorage, chatRepairProcessStart, chatRepairProcessAlive, chatRepairWorkerAlive } from '../src/storage/chat-repair.ts'
 import { createNativeApplicationStorage } from '../src/storage/native-application.ts'
 import { createNativeDshRestartStorage } from '../src/storage/native-dsh-restart.ts'
 import { nativeRuntimeIsQuiescent } from '../src/contracts/native-runtime-quiescence.ts'
@@ -24,6 +24,7 @@ import { privatePermissions } from '../src/storage/file-security.ts'
 interface RepairPorts {
   readonly dshHome: string
   ensureDsh(): Promise<void>
+  guardian(): Promise<void>
   stop(): Promise<void>
   start(): Promise<void>
 }
@@ -57,6 +58,30 @@ async function removeSameLock(filename: string, metadata: { readonly ino: number
   await unlink(filename)
 }
 
+async function assertNoLockHolders(metadata: { readonly dev: number; readonly ino: number }): Promise<void> {
+  const processes = (await readdir('/proc')).filter(name => /^\d+$/.test(name) && Number(name) !== process.pid)
+  if (processes.length > 4096) fail('chat_repair_lock_owners_unverified')
+  for (const pid of processes) {
+    try {
+      const processDirectory = await stat(`/proc/${pid}`)
+      if (process.getuid && processDirectory.uid !== process.getuid()) continue
+      const descriptors = await readdir(`/proc/${pid}/fd`)
+      if (descriptors.length > 4096) fail('chat_repair_lock_owners_unverified')
+      for (const descriptor of descriptors) {
+        const file = await stat(`/proc/${pid}/fd/${descriptor}`).catch((error: unknown) => {
+          if (isRecord(error) && error.code === 'ENOENT') return null
+          throw error
+        })
+        if (file?.dev === metadata.dev && file.ino === metadata.ino) fail('chat_repair_writer_still_running')
+      }
+    } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') continue
+      if (isRecord(error) && typeof error.code === 'string' && error.code.startsWith('chat_repair_')) throw error
+      fail('chat_repair_lock_owners_unverified')
+    }
+  }
+}
+
 /** Only call after every managed host was proved stopped. Empty leases are still protected if any process holds them. */
 export async function retireStoppedFrameworkLocks(directory: string, backups: string): Promise<void> {
   for (const name of ['.chat-runtime.lock', '.native-chat-lifecycle.lock', '.native-chat-runtime.lock']) {
@@ -66,31 +91,34 @@ export async function retireStoppedFrameworkLocks(directory: string, backups: st
     catch (error) { if (isRecord(error) && error.code === 'ENOENT') continue; throw error }
     try {
       if (opened.metadata.size !== 0) fail('chat_repair_lock_unverified')
-      const processes = (await readdir('/proc')).filter(name => /^\d+$/.test(name) && Number(name) !== process.pid)
-      if (processes.length > 4096) fail('chat_repair_lock_owners_unverified')
-      for (const pid of processes) {
-        try {
-          const processDirectory = await stat(`/proc/${pid}`)
-          if (process.getuid && processDirectory.uid !== process.getuid()) continue
-          const descriptors = await readdir(`/proc/${pid}/fd`)
-          if (descriptors.length > 4096) fail('chat_repair_lock_owners_unverified')
-          for (const descriptor of descriptors) {
-            const file = await stat(`/proc/${pid}/fd/${descriptor}`).catch((error: unknown) => {
-              if (isRecord(error) && error.code === 'ENOENT') return null
-              throw error
-            })
-            if (file?.dev === opened.metadata.dev && file.ino === opened.metadata.ino) fail('chat_repair_writer_still_running')
-          }
-        } catch (error) {
-          if (isRecord(error) && error.code === 'ENOENT') continue
-          if (isRecord(error) && typeof error.code === 'string' && error.code.startsWith('chat_repair_')) throw error
-          fail('chat_repair_lock_owners_unverified')
-        }
-      }
+      await assertNoLockHolders(opened.metadata)
       await backup(join(backups, `${name}.json`), { name, dev: opened.metadata.dev, ino: opened.metadata.ino, mtimeMs: opened.metadata.mtimeMs, size: 0 })
       await removeSameLock(filename, opened.metadata)
     } finally { await opened.handle.close() }
   }
+}
+
+/** Only call after all managed hosts stopped. Unknown owners retain their locks. */
+export async function retireStoppedDshWriterLock(filename: string, backups: string): Promise<void> {
+  let opened: Awaited<ReturnType<typeof openPrivateLock>>
+  try { opened = await openPrivateLock(filename) }
+  catch (error) { if (isRecord(error) && error.code === 'ENOENT') return; throw error }
+  try {
+    const content = await opened.handle.readFile('utf8')
+    if (!content) {
+      await assertNoLockHolders(opened.metadata)
+      await backup(join(backups, `writer-lock-${randomUUID()}.json`), { empty: true, ino: opened.metadata.ino, dev: opened.metadata.dev })
+      await removeSameLock(filename, opened.metadata)
+      return
+    }
+    if (!/^[1-9]\d*\n?$/.test(content) || !Number.isSafeInteger(Number(content.trim()))) fail('chat_repair_lock_unverified')
+    let alive = true
+    try { process.kill(Number(content.trim()), 0); await chatRepairProcessStart(Number(content.trim())) }
+    catch (error) { if (isRecord(error) && ['ESRCH', 'ENOENT'].includes(String(error.code))) alive = false }
+    if (alive) fail('chat_repair_writer_still_running')
+    await backup(join(backups, `writer-lock-${randomUUID()}.json`), { pid: Number(content.trim()), ino: opened.metadata.ino, dev: opened.metadata.dev })
+    await removeSameLock(filename, opened.metadata)
+  } finally { await opened.handle.close() }
 }
 
 /** Runs outside the framework, without resetting business executions, conversations or model requests. */
@@ -176,6 +204,14 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     await ensurePrivateDirectory(backups)
     const intent = await repository.readRunningIntent()
     await backup(join(backups, 'running-intent.json'), intent.value)
+    await ports.guardian()
+    const guardianDeadline = Date.now() + 15_000
+    while (true) {
+      const guarded = (await storage.read()).value.records.find(entry => entry.operation.id === operationId)
+      if (guarded?.guardian && guarded.guardianRecoveryComplete !== true && await chatRepairProcessAlive(guarded.guardian)) break
+      if (Date.now() >= guardianDeadline) fail('chat_repair_guardian_unavailable')
+      await pause(signal)
+    }
     await update({ phase: 'stopping' })
     // This flag precedes the call: stop may have stopped the UI before another component fails.
     stopAttempted = true
@@ -200,19 +236,7 @@ export async function runChatRepair(configurationFilename: string, operationId: 
           reasons: ['dsh_restart_interrupted_by_chat_repair'], updatedAt: Date.now() } } : entry) })
     }
     for (const filename of [...new Set([`${join(dirname(target.profilePath), 'package.json')}.lock`, `${target.credentialsPath}.lock`])]) {
-      let opened: Awaited<ReturnType<typeof openPrivateLock>>
-      try { opened = await openPrivateLock(filename) }
-      catch (error) { if (isRecord(error) && error.code === 'ENOENT') continue; throw error }
-      try {
-        const content = await opened.handle.readFile('utf8')
-        if (!/^[1-9]\d*\n?$/.test(content) || !Number.isSafeInteger(Number(content.trim()))) fail('chat_repair_lock_unverified')
-        let alive = true
-        try { process.kill(Number(content.trim()), 0) }
-        catch (error) { if (isRecord(error) && error.code === 'ESRCH') alive = false }
-        if (alive) fail('chat_repair_writer_still_running')
-        await backup(join(backups, `writer-lock-${randomUUID()}.json`), { pid: Number(content.trim()), ino: opened.metadata.ino, dev: opened.metadata.dev })
-        await removeSameLock(filename, opened.metadata)
-      } finally { await opened.handle.close() }
+      await retireStoppedDshWriterLock(filename, backups)
     }
     await repository.clearRunningIntent()
     await update({ phase: 'starting-services' })

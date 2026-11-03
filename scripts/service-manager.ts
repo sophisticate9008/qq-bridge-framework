@@ -441,7 +441,7 @@ async function lockAndRun(config: Configuration, argumentsList: string[]): Promi
   const file = await open(config.lockFile, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
   await file.chmod(0o600);
   await file.close();
-  const result = await execute('/usr/bin/flock', ['--exclusive', '--nonblock', '--conflict-exit-code', '75', '--close', config.lockFile, process.execPath, ...(argumentsList[0] === 'maintenance' ? ['--max-old-space-size=128'] : []), entry, ...argumentsList], {
+  const result = await execute('/usr/bin/flock', ['--exclusive', ...(argumentsList[0] === 'repair-services-rescue' ? ['--wait', '90'] : ['--nonblock']), '--conflict-exit-code', '75', '--close', config.lockFile, process.execPath, ...(argumentsList[0] === 'maintenance' ? ['--max-old-space-size=128'] : []), entry, ...argumentsList], {
     env: { ...process.env, QQ_BRIDGE_FRAMEWORK_OPS_LOCKED: '1' }, inherit: true, timeout: 300000,
   });
   if (result.code === 75) fail('另一项运维操作正在运行，请稍后查看状态。');
@@ -450,6 +450,32 @@ async function lockAndRun(config: Configuration, argumentsList: string[]): Promi
 async function main(): Promise<void> {
   const argumentsList = process.argv.slice(2);
   const action = argumentsList[0] ?? 'start';
+  if (action === 'repair-chat-guardian') {
+    const [id, flag, filename] = argumentsList.slice(1);
+    if (argumentsList.length !== 4 || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id ?? '')
+      || flag !== '--config' || !absolute(filename)) fail('聊天守护参数无效。');
+    const { loadGatewayAdminConfiguration, gatewayAdminAddress } = await import('../src/admin/gateway.ts');
+    const { runChatRepairGuardian } = await import('./chat-repair-guardian.ts');
+    const admin = loadGatewayAdminConfiguration(filename);
+    const directory = path.join(path.dirname(admin.tokenFile), 'runtime');
+    const environment = { ...process.env };
+    delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
+    await runChatRepairGuardian({ directory, operationId: id }, {
+      async ready() {
+        const token = (await readFile(admin.tokenFile, 'utf8')).trim();
+        const response = await fetch(new URL(`/api/chat/repair?id=${id}`, gatewayAdminAddress(admin)), {
+          headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(3000) });
+        if (!response.ok) { await response.body?.cancel(); return false; }
+        const value: unknown = await response.json();
+        return record(value) && record(value.operation) && value.operation.id === id;
+      },
+      async start() {
+        const result = await execute(process.execPath, [entry, 'repair-services-rescue', id], { env: environment, detached: false, timeout: 270_000 });
+        if (result.code !== 0) throw new Error('chat_repair_services_not_restored');
+      }
+    });
+    return;
+  }
   if (action === 'repair-chat') {
     const [id, flag, filename] = argumentsList.slice(1);
     if (argumentsList.length !== 4 || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id ?? '')
@@ -463,23 +489,32 @@ async function main(): Promise<void> {
     const command = async (value: string) => {
       const environment = { ...process.env };
       delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
+      delete environment.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE;
       // Keep every stage in the detached repair session so stopping its former host protects the whole worker tree.
       const result = await execute(process.execPath, [entry, value], { env: environment, timeout: 180_000, detached: false });
       if (result.code !== 0) throw Object.assign(new Error('Managed repair stage failed.'), { code:
         value === 'repair-services-stop' ? 'chat_repair_stop_failed' : 'chat_repair_start_failed' });
     };
-    await runChatRepair(filename, id, { dshHome: config.dshHome, ensureDsh: () => command('repair-services-prepare'),
+    await runChatRepair(filename, id, { dshHome: config.dshHome,
+      async guardian() {
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(process.execPath, [entry, 'repair-chat-guardian', id, '--config', filename], { stdio: 'ignore', detached: false });
+          child.once('error', () => reject(Object.assign(new Error('Guardian could not start'), { code: 'chat_repair_guardian_unavailable' })));
+          child.once('spawn', () => { child.unref(); resolve(); });
+        });
+      }, ensureDsh: () => command('repair-services-prepare'),
       stop: () => command('repair-services-stop'), start: () => command('repair-services-start') });
     return;
   }
-  if (['repair-services-prepare', 'repair-services-stop', 'repair-services-start'].includes(action)) {
-    if (argumentsList.length !== 1) fail('聊天修复参数无效。');
+  if (['repair-services-prepare', 'repair-services-stop', 'repair-services-start', 'repair-services-rescue'].includes(action)) {
+    if (action === 'repair-services-rescue' ? argumentsList.length !== 2 || !/^[a-f0-9-]{36}$/.test(argumentsList[1] ?? '') : argumentsList.length !== 1) fail('聊天修复参数无效。');
     const config = await load();
     for (const id of ['dsh', 'framework-admin']) {
       const service = component(config, id, true);
       if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管 DSH 与框架管理服务。');
     }
     if (process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') { await lockAndRun(config, argumentsList); return; }
+    if (action === 'repair-services-rescue') process.env.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE = argumentsList[1];
     // Protocol clients never belong to chat repair, even if a legacy manifest marks them managed.
     const targets = ordered(config).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
       && !['napcat', 'snowluma'].includes(config.services[id]!.group));

@@ -63,6 +63,7 @@ export function createChatRepairRoutes(options: { readonly directory: string; re
         // No HTTP lifetime signal reaches this session. The worker survives stopping its accepting framework.
         const environment = { ...process.env }
         delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED
+        delete environment.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE
         let manager: string | null = null
         try {
           const canonical = await realpath(options.serviceManager!)
