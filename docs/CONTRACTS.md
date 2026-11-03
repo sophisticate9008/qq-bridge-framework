@@ -1,5 +1,7 @@
 # 公共契约与修改约束
 
+DSH 部署运行时可提供可选的 `sessionsReloaded(configuration, signal)`，仅供可信宿主在确认目标 DSH 重载后通知部署协调器。默认实现核验当前提供方和预设的实际加载结果，再清除原会话配置等待状态；此通知不触发写入或重启。`blocked/apply` 的 `pending_reload`、`session_configuration_reload_required` 和 `session_configuration_reload_unknown` 均保留原应用恢复入口，恢复只继续核验和启动。
+
 框架、工具和协议使用当前命名，1.4.1 需要配套更新框架、SDK、DSH 桥接插件及调用方；迁移说明见 [命名统一与升级](RENAMING.md)。
 
 ## 聊天时间与有界补读

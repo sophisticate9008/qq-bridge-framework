@@ -378,8 +378,9 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
   }
 
   const canReconcile = chatApplicationCanReconcile(applicationState);
-  const waitingForReload = applicationState.operation?.state === 'blocked' && applicationState.operation.phase === 'apply'
-    && applicationState.operation.reasons.includes('pending_reload');
+  const waitingForReload = applicationState.operation?.phase === 'apply'
+    && applicationState.operation.reasons.some(reason => ['pending_reload', 'session_configuration_reload_required',
+      'session_configuration_reload_unknown'].includes(reason));
   const primaryAction = chatApplicationPrimaryAction(applicationState, { connected, requestActive: request.current !== null,
     updateReady: !applicationLoading && !observationError && !busy && saved !== null && form !== null && currentDocument() && !blocked && !dirty
       && personaSelected && !(prepareConfiguration ? configurationUpdateBlocked : configurationDirty) });

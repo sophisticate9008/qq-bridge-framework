@@ -152,6 +152,28 @@ test('a normal pending reload waits for observed deployment and finishes the sam
   assert.equal(observations, 2); assert.deepEqual(f.calls, ['stop', 'prepare', 'apply', 'reconcile-deployment', 'start']);
 });
 
+test('session reload recovery continues the original application without writing the deployment again', async t => {
+  for (const reason of ['session_configuration_reload_required', 'session_configuration_reload_unknown']) {
+    const storage = createNativeApplicationStorage(await directory(t)); const f = fixture();
+    f.ports.apply = async () => { f.calls.push('apply'); return { state: 'pending_reload', backupId: 'backup', missingReasons: [reason] }; };
+    const proof = f.ports.reconcileDeployment;
+    f.ports.reconcileDeployment = async () => ({ missingReasons: [reason], presetBindings: [] });
+    const coordinator = createNativeApplicationCoordinator({ storage, ports: f.ports, signal: new AbortController().signal });
+    const request = { operationId: randomUUID(), revisions, deploy: true };
+    await coordinator.create(request); await coordinator.drain();
+    assert.equal((await coordinator.read())?.state, 'blocked');
+    await assert.rejects(coordinator.create({ ...request, operationId: randomUUID() }), { code: 'APPLICATION_RECONCILIATION_REQUIRED' });
+    f.setStatus({ quiescent: true });
+    assert.equal((await coordinator.reconcile(request.operationId)).state, 'blocked');
+    f.ports.reconcileDeployment = proof;
+    assert.equal((await coordinator.reconcile(request.operationId)).state, 'running');
+    await coordinator.drain();
+    assert.equal((await coordinator.read())?.state, 'completed');
+    assert.equal(f.calls.filter(call => call === 'apply').length, 1);
+    assert.equal(f.calls.filter(call => call === 'start').length, 1);
+  }
+});
+
 test('reload observation expires as pending, blocks replacement intents and resumes only after explicit proof on the same id', async t => {
   const storage = createNativeApplicationStorage(await directory(t)); const f = fixture();
   f.ports.apply = async () => { f.calls.push('apply'); return { state: 'pending_reload', backupId: 'backup', missingReasons: ['pending_reload'] }; };

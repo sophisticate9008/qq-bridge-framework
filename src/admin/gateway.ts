@@ -598,7 +598,8 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     const application = nativeApplicationService(chatRuntime);
     const operation = await application?.read();
     const awaitingApply = operation?.phase === 'apply' && (operation.state === 'unknown'
-      || operation.state === 'blocked' && operation.reasons.includes('pending_reload'));
+      || operation.state === 'blocked' && operation.reasons.some(reason => ['pending_reload',
+        'session_configuration_reload_required', 'session_configuration_reload_unknown'].includes(reason)));
     assert(!operation || !nativeApplicationRequiresReconciliation(operation) || awaitingApply
       || applying && operation.state === 'running' && operation.phase === 'apply',
       'DSH_RESTART_APPLICATION_BUSY', 'An application phase still requires reconciliation.');
@@ -658,7 +659,10 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
         () => chatRuntime.assertSessionIdle(target), () => finishSessionRemoval(target, signal));
       else await localDsh.restart(current, signal);
     }),
-    verify: localDsh.verify,
+    async verify(current, signal) {
+      await localDsh.verify(current, signal);
+      await deploymentRuntime.sessionsReloaded?.(current, signal);
+    },
     async restore(revisions, wasRunning, signal) {
       signal.throwIfAborted();
       const application = nativeApplicationService(chatRuntime);

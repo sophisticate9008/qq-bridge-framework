@@ -175,6 +175,19 @@ function patchProfile(document: YamlDocument, proposal: DshDeploymentProposal, c
     else document.add(document.createNode({ id: patch.id, config: patch.config }))
   }
   document.add(document.createNode(credentialPatch))
+  // Config patches replace a complete entry config. Keep the newest write for
+  // these targets instead of accumulating another full provider/preset copy.
+  // Insertions and patches with other fields retain their original semantics.
+  const targets = new Set([...proposal.patch, credentialPatch].flatMap(patch => typeof patch.id === 'string' ? [patch.id] : []))
+  const seen = new Set<string>()
+  for (let index = document.contents.items.length - 1; index >= 0; index--) {
+    const row = document.contents.items[index]
+    if (!isMap(row) || row.items.length !== 2 || !row.has('id') || !row.has('config')) continue
+    const id = row.get('id')
+    if (typeof id !== 'string' || !targets.has(id)) continue
+    if (seen.has(id)) document.contents.items.splice(index, 1)
+    else seen.add(id)
+  }
   const rendered = String(document)
   parse(rendered)
   return rendered

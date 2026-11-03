@@ -282,6 +282,16 @@ export function createNativeDshDeploymentRuntime(options: DshProfileDeploymentOp
     }
   }
   return Object.freeze({
+    async sessionsReloaded(configuration: NativeChatConfiguration, signal: AbortSignal): Promise<void> {
+      const prepared = await prepareProfile(configuration, signal, files, options)
+      if (!prepared.preparation.summary.ready) fail('session_configuration_reload_required')
+      await requireApproval(configuration, prepared, signal)
+      const result = prepared.preparation.reconcile(await liveSnapshot(configuration, prepared, signal, files))
+      if (result.status !== 'verified') fail('pending_reload')
+      signal.throwIfAborted()
+      reloadedSessionConfiguration = prepared.sessionConfigurationFingerprint
+      pendingSessionReload = undefined
+    },
     async prepare(configuration: NativeChatConfiguration): Promise<NativeDeploymentPreparationResult> {
       if (applying) return { schema: 1, state: 'blocked', missingReasons: ['deployment_busy'] }
       staged = undefined
@@ -336,7 +346,7 @@ export function createNativeDshDeploymentRuntime(options: DshProfileDeploymentOp
             return { status: 'conflict' }
           }
         }, signal)
-        if (writeFailure) return { schema: 1, state: writeFailure === 'deployment_revision_conflict' ? 'conflict' : 'unknown',
+        if (writeFailure) return { schema: 1, state: writeFailure === 'deployment_revision_conflict' ? 'conflict' : backupId ? 'unknown' : 'blocked',
           ...(backupId ? { backupId } : {}), missingReasons: [writeFailure] }
         if (!backupId) return { schema: 1, state: 'blocked', missingReasons: prepared.preparation.summary.missingReasons }
         if (requiresSessionReload) {

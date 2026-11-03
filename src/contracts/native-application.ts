@@ -19,7 +19,8 @@ export interface NativeApplicationSnapshot {
 }
 export function nativeApplicationRequiresReconciliation(operation: NativeApplicationSnapshot): boolean {
   return operation.state === 'running' || operation.state === 'unknown'
-    || operation.state === 'blocked' && operation.phase === 'apply' && operation.reasons.includes('pending_reload');
+    || operation.state === 'blocked' && operation.phase === 'apply' && operation.reasons.some(reason =>
+      ['pending_reload', 'session_configuration_reload_required', 'session_configuration_reload_unknown'].includes(reason));
 }
 export const NATIVE_APPLICATION_PATH = '/api/chat/application';
 export const isNativeApplicationId = (value: unknown): value is string => typeof value === 'string'

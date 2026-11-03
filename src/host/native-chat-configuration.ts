@@ -54,6 +54,8 @@ export const DEFAULT_NATIVE_CHAT_DEPLOYMENT: NativeChatDeploymentConfiguration =
 })
 
 export interface NativeChatDeploymentRuntime {
+  /** Called by the trusted host after a confirmed DSH reload, before resuming the original application. */
+  sessionsReloaded?(configuration: NativeChatConfiguration, signal: AbortSignal): Promise<void>
   prepare(configuration: NativeChatConfiguration): Promise<NativeDeploymentPreparationResult>
   reconcile(configuration: NativeChatConfiguration): Promise<NativeDeploymentReconciliationResult>
   apply(configuration: NativeChatConfiguration, signal: AbortSignal, targetRevision?: string): Promise<NativeDeploymentApplyResult>
@@ -61,6 +63,7 @@ export interface NativeChatDeploymentRuntime {
 
 /** Untrusted integration boundary; outputs are decoded before use. */
 export interface NativeChatDeploymentRuntimeInput {
+  sessionsReloaded?(configuration: NativeChatConfiguration, signal: AbortSignal): Promise<void>
   prepare(configuration: NativeChatConfiguration): Promise<unknown>
   reconcile(configuration: NativeChatConfiguration): Promise<unknown>
   apply(configuration: NativeChatConfiguration, signal: AbortSignal, targetRevision?: string): Promise<unknown>

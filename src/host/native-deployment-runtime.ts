@@ -14,13 +14,15 @@ const checked = new WeakMap<NativeChatDeploymentRuntimeInput, NativeChatDeployme
 
 /** Integrations enter through this boundary, which also normalizes legacy schema-less results. */
 export function checkedNativeDeploymentRuntime(input: NativeChatDeploymentRuntimeInput): NativeChatDeploymentRuntime {
-  if (!input || !['prepare', 'apply', 'reconcile'].every(key => typeof Reflect.get(input, key) === 'function')) {
+  if (!input || !['prepare', 'apply', 'reconcile'].every(key => typeof Reflect.get(input, key) === 'function')
+    || input.sessionsReloaded !== undefined && typeof input.sessionsReloaded !== 'function') {
     throw new FrameworkError(NATIVE_DEPLOYMENT_ERROR_CODES.runtime, 'A native deployment runtime is required.')
   }
   const existing = checked.get(input)
   if (existing) return existing
   const fail = (code: string): never => { throw new FrameworkError(code, 'The deployment runtime returned an invalid result.') }
   const runtime: NativeChatDeploymentRuntime = Object.freeze({
+    ...(input.sessionsReloaded ? { sessionsReloaded: (configuration: NativeChatConfiguration, signal: AbortSignal) => input.sessionsReloaded!(configuration, signal) } : {}),
     async prepare(configuration: NativeChatConfiguration) {
       return parseNativeDeploymentPreparationResult(await input.prepare(configuration)) ?? fail(NATIVE_DEPLOYMENT_ERROR_CODES.preparation)
     },

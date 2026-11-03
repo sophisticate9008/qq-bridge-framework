@@ -242,10 +242,9 @@ export function createNativeApplicationCoordinator(options: {
         const record = prior.value.records.find(item => item.snapshot.id === id);
         assert(record, 'APPLICATION_NOT_FOUND', 'The application was not found.');
         const current = project(record);
-        if (current.reasons.some(reason => reason === 'session_configuration_reload_required'
-          || reason === 'session_configuration_reload_unknown')) return current;
         const awaitingDeployment = current.phase === 'apply' && (current.state === 'unknown'
-          || current.state === 'blocked' && current.reasons.includes('pending_reload'));
+          || current.state === 'blocked' && current.reasons.some(reason => ['pending_reload',
+            'session_configuration_reload_required', 'session_configuration_reload_unknown'].includes(reason)));
         if (current.state !== 'unknown' && !awaitingDeployment) return current;
         const observed = await withDeadline({ signal: options.signal, timeoutMs: 10_000,
           code: 'APPLICATION_STATUS_UNAVAILABLE', run: () => options.ports.status() });

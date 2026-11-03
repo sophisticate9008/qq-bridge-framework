@@ -8,6 +8,7 @@ import test from 'node:test'
 import type { TestContext } from 'node:test'
 import { parseDocument } from 'yaml'
 import { createNativeDshDeploymentRuntime } from '../src/adapters/dsh-profile-deployment.ts'
+import { createDshProfileFilePort, DshProfileFileError } from '../src/adapters/dsh-profile-files.ts'
 import type { NativeChatConfiguration } from '../src/host/native-chat-configuration.ts'
 import type { ChatCapabilityApprovalRequest, ChatCapabilityCompositionApproval } from '../src/host/chat-capabilities.ts'
 import { DEFAULT_NATIVE_EXECUTION_POLICY } from '../src/host/native-execution.ts'
@@ -119,6 +120,41 @@ async function fixture(context: TestContext) {
 function runtime() {
   return createNativeDshDeploymentRuntime({ verificationTimeoutMs: 1_000, pollIntervalMs: 10 })
 }
+
+test('repeated applications replace superseded config patches and retain operator content', async context => {
+  const data = await fixture(context)
+  const deployment = runtime()
+  let firstSize = 0
+  for (let index = 0; index < 12; index++) {
+    const prepared = await deployment.prepare(data.configuration)
+    assert.equal(prepared.state, 'prepared')
+    if (prepared.state !== 'prepared') return
+    const applied = await deployment.apply(data.configuration, new AbortController().signal, prepared.targetRevision)
+    assert.equal(applied.state, 'verified')
+    const profile = await readFile(data.profilePath, 'utf8')
+    if (index === 0) firstSize = Buffer.byteLength(profile)
+    assert.equal(Buffer.byteLength(profile), firstSize)
+    assert(profile.includes('# operator comment'))
+    const patches = parseDocument(profile).toJS() as Record<string, unknown>[]
+    assert.equal(patches.filter(row => row.id === 'llm-pi-ai').length, 1)
+    assert.equal(patches.filter(row => row.id === 'credentials-local').length, 1)
+  }
+})
+
+test('a profile rendering failure before backup is blocked without an unknown write', async context => {
+  const data = await fixture(context)
+  const before = await readFile(data.profilePath, 'utf8')
+  const deployment = createNativeDshDeploymentRuntime({ files: { ...createDshProfileFilePort(),
+    async write() { throw new DshProfileFileError('dsh_yaml_complexity_unsupported') },
+  } })
+  const prepared = await deployment.prepare(data.configuration)
+  assert.equal(prepared.state, 'prepared')
+  if (prepared.state !== 'prepared') return
+  const applied = await deployment.apply(data.configuration, new AbortController().signal, prepared.targetRevision)
+  assert.equal(applied.state, 'blocked')
+  assert.deepEqual(applied.missingReasons, ['dsh_yaml_complexity_unsupported'])
+  assert.equal(await readFile(data.profilePath, 'utf8'), before)
+})
 
 test('real profile callback previews, applies CAS backups and independently verifies live read-only APIs', async context => {
   const data = await fixture(context)
