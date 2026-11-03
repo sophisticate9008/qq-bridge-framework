@@ -1626,13 +1626,16 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               || item.trigger === 'probability' && (effective.groupWakeProbabilityPercent ?? 1) > 0
               || item.trigger === 'observation' && observing
               || item.trigger === 'reply' && effective.wakeOnReply
-              || item.trigger === 'continuation' && observing
+              || item.trigger === 'continuation' && effective.continuationMs > 0
               || item.trigger === 'nickname' && effective.names.some(name => item.message.content.some(part =>
                 part.type === 'text' && part.text.toLocaleLowerCase().includes(name.toLocaleLowerCase()))))
             if (!enabled.length) {
               return { status: 'rejected', errorCode: 'NATIVE_CHAT_INPUT_DISABLED' }
             }
-            const admittedAt = Math.min(...entries.map(item => item.admittedAt))
+            // Waiting for the previous turn does not consume this batch's execution budget.
+            // Original message times and history boundaries remain on each queued entry.
+            const admittedAt = entry.message.conversationId.startsWith('group:') ? Date.now()
+              : Math.min(...entries.map(item => item.admittedAt))
             const trigger = entry.trigger ?? 'continuation'
             const requestId = digest([entry.message.conversationId, entry.message.id, 'prompt'])
             inbound.setParticipation(requestId, trigger === 'mention' || trigger === 'private' ? 'direct'

@@ -10,6 +10,7 @@ export function ChatInboxState({ item, known, stale, imported = false }: {
     <StatusPill tone={item?.state === 'blocked' || stale ? 'warning' : 'neutral'}>{!known || stale ? '收件状态待确认' : inboxStateLabel(item)}</StatusPill>
     {known && item && <span className="text-muted-foreground">{stale ? '上次读取：' : ''}{item.pending} 条待处理{item.expired > 0 ? `，${item.expired} 条已过期` : ''}</span>}
     {known && deadline && <span className="text-muted-foreground">处理期限 <time dateTime={deadline.iso}>{deadline.label}</time></span>}
+    {known && item?.state === 'pending' && item.deadlineAt === null && <span className="max-w-52 text-muted-foreground">待发消息合并到下一轮，提交后开始计时。</span>}
     {known && item?.state === 'blocked' && <span className="max-w-52 text-muted-foreground">执行结果待核对；收件保持隔离，不会自动重放。</span>}
     {known && item?.lastError && item.state !== 'blocked' && <span className="max-w-52 text-muted-foreground">最近收件未完成，请核对任务执行日志。</span>}
   </div>;

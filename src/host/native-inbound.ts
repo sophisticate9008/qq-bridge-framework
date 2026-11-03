@@ -242,7 +242,8 @@ export function createNativeInboundController(options: {
             : current.history.append(message.conversationId, { id: message.id, actor: message.userId,
               ...(message.displayName === undefined ? {} : { displayName: message.displayName }),
               content, receivedAt: message.receivedAt })
-          runtime.inbox.enqueue({ message: incoming, admittedAt, deadlineAt: admittedAt + configuration.execution.turnTimeoutMs,
+          runtime.inbox.enqueue({ message: incoming, admittedAt,
+            deadlineAt: message.conversationId.startsWith('group:') ? null : admittedAt + configuration.execution.turnTimeoutMs,
             ...(historySequence === undefined ? {} : { historySequence }),
             trigger: participation === 'direct' ? message.conversationId.startsWith('private:') ? 'private' : 'mention'
               : participation === 'ambient' ? 'observation' : participation })

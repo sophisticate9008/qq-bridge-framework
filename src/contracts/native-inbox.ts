@@ -29,8 +29,9 @@ export function parseNativeInboxSummary(input: unknown): NativeInboxSummary | nu
       || ![item.oldestReceivedAt, item.deadlineAt].every(value => value === null || typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000)
       || item.lastError !== null && (typeof item.lastError !== 'string' || item.lastError.length > 128)
       || item.pending === 0 && (item.state !== 'idle' || item.oldestReceivedAt !== null || item.deadlineAt !== null)
-      || item.pending > 0 && (item.state === 'idle' || typeof item.oldestReceivedAt !== 'number' || typeof item.deadlineAt !== 'number'
-        || item.deadlineAt <= item.oldestReceivedAt)) return null;
+      || item.pending > 0 && (item.state === 'idle' || typeof item.oldestReceivedAt !== 'number'
+        || (item.deadlineAt === null ? !item.conversationId.startsWith('group:')
+          : typeof item.deadlineAt !== 'number' || item.deadlineAt <= item.oldestReceivedAt))) return null;
     seen.add(item.conversationId);
     items.push({ conversationId: item.conversationId, state: item.state as NativeInboxSummary['items'][number]['state'],
       pending: item.pending, oldestReceivedAt: item.oldestReceivedAt as number | null, deadlineAt: item.deadlineAt as number | null,

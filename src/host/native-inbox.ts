@@ -9,7 +9,8 @@ import type { DurableStore, InboundMessage, StoredRecord } from './types.ts';
 export interface NativeInboxEntry {
   readonly message: InboundMessage;
   readonly admittedAt: number;
-  readonly deadlineAt: number;
+  /** Group input starts its execution deadline when the merged batch dispatches. */
+  readonly deadlineAt: number | null;
   readonly historySequence?: number;
   readonly trigger?: 'private' | 'mention' | 'nickname' | 'reply' | 'probability' | 'continuation' | 'observation';
 }
@@ -39,7 +40,8 @@ function decode(record: StoredRecord): Queue {
       && item.message.conversationId === value.conversationId && reference(item.message.userId)
       && Number.isFinite(item.message.receivedAt) && typeof item.message.directed === 'boolean'
       && typeof item.message.isSelf === 'boolean' && Number.isFinite(item.admittedAt)
-      && Number.isFinite(item.deadlineAt) && Number(item.deadlineAt) > Number(item.admittedAt),
+      && (item.deadlineAt === null && conversationId.startsWith('group:')
+        || Number.isFinite(item.deadlineAt) && Number(item.deadlineAt) > Number(item.admittedAt)),
     'NATIVE_INBOX_CORRUPT', 'Invalid queued message.');
     assert(item.trigger === undefined || ['private', 'mention', 'nickname', 'reply', 'probability', 'continuation', 'observation'].includes(String(item.trigger)),
       'NATIVE_INBOX_CORRUPT', 'Invalid input trigger.');
@@ -54,7 +56,8 @@ function decode(record: StoredRecord): Queue {
       ...(accountScope === undefined ? {} : { accountScope }),
       ...(displayName === undefined ? {} : { displayName }),
       receivedAt: Number(item.message.receivedAt), directed: item.message.directed, isSelf: item.message.isSelf,
-      content: normalizeContent(item.message.content) }, admittedAt: Number(item.admittedAt), deadlineAt: Number(item.deadlineAt) };
+      content: normalizeContent(item.message.content) }, admittedAt: Number(item.admittedAt),
+      deadlineAt: conversationId.startsWith('group:') ? null : Number(item.deadlineAt) };
   });
   const receipts = value.receipts.map(item => {
     assert(isRecord(item) && reference(item.id) && ['accepted', 'rejected', 'unknown', 'expired', 'coalesced'].includes(String(item.outcome))
@@ -72,9 +75,10 @@ function decode(record: StoredRecord): Queue {
 export function readNativeInboxSummary(store: DurableStore): NativeInboxSummary {
   const items = store.list(namespace, { limit: 256 }).map(record => {
     const queue = decode(record);
+    const deadlines = queue.entries.flatMap(entry => entry.deadlineAt === null ? [] : [entry.deadlineAt]);
     return { conversationId: queue.conversationId, state: queue.entries.length ? queue.phase : 'idle' as const,
       pending: queue.entries.length, oldestReceivedAt: queue.entries.length ? Math.min(...queue.entries.map(entry => entry.admittedAt)) : null,
-      deadlineAt: queue.entries.length ? Math.min(...queue.entries.map(entry => entry.deadlineAt)) : null,
+      deadlineAt: deadlines.length ? Math.min(...deadlines) : null,
       lastError: queue.errorCode, expired: queue.receipts.filter(receipt => receipt.outcome === 'expired').length,
       automaticReplayAvailable: false as const };
   });
@@ -83,7 +87,7 @@ export function readNativeInboxSummary(store: DurableStore): NativeInboxSummary 
     limitPerConversation: 16 as const, limitTotal: 256 as const });
 }
 
-/** Pending corrections retain their arrival deadline. Interrupted dispatch is never replayed. */
+/** Group input coalesces while busy; private input retains its arrival deadline. Interrupted dispatch is never replayed. */
 export function createNativeInbox(options: {
   readonly store: DurableStore;
   readonly clock?: () => number;
@@ -94,6 +98,7 @@ export function createNativeInbox(options: {
   readonly onFault?: (code: string) => void;
 }) {
   const now = options.clock ?? Date.now;
+  const expired = (entry: NativeInboxEntry) => entry.deadlineAt !== null && entry.deadlineAt <= now();
   const coalesceMs = options.coalesceMs ?? 0;
   const groupContinuationCoalesceMs = options.groupContinuationCoalesceMs ?? 0;
   assert(Number.isSafeInteger(coalesceMs) && coalesceMs >= 0 && coalesceMs <= 500,
@@ -112,7 +117,7 @@ export function createNativeInbox(options: {
   function receipts(queue: Queue, entries: readonly NativeInboxEntry[], outcome: Outcome, requestMessageId: string | null) {
     return [...queue.receipts, ...entries.map(entry => ({ id: entry.message.id, outcome, requestMessageId }))].slice(-64);
   }
-  // Only an interrupted submitted batch is uncertain. Waiting inputs retain their original deadline.
+  // Only an interrupted submitted batch is uncertain. Group input remains pending until dispatch.
   function resume(record: StoredRecord): StoredRecord {
     const queue = decode(record);
     let next = queue;
@@ -127,9 +132,9 @@ export function createNativeInbox(options: {
       next = { ...queue, phase: 'pending', dispatchingIds: [], entries: queue.entries.filter(entry => !ids.has(entry.message.id)),
         receipts: receipts(queue, unrecorded, 'unknown', null), errorCode: null };
     }
-    const expired = next.entries.filter(entry => entry.deadlineAt <= now());
-    if (expired.length) next = { ...next, entries: next.entries.filter(entry => entry.deadlineAt > now()),
-      receipts: receipts(next, expired, 'expired', null), errorCode: 'NATIVE_CHAT_DEADLINE_EXPIRED' };
+    const stale = next.entries.filter(expired);
+    if (stale.length) next = { ...next, entries: next.entries.filter(entry => !expired(entry)),
+      receipts: receipts(next, stale, 'expired', null), errorCode: 'NATIVE_CHAT_DEADLINE_EXPIRED' };
     return next === queue ? record : write(record, next);
   }
   async function process(conversationId: string) {
@@ -138,10 +143,10 @@ export function createNativeInbox(options: {
     if (!record) return;
     let queue = decode(record);
     if (queue.phase !== 'pending' || !queue.entries.length) return;
-    const expired = queue.entries.filter(entry => entry.deadlineAt <= now());
-    if (expired.length) {
-      queue = { ...queue, entries: queue.entries.filter(entry => entry.deadlineAt > now()),
-        receipts: receipts(queue, expired, 'expired', null), errorCode: 'NATIVE_CHAT_DEADLINE_EXPIRED' };
+    const stale = queue.entries.filter(expired);
+    if (stale.length) {
+      queue = { ...queue, entries: queue.entries.filter(entry => !expired(entry)),
+        receipts: receipts(queue, stale, 'expired', null), errorCode: 'NATIVE_CHAT_DEADLINE_EXPIRED' };
       record = write(record, queue);
     }
     if (!queue.entries.length) return;
@@ -276,7 +281,7 @@ export function createNativeInbox(options: {
       // Queue order is admission order, independent of sender or protocol timestamps.
       // A completed batch's receipt proves that all currently waiting entries follow it.
       if (sourceIndex === -1 && !queue.receipts.some(receipt => receipt.id === messageId)) return false;
-      return queue.entries.slice(sourceIndex + 1).some(entry => entry.deadlineAt > now()
+      return queue.entries.slice(sourceIndex + 1).some(entry => !expired(entry)
         && !queue.dispatchingIds?.includes(entry.message.id) && eligible(entry));
     },
     hasWaitingFrom(conversationId: string, userId: string, messageId: string,
@@ -285,7 +290,7 @@ export function createNativeInbox(options: {
       if (!record) return false;
       const queue = decode(record);
       return queue.entries.some(entry => entry.message.userId === userId && entry.message.id !== messageId
-        && entry.deadlineAt > now() && !queue.dispatchingIds?.includes(entry.message.id) && eligible(entry));
+        && !expired(entry) && !queue.dispatchingIds?.includes(entry.message.id) && eligible(entry));
     },
     summary() { return readNativeInboxSummary(options.store); },
     list() { return snapshot(options.store.list(namespace, { limit: 256 }).map(record => decode(record))); },

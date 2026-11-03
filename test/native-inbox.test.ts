@@ -8,6 +8,7 @@ import type { DurableStore } from '../src/contracts/ports.ts';
 const entry = (id: string, userId = '123', admittedAt = 10): NativeInboxEntry => ({ admittedAt, deadlineAt: admittedAt + 100,
   message: { id, userId, conversationId: 'group:456', receivedAt: admittedAt, directed: true, isSelf: false,
     content: [{ type: 'text', text: `correction-${id}` }] } });
+const privateEntry = (id: string): NativeInboxEntry => ({ ...entry(id), message: { ...entry(id).message, conversationId: 'private:456' } });
 
 test('unchanged idle queues avoid full scans while local enqueues and readiness still wake pending input', async () => {
   const store = createSqliteStore({ filename: ':memory:' });
@@ -62,12 +63,12 @@ test('pending input still expires without any intervening storage mutation', asy
   const inbox = createNativeInbox({ store, clock: () => clock, readiness: () => 'busy',
     async deliver() { assert.fail('Expired input must not dispatch'); } });
   try {
-    inbox.enqueue(entry('expiry')); await inbox.tick();
+    inbox.enqueue(privateEntry('expiry')); await inbox.tick();
     const token = store.changeToken!('native-chat.inbox');
     clock = 110;
     assert.equal(store.changeToken!('native-chat.inbox'), token);
     await inbox.tick();
-    assert.equal(inbox.hasPending('group:456'), false);
+    assert.equal(inbox.hasPending('private:456'), false);
     assert.equal(inbox.list()[0]?.receipts[0]?.outcome, 'expired');
   } finally { await inbox.stop(); store.close(); }
 });
@@ -106,20 +107,25 @@ test('a store clock rollback rediscovers TTL-hidden input independently of the i
   } finally { await inbox.stop(); await writer.stop(); store.close(); }
 });
 
-test('busy group input becomes one latest observation without merging identities or extending deadlines', async () => {
+test('busy group input waits beyond its legacy deadline and becomes one latest observation with original identities and times', async () => {
   const store = createSqliteStore({ filename: ':memory:' });
   let ready: 'busy' | 'ready' = 'busy';
+  let clock = 20;
   const delivered: (readonly NativeInboxEntry[])[] = [];
-  const inbox = createNativeInbox({ store, clock: () => 20, readiness: () => ready,
+  const inbox = createNativeInbox({ store, clock: () => clock, readiness: () => ready,
     async deliver(entries) { delivered.push(entries); return { status: 'accepted' }; } });
   try {
     inbox.enqueue(entry('1')); inbox.enqueue(entry('2', '123', 12)); inbox.enqueue(entry('3', '789', 14));
     await inbox.tick(); assert.equal(delivered.length, 0);
     assert.equal(inbox.list()[0]?.entries.length, 3);
+    clock = 1000; await inbox.tick();
+    assert.equal(inbox.summary().items[0]?.deadlineAt, null);
+    assert.equal(inbox.list()[0]?.entries.length, 3);
     ready = 'ready'; await inbox.tick();
     assert.deepEqual(delivered[0]?.map(item => item.message.id), ['1', '2', '3']);
     assert.deepEqual(delivered[0]?.map(item => item.message.userId), ['123', '123', '789']);
-    assert.equal(delivered[0]?.[0]?.deadlineAt, 110);
+    assert.equal(delivered[0]?.[0]?.deadlineAt, null);
+    assert.deepEqual(delivered[0]?.map(item => item.admittedAt), [10, 12, 14]);
     assert.equal(inbox.enqueue(entry('1')), 'duplicate');
     await inbox.tick(); assert.equal(delivered.length, 1);
     assert.deepEqual(inbox.list()[0]?.receipts.map(receipt => receipt.outcome), ['coalesced', 'coalesced', 'accepted']);
@@ -146,11 +152,11 @@ test('unconfirmed execution pauses pending input without permanently blocking su
   } finally { await recovered.stop(); store.close(); }
 });
 
-test('expiry consumes no model call, capacity is bounded and changed duplicate content fails', async () => {
+test('group wake compaction stays bounded without expiring the pending batch during model work', async () => {
   const store = createSqliteStore({ filename: ':memory:' });
   let clock = 20;
   const inbox = createNativeInbox({ store, clock: () => clock, readiness: () => 'busy',
-    async deliver() { assert.fail('Expired input must not submit'); } });
+    async deliver() { assert.fail('Busy input must not submit'); } });
   try {
     inbox.enqueue(entry('0'));
     assert.throws(() => inbox.enqueue({ ...entry('0'), message: { ...entry('0').message,
@@ -160,8 +166,8 @@ test('expiry consumes no model call, capacity is bounded and changed duplicate c
     assert.equal(inbox.list()[0]?.entries.length, 16);
     assert.deepEqual(inbox.list()[0]?.receipts.map(item => item.outcome), ['coalesced']);
     clock = 110; await inbox.tick();
-    assert.equal(inbox.list()[0]?.entries.length, 0);
-    assert.equal(inbox.list()[0]?.receipts.filter(item => item.outcome === 'expired').length, 16);
+    assert.equal(inbox.list()[0]?.entries.length, 16);
+    assert.equal(inbox.list()[0]?.receipts.filter(item => item.outcome === 'expired').length, 0);
   } finally { await inbox.stop(); store.close(); }
 });
 
@@ -182,7 +188,7 @@ test('concurrent arrival during dispatch survives while repeated ticks do not du
   } finally { await inbox.stop(); store.close(); }
 });
 
-test('short coalescing is bounded and excludes dispatched or expired inputs from superseding replies', async () => {
+test('short group coalescing is bounded and keeps unsent corrections relevant throughout the active dispatch', async () => {
   const store = createSqliteStore({ filename: ':memory:' });
   let clock = 1000;
   const batches: string[][] = [];
@@ -206,8 +212,8 @@ test('short coalescing is bounded and excludes dispatched or expired inputs from
     assert.equal(inbox.hasWaitingAfter('group:456', 'f'), true);
     assert.equal(inbox.hasWaitingAfter('group:456', 'never-admitted'), false);
     add('correction'); assert.equal(inbox.hasWaitingFrom('group:456', '123', 'f'), true);
-    clock = 6500; assert.equal(inbox.hasWaitingFrom('group:456', '123', 'f'), false);
-    assert.equal(inbox.hasWaitingAfter('group:456', 'f'), false);
+    clock = 6500; assert.equal(inbox.hasWaitingFrom('group:456', '123', 'f'), true);
+    assert.equal(inbox.hasWaitingAfter('group:456', 'f'), true);
     release!(); await running;
   } finally { await inbox.stop(); store.close(); }
 });

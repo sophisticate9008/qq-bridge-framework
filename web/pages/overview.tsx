@@ -79,7 +79,7 @@ export function OverviewPage(props: PageProps) {
     <h3 className="border-b pb-1.5 font-semibold">消息排队</h3>
     {inboxValue ? <>
       <div className="row small"><span className="chip">等待处理 {inboxValue.pending} 条</span><span className="muted">{inboxValue.items.length} 个会话有收件记录</span></div>
-      {inboxValue.items.length > 0 ? <div className="tablewrap rounded border"><table><thead><tr><th>会话</th><th>状态</th><th>排队</th><th>等待截止</th></tr></thead><tbody>{inboxValue.items.map(item => <tr key={item.conversationId}><td>{item.conversationId.replace(/^group:/, '群聊 · ').replace(/^private:/, '私聊 · ')}</td><td>{inboxStateLabel(item)}</td><td>{item.pending} 条</td><td>{inboxDeadline(item)?.label ?? '—'}</td></tr>)}</tbody></table></div> : <p className="small muted">暂无收件记录。</p>}
+      {inboxValue.items.length > 0 ? <div className="tablewrap rounded border"><table><thead><tr><th>会话</th><th>状态</th><th>排队</th><th>计时</th></tr></thead><tbody>{inboxValue.items.map(item => <tr key={item.conversationId}><td>{item.conversationId.replace(/^group:/, '群聊 · ').replace(/^private:/, '私聊 · ')}</td><td>{inboxStateLabel(item)}</td><td>{item.pending} 条</td><td>{inboxDeadline(item)?.label ?? (item.pending > 0 ? '合并提交后计时' : '—')}</td></tr>)}</tbody></table></div> : <p className="small muted">暂无收件记录。</p>}
     </> : <p className="small muted">{inbox.error ? '收件状态读取失败。' : '正在读取收件状态…'}</p>}
   </section>;
 

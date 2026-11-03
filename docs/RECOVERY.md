@@ -98,7 +98,7 @@ GET /api/chat/application?id=<原 operationId>
 
 ## 队列、工作、提醒与交互
 
-`GET /api/chat/inbox` 返回每个会话 idle/pending/dispatching/blocked、pending 数量、期限和错误，以及 `automaticReplayAvailable: false`。正常忙碌和旧执行核对期间，新输入在原期限内排队；过期输入结束，不冻结后续消息。重启保留未提交且未过期的输入；中断的提交批次记为 unknown 回执并移出待发队列，不自动重放。旧 blocked 记录启动时按同样规则整理，旧格式无法确认提交范围时不补发。执行结果未确认且有新输入等待时，后台每会话最多五秒核对一次 SDK 结束证据、全局最多四路；确认结束后自动继续。SDK 尚未确认结束时不会强行并发提交；也不自动重建或清空会话。全局 follow 池满导致的新会话拒绝也不等于已加入普通忙碌队列。
+`GET /api/chat/inbox` 返回每个会话 idle/pending/dispatching/blocked、pending 数量、期限和错误，以及 `automaticReplayAvailable: false`。群聊忙碌和旧执行核对期间，已准入的新输入保存在待发区，下一批一次合并提交；`deadlineAt: null` 表示尚未开始本批执行计时。批次开始分发时按当前单轮策略计算期限，消息原始时间、身份和历史边界保留，等待前一轮不消耗下一轮的执行预算。已准入的续聊不因等待期间窗口自然结束而丢弃，派发前仍核对当前参与设置与权限。私聊保留原入站期限，过期输入结束。重启保留尚未提交的群聊输入和未过期的私聊输入；中断的提交批次记为 unknown 回执并移出待发队列，不自动重放。旧 blocked 记录启动时按同样规则整理，旧格式无法确认提交范围时不补发。执行结果未确认且有新输入等待时，后台每会话最多五秒核对一次 SDK 结束证据、全局最多四路；确认结束后自动继续。SDK 尚未确认结束时不会强行并发提交；也不自动重建或清空会话。全局 follow 池满导致的新会话拒绝也不等于已加入普通忙碌队列。
 
 `GET /api/chat/work` 和带 id 的详情查询只读取持久工作记录，包括交付和文件回执。网页不提供工作 start/followup/interrupt/reconcile 写入口。工作指令仍通过所属 QQ 来源和功能 policy；SDK 封装也必须使用调用方 execution。
 

@@ -2430,6 +2430,36 @@ test('dense input reaches the inbox during slow submit and replaces an unsent re
   await until(() => fake.sends.length === 2)
 })
 
+test('busy group input submits one merged successor with a fresh deadline and separate sender identities', async context => {
+  const fake = await fixture(context)
+  await fake.configure(); await fake.start()
+  const prompts = () => fake.rpc.filter(item => item.method === 'session/prompt')
+  const message = (id: number, userId: number, text: string) => fake.message(id, { time: Math.floor(Date.now() / 1000),
+    message_type: 'group', group_id: 456, user_id: userId,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text } }] })
+  message(9850, 123, '正在处理的原问题')
+  await until(() => prompts().length === 1)
+  message(9851, 123, '第一处更正')
+  message(9852, 789, '另一位成员的补充')
+  message(9853, 123, '最后一处更正')
+  await until(() => fake.runtime().inboxSummary().pending === 3)
+  assert.equal(fake.runtime().inboxSummary().items.find(item => item.conversationId === 'group:456')?.deadlineAt, null)
+  await delay(150)
+  assert.equal(prompts().length, 1, 'Busy input must remain in the local pending area')
+  const releasedAt = Date.now()
+  await fake.answer(1)
+  await until(() => prompts().length === 2)
+  const request = prompts()[1]!.request
+  const execution = fake.runtime().executions()!.list().find(item => item.requestId === request.requestId)!
+  assert(execution.admittedAt >= releasedAt, 'Queue waiting must not consume the next execution budget')
+  assert.equal(execution.deadlineAt - execution.admittedAt, DEFAULT_NATIVE_EXECUTION_POLICY.turnTimeoutMs)
+  const content = JSON.stringify(request.content)
+  for (const text of ['第一处更正', '另一位成员的补充', '最后一处更正']) assert.match(content, new RegExp(text))
+  assert.match(content, /789/)
+  await fake.answer(2)
+  assert.equal(prompts().length, 2, 'All pending group corrections belong to one successor call')
+})
+
 test('dense group input keeps different senders separate and does not discard another persons reply', async context => {
   const fake = await fixture(context)
   await fake.configure(); await fake.start()
