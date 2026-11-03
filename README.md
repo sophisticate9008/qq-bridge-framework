@@ -64,6 +64,7 @@ npm start
 | --- | --- |
 | 从零安装、准备依赖和首次连接 | [安装教程](docs/INSTALL.md) |
 | 聊天、媒体、助手、权限与日常设置 | [使用教程](docs/USAGE.md) |
+| 唤醒、未读过期、引用补读与聊天策略维护 | [聊天策略维护](docs/CHAT_STRATEGY.md) |
 | 运行命令、升级、备份与诊断 | [运行手册](docs/OPERATIONS.md) |
 | 后台服务、日志与协议切换 | [服务运维](docs/SERVICE_MANAGER.md) |
 | 控制台页面、草稿与应用 | [控制台](docs/UI.md) |
