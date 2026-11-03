@@ -13,6 +13,24 @@ const event: FrameworkEvent = { id: 'synthetic-reply', type: 'fixture.reply', co
 const pages: readonly MessageContent[] = [{ type: 'image', assetId: 'registered-synthetic-page' }]
 type Render = Parameters<typeof createNativeMarkdownDeliveries>[0]['render']
 
+test('HTML handoffs persist their format across restart and never replay an unknown send', async context => {
+  const store = createSqliteStore({ filename: ':memory:' })
+  const source: FrameworkEvent = { ...event, data: { ...event.data, content: [{ type: 'text', text: JSON.stringify({
+    schema: 'qbf.output/1', format: 'html-image', body: '<h1 style="color:purple">HTML</h1>' }) }] } }
+  const first = await fixture(context, async () => pages, store)
+  assert.equal((await first.queue.defer(source, first.lifetime.signal))?.status, 'queued')
+  await first.stop()
+  const restored = await fixture(context, async request => { assert.equal(request.format, 'html-image'); return pages }, store, [{ status: 'unknown' }])
+  restored.queue.start()
+  await awaitCondition(() => restored.results.some(result => result.status === 'unknown'), { timeoutMs: 2000, message: 'HTML unknown delivery' })
+  await restored.stop()
+  const again = await fixture(context, async () => { assert.fail('unknown HTML must not render again') }, store)
+  context.after(async () => { await again.stop(); await restored.stop(); await first.stop(); store.close() })
+  again.queue.start()
+  assert.equal((await again.queue.defer(source, again.lifetime.signal))?.status, 'unknown')
+  assert.equal(again.sent.length, 0)
+})
+
 async function fixture(context: TestContext, render: Render, sharedStore?: ReturnType<typeof createSqliteStore>, receipts?: readonly DeliveryReceipt[]) {
   const store = sharedStore ?? createSqliteStore({ filename: ':memory:' })
   const lifetime = new AbortController()

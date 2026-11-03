@@ -1,5 +1,11 @@
 # 公共契约与修改约束
 
+## HTML 图片输出
+
+内置能力 `native.html.render` 对应 `qbf_render_html`，输入 `{ html, title? }`，只处理当前 QQ 会话。它使用 `qbf.output/1` 的 `html-image` 格式，经原生回复来源验证、会话白名单、后台文档队列、图片资产登记和既有 outbox 发送；`queued` 不等于送达。后台队列原 schema 1 向后兼容，保留旧 Markdown 任务，新增 HTML 格式；旧 Markdown 图片和会话不迁移、不重置。输出宿主可选 `renderHtml` 与 `renderMarkdown` 分别声明能力，未配置 HTML 渲染器时明确拒绝该格式。
+
+HTML 外层输入最多 32000 码元／64 KiB，可选标题最多 120 码元；渲染程序内部 HTML 另限 4 MiB，避免宿主添加默认样式或未来受控内容展开时误用外层输入限制。原生组件协议 1，按平台选择、校验 SHA-256 并独立运行；禁用网络和页面脚本，SVG 解析也关闭图片文件／数据引用与系统字体发现。父进程超时或取消时终止子进程，等待退出后清理私有临时目录。PNG 经现有完整性及作用域检查后才登记为可发送资源。详细资源和恢复语义见 [HTML 排版](HTML.md)。
+
 DSH 部署运行时可提供可选的 `sessionsReloaded(configuration, signal)`，仅供可信宿主在确认目标 DSH 重载后通知部署协调器。默认实现核验当前提供方和预设的实际加载结果，再清除原会话配置等待状态；此通知不触发写入或重启。`blocked/apply` 的 `pending_reload`、`session_configuration_reload_required` 和 `session_configuration_reload_unknown` 均保留原应用恢复入口，恢复只继续核验和启动。
 
 框架、工具和协议使用当前命名，1.4.1 需要配套更新框架、SDK、DSH 桥接插件及调用方；迁移说明见 [命名统一与升级](RENAMING.md)。

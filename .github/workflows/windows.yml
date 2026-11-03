@@ -18,6 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  html-renderer:
+    if: ${{ !inputs.source_only }}
+    uses: ./.github/workflows/html-renderer.yml
   source:
     name: Windows 源码链路诊断
     if: inputs.source_only
@@ -37,6 +40,7 @@ jobs:
       - run: node --test test/windows-file-security.test.ts
       - run: node --test --test-name-pattern='real local WS text passes through native host' test/native-chat-runtime.test.ts
   package:
+    needs: html-renderer
     if: ${{ !inputs.source_only }}
     name: 云端构建完整候选包
     runs-on: ubuntu-24.04
@@ -50,6 +54,11 @@ jobs:
           node-version: '24.12.0'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: html-renderer-*
+          path: runtime/html-renderer-components
+      - run: node scripts/install-html-renderer.ts runtime/html-renderer-components --all
       - run: npm ci --prefix packages/dsh-bridge-plugin --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - run: npm run build:sdk

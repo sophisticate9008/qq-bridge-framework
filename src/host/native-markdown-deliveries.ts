@@ -60,7 +60,7 @@ export function createNativeMarkdownDeliveries(options: {
       && reference(value.event.conversationId) && reference(value.event.sessionId) && isRecord(value.event.data)
       && Number.isSafeInteger(value.event.data.generation) && Number(value.event.data.generation) > 0
       && isRecord(value.event.data.agentData) && reference(value.event.data.agentData.nativeRequestId)
-      && isRecord(value.request) && value.request.format === 'markdown-image' && typeof value.request.body === 'string'
+      && isRecord(value.request) && ['markdown-image', 'html-image'].includes(String(value.request.format)) && typeof value.request.body === 'string'
       && value.request.body.trim().length > 0 && value.request.body.length <= 32000 && Buffer.byteLength(value.request.body) <= 65536
       && (value.request.title === undefined || typeof value.request.title === 'string' && value.request.title.length <= 120)
       && (value.content === null || Array.isArray(value.content))

@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isRecord } from '../src/core/values.ts';
+import { htmlRendererBuildHash } from './html-renderer-component.ts';
 import { packFrameworkRelease } from './framework-release.ts';
 
 // Pack only the components' allowlisted files under their current names.
@@ -56,5 +57,11 @@ checksums.push(`${createHash('sha256').update(await readFile(framework)).digest(
 const windowsArchive = `qq-bridge-framework-${version}-windows-x64.zip`;
 checksums.push(`${createHash('sha256').update(await readFile(join(destination, windowsArchive))).digest('hex')}  ${windowsArchive}`);
 console.log(`Framework runtime: qq-bridge-framework-${version}.tar.gz; ${windowsArchive}`);
+const rendererHash = await htmlRendererBuildHash(root);
+for (const target of ['linux-x64', 'linux-arm64', 'win32-x64']) {
+  const filename = `qbf-html-renderer-${rendererHash}-${target}.tgz`;
+  execFileSync('tar', ['-czf', join(destination, filename), '.'], {cwd: join(root, 'assets/native/html-renderer', target)});
+  checksums.push(`${createHash('sha256').update(await readFile(join(destination, filename))).digest('hex')}  ${filename}`);
+}
 await writeFile(join(destination, 'SHA256SUMS'), checksums.sort().join('\n') + '\n');
 console.log(`Release files: ${destination}`);

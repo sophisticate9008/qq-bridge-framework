@@ -8,6 +8,7 @@ import type { OneBotAssetResolutionRequest } from '../adapters/onebot.ts'
 import type { FrameworkEvent, MessageContent } from '../core/types.ts'
 import { assert, errorCode, reference } from '../core/values.ts'
 import type { MarkdownPngPage, MarkdownRenderer } from '../rendering/markdown.ts'
+import type { HtmlRenderer } from '../rendering/builtin-html.ts'
 import { ensurePrivateDirectory } from '../storage/private-json.ts'
 import { digest, json, object } from './data.ts'
 import type { NativeMarkdownOutputRequest } from './native-output.ts'
@@ -44,6 +45,7 @@ function validatePage(page: MarkdownPngPage): Buffer {
 /** The local renderer only publishes PNG bytes for this exact chat session and generation. */
 export function createNativeMarkdownService(options: {
   readonly directory: string; readonly store: DurableStore; readonly accountId: string; readonly renderer: MarkdownRenderer
+  readonly htmlRenderer?: HtmlRenderer
   readonly binding: (conversationId: string) => { readonly sessionId: string; readonly generation: number } | null
   readonly authorize: (conversationId: string, signal: AbortSignal) => Promise<void>
   readonly clock?: () => number; readonly signal?: AbortSignal
@@ -123,7 +125,10 @@ export function createNativeMarkdownService(options: {
       assert(reference(event.id) && request.body.trim().length > 0 && request.body.length <= 32000 && Buffer.byteLength(request.body) <= 65536,
         'NATIVE_MARKDOWN_INPUT_LIMIT', 'Markdown requires bounded text.')
       await options.authorize(event.conversationId, signal); signal.throwIfAborted()
-      const pages = await options.renderer.render({ markdown: request.body, ...(request.title === undefined ? {} : { title: request.title }), signal })
+      assert(request.format !== 'html-image' || options.htmlRenderer, 'NATIVE_HTML_UNAVAILABLE', 'HTML rendering is unavailable.')
+      const pages = request.format === 'html-image'
+        ? await options.htmlRenderer!.render({ html: request.body, ...(request.title === undefined ? {} : { title: request.title }), signal })
+        : await options.renderer.render({ markdown: request.body, ...(request.title === undefined ? {} : { title: request.title }), signal })
       signal.throwIfAborted(); current(event.conversationId, scope.sessionId, scope.generation)
       assert(Array.isArray(pages) && pages.length > 0 && pages.length <= 6, 'NATIVE_MARKDOWN_PAGE_LIMIT', 'Markdown must fit within six PNG pages.')
       const bytes = pages.map(validatePage)

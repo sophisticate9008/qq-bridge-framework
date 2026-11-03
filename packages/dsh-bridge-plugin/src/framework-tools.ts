@@ -182,7 +182,7 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
               const input = json(args)
               if (Buffer.byteLength(JSON.stringify(input)) > 65536) return { status: 'rejected', code: 'TOOL_INPUT_TOO_LARGE' }
               lease.seen.add(exec.callId)
-              if (spec.name === 'qbf_reply') options.onReplyAttempt?.(agent, claim)
+              if (spec.name === 'qbf_reply' || spec.name === 'qbf_render_html') options.onReplyAttempt?.(agent, claim)
               return new Promise<unknown>(resolve => {
                 const ticket = randomUUID()
                 let timer: ReturnType<typeof setTimeout>
@@ -191,7 +191,7 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
                   if (!pending.delete(ticket)) return
                   clearTimeout(timer)
                   exec.signal.removeEventListener('abort', abort)
-                  if (!exec.signal.aborted && (quietSticker || spec.name === 'qbf_reply' && replyConcludesTurn(result))) exec.concludeTurn()
+                  if (!exec.signal.aborted && (quietSticker || (spec.name === 'qbf_reply' || spec.name === 'qbf_render_html') && replyConcludesTurn(result))) exec.concludeTurn()
                   resolve(result)
                 }
                 const wire = { ticket, leaseId: lease.id, call: { id: exec.callId, sessionId: agent.id, generation: lease.generation,

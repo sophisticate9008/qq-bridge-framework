@@ -25,3 +25,4 @@ coverage/
 *.tgz
 *.bak
 .cache/
+/assets/native/

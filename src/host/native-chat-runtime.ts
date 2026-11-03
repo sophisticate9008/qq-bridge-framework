@@ -49,10 +49,11 @@ import { createNativeWorkFeedback } from './native-work-feedback.ts'
 import { createNativeReplyFreshness } from './native-reply-freshness.ts'
 import { createFfmpegVideoObserver } from '../adapters/ffmpeg-video.ts'
 import { validateNativeMediaConfiguration } from '../contracts/native-media-configuration.ts'
-import { createNativeOutputService, createNativeOutputPackage } from './native-output.ts'
+import { createNativeOutputService, createNativeOutputPackage, parseNativeOutputContent } from './native-output.ts'
 import { createNativeMarkdownService } from './native-markdown.ts'
 import { createNativeMarkdownDeliveries, NATIVE_MARKDOWN_DELIVERY_EVENT, validateNativeMarkdownDeliveryEvent } from './native-markdown-deliveries.ts'
 import { createBuiltinMarkdownRenderer } from '../rendering/builtin-markdown.ts'
+import { createBuiltinHtmlRenderer } from '../rendering/builtin-html.ts'
 import { createNativeInboundController } from './native-inbound.ts'
 import { deriveDshMigrationTargetSelection } from '../adapters/dsh-migration-selection.ts'
 import { createHash } from 'node:crypto'
@@ -247,6 +248,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   let markdownDeliveries: ReturnType<typeof createNativeMarkdownDeliveries> | undefined
   const output = createNativeOutputService(packageConfigurationRegistry, { renderMarkdown(request) {
     if (!markdown) failure('NATIVE_MARKDOWN_UNAVAILABLE')
+    return markdown.render(request)
+  }, renderHtml(request) {
+    if (!markdown) failure('NATIVE_HTML_UNAVAILABLE')
     return markdown.render(request)
   } })
   const activity = createNativeActivity()
@@ -1063,7 +1067,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         if (!selfId) failure('NATIVE_CHAT_PROTOCOL_UNVERIFIED')
         await verifyHttpIdentity(selfId, configuration, controller.signal)
         markdown = createNativeMarkdownService({ directory: options.directory, store, accountId: selfId,
-          renderer: createBuiltinMarkdownRenderer(), signal: controller.signal,
+          renderer: createBuiltinMarkdownRenderer(), htmlRenderer: createBuiltinHtmlRenderer({ directory: options.directory }), signal: controller.signal,
           onMaintenanceFault(code) { lastError = code; activity.record('error') },
           binding(conversationId) { const binding = host?.sessions.get(conversationId); return binding?.sessionId
             ? { sessionId: binding.sessionId, generation: binding.generation } : null },
@@ -1349,8 +1353,10 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             if (result.status === 'sent') activity.record('send_confirmed', event.conversationId, nativeActivityContent(confirmedContent))
           },
           observe(phase, event, code) {
-            if (phase === 'queued') activity.record('markdown_queued', event.conversationId)
-            else if (phase === 'failed') activity.record('markdown_failed', event.conversationId, undefined, {}, code)
+            const selected = parseNativeOutputContent(normalizeContent(event.data.content))
+            const html = 'format' in selected && selected.format === 'html-image'
+            if (phase === 'queued') activity.record(html ? 'html_queued' : 'markdown_queued', event.conversationId)
+            else if (phase === 'failed') activity.record(html ? 'html_failed' : 'markdown_failed', event.conversationId, undefined, {}, code)
             else if (phase === 'unknown') activity.record('send_unknown', event.conversationId, undefined, {}, code)
           }, onFault: code => activity.record('markdown_failed', null, undefined, {}, code) })
         const authorizationIdentity = readMigrationAuthorizationIdentity(store, identity)

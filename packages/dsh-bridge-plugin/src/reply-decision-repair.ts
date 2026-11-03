@@ -87,7 +87,7 @@ export function createReplyDecisionRepair(options: {
     assistant(agent: ReplyDecisionAgent, turn: number, content: unknown): void {
       const decision = decisions.get(agent)
       if (!decision || decision.turn !== turn || !Array.isArray(content)) return
-      if (content.some(block => object(block) && block.type === 'tool-call' && (block.name === 'qbf_reply' || block.name === 'qbf_sticker_send')))
+      if (content.some(block => object(block) && block.type === 'tool-call' && (block.name === 'qbf_reply' || block.name === 'qbf_render_html' || block.name === 'qbf_sticker_send')))
         decision.attempted = true
       if (content.some(block => object(block) && block.type === 'tool-call' && collectionCall(block))) decision.collection = true
       decision.final = content.filter(block => object(block) && block.type === 'text' && typeof block.text === 'string')

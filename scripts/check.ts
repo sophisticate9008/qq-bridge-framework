@@ -39,6 +39,7 @@ function walk(directory: string) {
     if (excluded.has(entry.name)) continue;
     const location = path.join(directory, entry.name);
     const relative = path.relative(root, location);
+    if (relative.split(path.sep).join('/') === 'assets/native') continue; // Generated, ignored release components.
     if (entry.isSymbolicLink()) { findings.push(`${relative}: symbolic link requires explicit review`); continue; }
     if (entry.isDirectory()) { walk(location); continue; }
     if (!entry.isFile()) { findings.push(`${relative}: unsupported file type`); continue; }

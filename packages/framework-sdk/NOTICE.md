@@ -66,6 +66,10 @@ QQ 收藏接口依据 NapCat 的 [CustomFace 动作实现](https://github.com/Na
 
 选型时参考过 [mdshot](https://github.com/pi0/mdshot) 的 Markdown 截图方案，实现未嵌入其源码。中文字体的再分发许可见下文。
 
+### HTML 排版编译调研
+
+`tools/blitz-probe` 使用 [Blitz](https://github.com/DioxusLabs/blitz) 与其 AnyRender CPU 后端进行独立编译调研，解析、绘制和 PNG 输出流程参考上游 `examples/screenshot.rs`。Blitz 使用 MIT OR Apache-2.0 许可，探针压缩包保留其两份许可原文及所用中文字体许可。源码仓库保存封装及构建脚本，不保存上游源码、编译产物或依赖目录；正式集成前仍需整理传递依赖许可。当前探针不属于已启用的聊天排版能力，构建方式与实测记录见 [探针说明](tools/blitz-probe/README.md)。
+
 ### 视频观察
 
 内置视频观察器调用独立安装的 [FFmpeg/FFprobe](https://github.com/FFmpeg/FFmpeg)，使用其探测元数据与抽帧接口。本仓库未嵌入或再分发 FFmpeg 源码及二进制。安装的 FFmpeg 发行版保留自身许可，具体取决于编译选项；请查阅其附带说明和 [上游许可](https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md)。

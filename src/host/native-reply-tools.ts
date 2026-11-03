@@ -24,6 +24,15 @@ function replyInput(input: JsonValue): JsonValue {
   return { content: json(replyContent(input.content)) };
 }
 const tool = nativeToolCapabilityDefinition('native.reply');
+const htmlTool = nativeToolCapabilityDefinition('native.html.render');
+const afterInvoke: NonNullable<NativeToolContribution['afterInvoke']> = async (value, execution, event, host) => {
+  assert(isRecord(value) && typeof value.nativeRequestId === 'string', 'INVALID_REPLY_INPUT', 'A trusted reply source is required.');
+  const content = normalizeContent(value.content);
+  let contentFingerprint: string;
+  try { contentFingerprint = digest(parseNativeOutputContent(content)); } catch { contentFingerprint = digest(content); }
+  return json(await host.deliverAgentMessage(execution, { ...event, data: { ...event.data,
+    content: json(content), agentData: { nativeRequestId: value.nativeRequestId, nativeContentFingerprint: contentFingerprint } } }));
+};
 export const NATIVE_REPLY_TOOLS: readonly NativeToolContribution[] = Object.freeze<readonly NativeToolContribution[]>([
   { definition: { name: tool.tool, capability: tool.capability, description: tool.description, featureId: 'framework-tools', timeoutMs: 120000,
     registrationSource: { origin: 'framework-builtin', ownerId: 'qq-bridge-framework', ownerName: '框架内置工具', transport: 'native' },
@@ -32,14 +41,20 @@ export const NATIVE_REPLY_TOOLS: readonly NativeToolContribution[] = Object.free
         oneOf: [ { type: 'string', minLength: 1, maxLength: 64000 }, { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object' } },
           { type: 'object', required: ['schema'], properties: { schema: { const: 'qbf.output/1' } } } ] }
     } } }, validate: replyInput, deliveryCapabilities: ['messaging.send', 'messaging.forward'],
-    async afterInvoke(value, execution, event, host) {
-      assert(isRecord(value) && typeof value.nativeRequestId === 'string', 'INVALID_REPLY_INPUT', 'A trusted reply source is required.');
-      const content = normalizeContent(value.content);
-      let contentFingerprint: string;
-      try { contentFingerprint = digest(parseNativeOutputContent(content)); } catch { contentFingerprint = digest(content); }
-      const result = await host.deliverAgentMessage(execution, { ...event, data: { ...event.data,
-        content: json(content), agentData: { nativeRequestId: value.nativeRequestId, nativeContentFingerprint: contentFingerprint } } });
-      return json(result);
+    afterInvoke },
+  { definition: { name: htmlTool.tool, capability: htmlTool.capability, description: htmlTool.description, featureId: 'framework-tools', timeoutMs: 30000,
+    registrationSource: { origin: 'framework-builtin', ownerId: 'qq-bridge-framework', ownerName: '框架内置工具', transport: 'native' },
+    parameters: { type: 'object', additionalProperties: false, required: ['html'], properties: {
+      html: { type: 'string', minLength: 1, maxLength: 32000, description: 'HTML 正文或完整文档，样式使用内联 CSS；静态 SVG 图形可直接内嵌。' },
+      title: { type: 'string', minLength: 1, maxLength: 120, description: '可选的图片正文标题。' },
+    } } }, deliveryCapabilities: ['messaging.send'], afterInvoke,
+    validate(input) {
+      assert(isRecord(input) && Object.keys(input).every(key => ['html', 'title'].includes(key))
+        && typeof input.html === 'string', 'NATIVE_HTML_INPUT_LIMIT', 'HTML source and an optional title are required.');
+      const envelope = { schema: 'qbf.output/1', format: 'html-image', body: input.html,
+        ...(input.title === undefined ? {} : { title: input.title }) };
+      parseNativeOutputContent(replyContent(envelope));
+      return { content: json(replyContent(envelope)) };
     } }
 ]);
 
@@ -48,7 +63,7 @@ export function createNativeReplyEffects(options: {
   readonly sources: () => NativeMessageSourceReader | undefined;
   readonly authorize: (conversationId: string, signal: AbortSignal) => Promise<void>;
 }): Readonly<Record<string, EffectAdapter>> {
-  return { 'native.reply': { async execute(request) {
+  const effect: EffectAdapter = { async execute(request) {
     await options.authorize(request.scope.conversationId, request.signal);
     const reader = options.sources();
     assert(reader, 'NATIVE_MESSAGE_SOURCE_MISSING', 'A current normalized QQ source is required.');
@@ -59,5 +74,11 @@ export function createNativeReplyEffects(options: {
       'INVALID_REPLY_INPUT', 'Reply accepts one content field.');
     return { content: json(replyContent(request.input.content)),
       nativeRequestId: digest([source.conversationId, source.sourceMessageId, 'prompt']) };
+  } };
+  return { 'native.reply': effect, 'native.html.render': { async execute(request) {
+    assert(isRecord(request.input), 'NATIVE_HTML_INPUT_LIMIT', 'HTML rendering requires an explicit image envelope.');
+    const selected = parseNativeOutputContent(replyContent(request.input.content));
+    assert('format' in selected && selected.format === 'html-image', 'NATIVE_HTML_INPUT_LIMIT', 'HTML rendering requires an explicit HTML envelope.');
+    return effect.execute(request);
   } } };
 }

@@ -123,10 +123,13 @@ try {
     import assert from 'node:assert/strict';
     import sharp from 'sharp';
     import { createBuiltinMarkdownRenderer } from './dist/src/rendering/builtin-markdown.js';
+    import { createBuiltinHtmlRenderer } from './dist/src/rendering/builtin-html.js';
     const pages = await createBuiltinMarkdownRenderer({ timeoutMs: 30000 }).render({ markdown: '# 安装验证\n\n中文字体与公式 $1+1=2$。' });
     assert(pages.length > 0);
     const metadata = await sharp(pages[0].png).metadata();
     assert.equal(metadata.format, 'png'); assert(metadata.width > 0);
+    const html = await createBuiltinHtmlRenderer({ directory: './runtime/html-install-check' }).render({ html: '<h1 style="color:#7134c4">HTML 安装验证</h1><p>中文与彩色排版。</p>' });
+    assert.equal(html.length, 1); assert.equal((await sharp(html[0].png).metadata()).format, 'png');
   `], { cwd, env, timeout: 45000, maxBuffer: 65536 });
   evidence.nativeRenderingAndFonts = true;
   checkpoint('initialization');

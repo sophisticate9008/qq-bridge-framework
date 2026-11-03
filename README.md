@@ -14,16 +14,16 @@ AI许愿生成的，目前自用
 
 需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Windows x64 使用 ZIP 与双击启动脚本；Linux x64／ARM64 使用全量 TAR 包。原生 CI 环境为 Windows Server 2022 与 Ubuntu 24.04，涵盖安装、WebUI、原生排版和重启；Windows 另验证模拟聊天链路。见 [Windows 使用说明](docs/WINDOWS.md)与[平台验证记录](docs/VALIDATION.md)。
 
-从 [v1.9.2 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.9.2) 下载对应完整包：
+从 [v1.10.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.10.0) 下载对应完整包：
 
-- Windows x64：`qq-bridge-framework-1.9.2-windows-x64.zip`，解压后双击 `start-windows.cmd`，首次自动安装生产依赖并初始化。
-- Linux x64／ARM64：`qq-bridge-framework-1.9.2.tar.gz`，按下面命令启动。
+- Windows x64：`qq-bridge-framework-1.10.0-windows-x64.zip`，解压后双击 `start-windows.cmd`，首次自动安装生产依赖并初始化。
+- Linux x64／ARM64：`qq-bridge-framework-1.10.0.tar.gz`，按下面命令启动。
 
 两种包均包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包，附件由 `SHA256SUMS` 校验。
 
 ```sh
-tar -xzf qq-bridge-framework-1.9.2.tar.gz
-cd qq-bridge-framework-1.9.2
+tar -xzf qq-bridge-framework-1.10.0.tar.gz
+cd qq-bridge-framework-1.10.0
 npm ci --omit=dev
 npm run cli -- init
 npm start
@@ -45,6 +45,7 @@ npm start
 | GIF 与视频 | GIF 与视频可固定选择 V1 单帧或 V2 四宫格均匀抽样；视频观察默认关闭，需 FFmpeg/FFprobe，均不分析音轨 |
 | QQ 回复与交互 | 文字、图片、语音、文件、QQ 表情、收藏表情、分气泡、长文转发，以及协议支持的戳一戳、撤回和修改自身群名片 |
 | Markdown 图片 | 本机后台排版中文、表格、代码和公式，按完整内容生成一张长 PNG，无需浏览器 |
+| HTML 图片 | 内置 `qbf_render_html` 将静态 HTML/CSS 与 SVG 图形在后台排版，并发送到当前 QQ 会话；见 [HTML 排版](docs/HTML.md) |
 | 后台助手 | 配置并启用独立助手后，主人可从 QQ 委派、追加、查询和停止工作，结果与实际附件回传原会话 |
 | 空间说说 | 依据协议实际能力登记发布、删除工具；支持文字、图片和图文，未知结果不自动重试 |
 | 记忆、偏好与提醒 | 提供内置持久服务，由扩展接入业务、工具和上下文；默认不向模型注册记忆及提醒工具 |
@@ -54,7 +55,7 @@ npm start
 
 安装、注册、就绪与授权分别显示。实际能力以所选模型、协议端、DSH 插件和已加载扩展为准。使用示例和限制见 [使用教程](docs/USAGE.md)。
 
-当前版本为 **v1.9.2**（框架、SDK 与 DSH 桥接插件统一为 `1.9.2`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
+当前版本为 **v1.10.0**（框架、SDK 与 DSH 桥接插件统一为 `1.10.0`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
 
 ## 文档
 
@@ -88,3 +89,5 @@ npm start
 
 
 聊天资源清理与容量规则见 [资源回收契约](docs/CONTRACTS.md#聊天资源回收)。运维命令 `qbf-cli maintenance` 可预览可回收内容，加 `--apply` 执行；当前部署、仍被历史引用的附件及未核清的执行证据受保护。
+
+原生 HTML 组件的恢复、构建和跨版本复用方法见 [构建教程](docs/HTML_BUILD.md)。

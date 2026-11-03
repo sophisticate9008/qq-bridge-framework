@@ -1,3 +1,4 @@
+import { htmlRendererBuildHash } from './html-renderer-component.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -62,6 +63,15 @@ export async function packFrameworkRelease(options: {
     assert(files.length > 0);
     for (const filename of files) { assert(!filename.endsWith('.tgz')); await copy(filename); }
     for (const directory of ['dist/src', 'dist/scripts', 'dist/admin-web', 'dist/assets']) await built(directory);
+    for (const target of ['linux-x64', 'linux-arm64', 'win32-x64']) {
+      const path = join(stage, 'dist/assets/native/html-renderer', target);
+      const component: unknown = JSON.parse(await readFile(join(path, 'component.json'), 'utf8'));
+      assert(isRecord(component) && component.protocol === 1 && component.target === target
+        && component.buildHash === await htmlRendererBuildHash(root)
+        && component.binary === (target.startsWith('win32-') ? 'qbf-html-renderer.exe' : 'qbf-html-renderer')
+        && component.resourcePolicy === 'no-network-no-files-no-scripts', 'Build the matching native HTML components before release');
+      assert.equal(createHash('sha256').update(await readFile(join(path, String(component.binary)))).digest('hex'), component.sha256);
+    }
     for (const required of ['dist/scripts/cli.js', 'dist/src/admin/server.js', 'dist/admin-web/index.html',
       'dist/admin-web/app.js', 'dist/src/storage/windows-acl-worker.js', 'dist/assets/fonts/wqy-microhei.ttc',
       'dist/assets/fonts/NotoSansMath-Regular.ttf', 'dist/assets/fonts/NotoSansSymbols2-Regular.ttf',

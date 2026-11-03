@@ -1,6 +1,6 @@
 {
   "name": "qq-bridge-framework",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "private": true,
   "description": "面向 QQ 会话的可扩展智能体框架，提供中文控制台、连续聊天与受控工具执行。AI许愿生成的，目前自用",
   "type": "module",
@@ -72,6 +72,7 @@
     "lucide-react": "1.61.0",
     "markdown-it": "15.0.3",
     "mathjax": "3.2.2",
+    "parse5": "8.1.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-is": "19.3.1",

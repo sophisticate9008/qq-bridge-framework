@@ -19,7 +19,7 @@ export const NATIVE_OUTPUT_CONFIGURATION: PackageConfigurationContribution = Obj
     ] }, defaults: DEFAULT_NATIVE_OUTPUT, validate: validateNativeOutputConfiguration
 })
 
-export interface NativeMarkdownOutputRequest { readonly format: 'markdown-image'; readonly body: string; readonly title?: string }
+export interface NativeMarkdownOutputRequest { readonly format: 'markdown-image' | 'html-image'; readonly body: string; readonly title?: string }
 
 export function isNativeMarkdownText(text: string): boolean {
   return /^ {0,3}#{1,6}[ \t]+\S/m.test(text) || /^ {0,3}(?:`{3,}|~{3,})[^\n]*\n/m.test(text)
@@ -35,13 +35,13 @@ export function parseNativeOutputContent(content: readonly MessageContent[]): re
     return content
   }
   if (!isRecord(input) || input.schema !== 'qbf.output/1') return content
-  if (input.format === 'markdown-image') {
+  if (input.format === 'markdown-image' || input.format === 'html-image') {
     assert(Object.keys(input).every(key => ['schema', 'format', 'body', 'title'].includes(key))
       && typeof input.body === 'string' && input.body.trim().length > 0 && input.body.length <= 32000
       && Buffer.byteLength(input.body) <= 65536 && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(input.body)
       && (input.title === undefined || typeof input.title === 'string' && input.title.trim().length > 0 && input.title.length <= 120
         && !/[\x00-\x1f\x7f]/.test(input.title)), 'NATIVE_OUTPUT_INVALID', 'A Markdown image requires bounded text and an optional title.')
-    return { format: 'markdown-image', body: input.body, ...(input.title === undefined ? {} : { title: input.title }) }
+    return { format: input.format, body: input.body, ...(input.title === undefined ? {} : { title: input.title }) }
   }
   assert(Object.keys(input).length === 2 && Array.isArray(input.content) && input.content.length <= 8,
     'NATIVE_OUTPUT_INVALID', 'The output requires bounded message content.')
@@ -62,6 +62,7 @@ export function parseNativeOutputContent(content: readonly MessageContent[]): re
 /** The output package plans complete deliveries before the existing relay consumes send permissions. */
 export function createNativeOutputService(registry: PackageConfigurationRegistry, options: {
   readonly renderMarkdown?: (request: NativeMarkdownOutputRequest & { readonly event: FrameworkEvent; readonly signal: AbortSignal }) => Promise<readonly MessageContent[]>
+  readonly renderHtml?: (request: NativeMarkdownOutputRequest & { readonly event: FrameworkEvent; readonly signal: AbortSignal }) => Promise<readonly MessageContent[]>
 } = {}) {
   const planned = new Map<string, readonly (readonly MessageContent[])[]>()
   async function prepare(content: unknown, event: FrameworkEvent, signal: AbortSignal): Promise<readonly MessageContent[]> {
@@ -71,8 +72,9 @@ export function createNativeOutputService(registry: PackageConfigurationRegistry
     const selected = parseNativeOutputContent(normalizeContent(content))
     let result: readonly MessageContent[]
     if ('format' in selected) {
-      assert(options.renderMarkdown, 'NATIVE_MARKDOWN_UNAVAILABLE', 'Markdown image rendering is unavailable.')
-      result = normalizeContent(await options.renderMarkdown({ ...selected, event, signal }))
+      const render = selected.format === 'html-image' ? options.renderHtml : options.renderMarkdown
+      assert(render, selected.format === 'html-image' ? 'NATIVE_HTML_UNAVAILABLE' : 'NATIVE_MARKDOWN_UNAVAILABLE', 'Image rendering is unavailable.')
+      result = normalizeContent(await render({ ...selected, event, signal }))
     } else {
       result = selected
       if (options.renderMarkdown && result.every(part => part.type === 'text')) {
@@ -109,7 +111,8 @@ export function createNativeOutputService(registry: PackageConfigurationRegistry
   return Object.freeze({ prepare,
     async context(signal: AbortSignal) { signal.throwIfAborted(); const configuration = validateNativeOutputConfiguration((await registry.read('chat-output')).configuration)
       signal.throwIfAborted(); return { ...configuration, protocol: 'qbf.output/1' as const, maxDeliveries: 4, markdownImageSupported: options.renderMarkdown !== undefined,
-        formats: ['text', ...(options.renderMarkdown ? ['markdown-image'] : [])], markdownImageMaxCharacters: 32000 } },
+        formats: ['text', ...(options.renderMarkdown ? ['markdown-image'] : []), ...(options.renderHtml ? ['html-image'] : [])],
+        htmlImageSupported: options.renderHtml !== undefined, markdownImageMaxCharacters: 32000, htmlImageMaxCharacters: 32000 } },
     split(content: readonly MessageContent[], event: FrameworkEvent) {
       const groups = planned.get(event.id); planned.delete(event.id)
       assert(groups, 'NATIVE_OUTPUT_UNPREPARED', 'Output splitting requires its current preparation.')
@@ -120,8 +123,8 @@ export function createNativeOutputService(registry: PackageConfigurationRegistry
 export type NativeOutputService = ReturnType<typeof createNativeOutputService>
 
 export function createNativeOutputPackage(service: NativeOutputService): NativePackageDefinition {
-  return { content: createBuiltinPackageContent(import.meta.url, ['./framework-service-contracts', './service-contract', '../contracts/service-contract', '../contracts/native-output', './native-chat-bubbles', '../core/text-chunks', './native-markdown', './native-markdown-deliveries', '../rendering/builtin-markdown', '../rendering/builtin-markdown-worker', '../rendering/builtin-markdown-math']), manifest: { schema: 1, id: 'chat-output', version: '1.0.0', displayName: '回复呈现与 Markdown 转图',
-    description: '框架内置 Markdown 图片渲染、短回复分条与长纯文本转发。', dependencies: [], requires: [],
+  return { content: createBuiltinPackageContent(import.meta.url, ['./framework-service-contracts', './service-contract', '../contracts/service-contract', '../contracts/native-output', './native-chat-bubbles', '../core/text-chunks', './native-markdown', './native-markdown-deliveries', '../rendering/builtin-markdown', '../rendering/builtin-markdown-worker', '../rendering/builtin-markdown-math', '../rendering/builtin-html']), manifest: { schema: 1, id: 'chat-output', version: '1.0.0', displayName: '回复呈现与图片排版',
+    description: '框架内置 Markdown 与 HTML 图片排版、短回复分条及长纯文本转发。', dependencies: [], requires: [],
     provides: [serviceDeclaration(CHAT_OUTPUT_SERVICE_CONTRACT)], contributions: [] }, configurations: [NATIVE_OUTPUT_CONFIGURATION],
     install(context) { publishService(context, CHAT_OUTPUT_SERVICE_CONTRACT, service); context.own('subscription', 'output-plans', () => service.clear()) } }
 }

@@ -1,5 +1,8 @@
 /** What a tool does. Caller identity and grants belong to host policy, not this catalog. */
 export const NATIVE_TOOL_CAPABILITY_CATALOG = Object.freeze([
+  { capability: 'native.html.render', tool: 'qbf_render_html', name: 'HTML 排版并发送图片',
+    summary: '将 HTML 与 CSS 在本机后台排版为一张 PNG，发送到当前 QQ 会话。',
+    description: '把 html 排版成一张宽1080像素、高度随内容增长的PNG，后台发送到当前QQ会话。支持中文、彩色CSS、表格、Flex/Grid和静态SVG；不执行脚本，不加载网络或本机文件资源。html最多32000字符且不超过64KiB，title可选。沿用整图16777216像素、8MiB和12秒排版预算，不按固定高度切图。queued表示已受理而非已送达，受理后结束本轮，后台工作不因模型超时或后续聊天取消；发送结果未知时不重复调用。' },
   { capability: 'native.reply', tool: 'qbf_reply', name: '发送QQ消息',
     summary: '主动向当前QQ会话发送文字、媒体或排版内容，返回真实回执。',
     description: '需要在QQ中说话时调用此工具。content接受文字、结构化消息数组或qbf.output/1对象；沿用Markdown转图、长文转发和分气泡。发送成功会结束当前回合，因此先完成必要查询、读取或启动工作，再把要说的内容一次提交，不先发“稍等”再准备做事。按实际发送回执判断sent、rejected或unknown；receipts保留逐条结果，部分成功时不重复整份内容，unknown不重复发送。cached/reused表示复用了原回执，没有再次发送。本轮若被新消息替代，结束并等待新会话快照，不改写旧内容重发。普通最终文本不会自动发送到QQ。' },
