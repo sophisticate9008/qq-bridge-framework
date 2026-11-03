@@ -61,25 +61,42 @@ async function removeSameLock(filename: string, metadata: { readonly ino: number
 async function assertNoLockHolders(metadata: { readonly dev: number; readonly ino: number }): Promise<void> {
   const processes = (await readdir('/proc')).filter(name => /^\d+$/.test(name) && Number(name) !== process.pid)
   if (processes.length > 4096) fail('chat_repair_lock_owners_unverified')
+  const inspectionFailures: { readonly pid: number; readonly stage: string; readonly code: string }[] = []
+  const gone = (error: unknown) => isRecord(error) && ['ENOENT', 'ESRCH'].includes(String(error.code))
+  const remember = (pid: string, stage: string, error: unknown) => {
+    if (inspectionFailures.length >= 8) return
+    const code = isRecord(error) && typeof error.code === 'string' && /^[A-Z0-9_]{1,48}$/.test(error.code) ? error.code : 'UNKNOWN'
+    inspectionFailures.push({ pid: Number(pid), stage, code })
+  }
   for (const pid of processes) {
+    let stage = 'identity'
     try {
       const processDirectory = await stat(`/proc/${pid}`)
-      if (process.getuid && processDirectory.uid !== process.getuid()) continue
+      if (process.getuid && processDirectory.uid !== process.getuid()) {
+        // Linux changes /proc ownership for a non-dumpable process. Its real UID can still own this lock.
+        const status = await readFile(`/proc/${pid}/status`, 'utf8')
+        const uids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/m.exec(status)
+        if (!uids) throw new Error('Process ownership unavailable')
+        if (!uids.slice(1).some(uid => Number(uid) === process.getuid!())) continue
+      }
+      stage = 'fd-list'
       const descriptors = await readdir(`/proc/${pid}/fd`)
-      if (descriptors.length > 4096) fail('chat_repair_lock_owners_unverified')
+      if (descriptors.length > 4096) { remember(pid, stage, { code: 'LIMIT' }); continue }
+      stage = 'fd-identity'
       for (const descriptor of descriptors) {
-        const file = await stat(`/proc/${pid}/fd/${descriptor}`).catch((error: unknown) => {
-          if (isRecord(error) && error.code === 'ENOENT') return null
-          throw error
-        })
-        if (file?.dev === metadata.dev && file.ino === metadata.ino) fail('chat_repair_writer_still_running')
+        let file: Awaited<ReturnType<typeof stat>>
+        try { file = await stat(`/proc/${pid}/fd/${descriptor}`) }
+        catch (error) { if (!gone(error)) remember(pid, stage, error); continue }
+        if (file.dev === metadata.dev && file.ino === metadata.ino) fail('chat_repair_writer_still_running')
       }
     } catch (error) {
-      if (isRecord(error) && error.code === 'ENOENT') continue
-      if (isRecord(error) && typeof error.code === 'string' && error.code.startsWith('chat_repair_')) throw error
-      fail('chat_repair_lock_owners_unverified')
+      if (gone(error)) continue
+      if (isRecord(error) && error.code === 'chat_repair_writer_still_running') throw error
+      remember(pid, stage, error)
     }
   }
+  if (inspectionFailures.length) throw Object.assign(new Error('Lock ownership could not be fully inspected.'), {
+    code: 'chat_repair_lock_owners_unverified', inspectionFailures })
 }
 
 /** Only call after every managed host was proved stopped. Empty leases are still protected if any process holds them. */

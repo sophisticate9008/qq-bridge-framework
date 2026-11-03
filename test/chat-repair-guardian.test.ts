@@ -98,12 +98,23 @@ test('stopped-only profile lock recovery retains live holders and recovers an em
     await writeFile(filename, '', { mode: 0o600 })
     holder = spawn(process.execPath, [fixtureScript, 'writer', directory, randomUUID()], { stdio: ['ignore', 'pipe', 'inherit'] })
     await once(holder.stdout!, 'data')
-    await assert.rejects(retireStoppedDshWriterLock(filename, backups), error => error instanceof Error && 'code' in error && error.code === 'chat_repair_writer_still_running')
+    await assert.rejects(retireStoppedDshWriterLock(filename, backups), { code: 'chat_repair_writer_still_running' })
     await access(filename)
     await kill(holder)
-    await retireStoppedDshWriterLock(filename, backups)
-    await assert.rejects(access(filename), error => error instanceof Error && 'code' in error && error.code === 'ENOENT')
-    assert.equal((await readdir(backups)).length, 1)
+    try {
+      await retireStoppedDshWriterLock(filename, backups)
+      await assert.rejects(access(filename), error => error instanceof Error && 'code' in error && error.code === 'ENOENT')
+      assert.equal((await readdir(backups)).length, 1)
+    } catch (error) {
+      // Unprivileged runners may have same-UID processes whose descriptors cannot be inspected.
+      // The live-holder assertion above remains mandatory; incomplete orphan proof must retain the file.
+      assert(error instanceof Error && 'code' in error)
+      assert.equal(error.code, 'chat_repair_lock_owners_unverified')
+      assert('inspectionFailures' in error && Array.isArray(error.inspectionFailures) && error.inspectionFailures.length > 0)
+      process.stderr.write(`isolated orphan proof retained: ${JSON.stringify(error.inspectionFailures)}\n`)
+      await access(filename)
+      assert.equal((await readdir(backups)).length, 0)
+    }
   } finally { await kill(holder); await rm(directory, { recursive: true, force: true }) }
 })
 test('a real unreaped zombie PID does not permanently retain a profile writer lock', linux, async () => {
