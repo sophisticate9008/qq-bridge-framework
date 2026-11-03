@@ -414,7 +414,7 @@ export function createAdminServer({
     throw new TypeError('accessSessionTtlMs must be an integer between 10 and 2592000000')
   }
 
-  if (!Array.isArray(routes) || routes.length > 128) throw new TypeError('routes must be an array of at most 128 entries')
+  if (!Array.isArray(routes) || routes.length > 256) throw new TypeError('routes must be an array of at most 256 entries')
   const extensions = new Map<string, AdminRoute>()
   const methods = new Map<string, string[]>()
   for (const route of routes) {
