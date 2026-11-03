@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import sharp from 'sharp'
 import { createBuiltinMarkdownRenderer } from '../src/rendering/builtin-markdown.ts'
@@ -25,6 +26,19 @@ test('built-in Takumi renderer produces actual Chinese table/code/math PNG pages
       assert(ink <= 3, `page ${index + 1} ends through text pixels`)
     }
   }
+})
+
+test('plain mathematical letters and superscript parentheses render distinct glyphs instead of identical missing-glyph boxes', async () => {
+  const renderer = createBuiltinMarkdownRenderer({ width: 480, pageHeight: 600 })
+  const symbols = ['𝑥', '𝑦', 'ℝ', 'ℂ', '⁽', '⁾']
+  const images = new Set<string>()
+  for (const markdown of symbols) {
+    const pages = await renderer.render({ markdown })
+    assert.equal(pages.length, 1)
+    const pixels = await sharp(pages[0].png).removeAlpha().raw().toBuffer()
+    images.add(createHash('sha256').update(pixels).digest('hex'))
+  }
+  assert.equal(images.size, symbols.length, 'different math symbols must not collapse to the same missing-glyph image')
 })
 
 test('Markdown links/images and raw HTML never fetch external content; prices remain ordinary text', async context => {

@@ -76,6 +76,10 @@ Markdown 图片渲染使用未经修改的文泉驿微米黑 0.2.0-beta 字体�
 
 字体、完整许可、原作者及上游声明位于 [assets/fonts](https://github.com/sophisticate9008/qq-bridge-framework/blob/v1.0/assets/fonts/README.md)。字体独立适用其自身许可，框架的 MIT 许可不替代它。
 
+### 随附的 Noto 排版字体
+
+Markdown 正文的数学与通用符号使用未经修改的 Noto Sans Math、Noto Sans Symbols 2 与 Noto Sans 字体补充字形，按 SIL Open Font License 1.1 分发。前两款版权 © 2022 The Noto Project Authors，Noto Sans 版权 © 2018 The Noto Project Authors。固定来源、文件身份及各自完整许可见 [字体记录](assets/fonts/README.md)。这些字体与文泉驿主体字体共同随框架包分发。
+
 ### OneBot 空间接口参考
 
 共享空间适配器依据以下项目公开的线格式接口独立实现，没有嵌入它们的客户端或网页认证实现：

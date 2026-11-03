@@ -84,14 +84,19 @@ function allTokens(tokens: readonly Token[]): Token[] { return tokens.flatMap(to
 
 async function run(): Promise<readonly MarkdownPngPage[]> {
   const input: unknown = workerData
-  assert(isRecord(input) && typeof input.markdown === 'string' && typeof input.fontPath === 'string'
+  assert(isRecord(input) && typeof input.markdown === 'string' && Array.isArray(input.fontPaths) && input.fontPaths.length === 4
+    && input.fontPaths.every((value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 4096)
     && typeof input.width === 'number' && typeof input.pageHeight === 'number' && typeof input.maxPages === 'number',
   'MARKDOWN_INVALID_INPUT', 'Invalid trusted render request.')
   const { width, pageHeight, maxPages } = input
   const renderer = new Renderer({ cacheMaxBytes: 16 * 1024 * 1024, fontCacheMaxBytes: 16 * 1024 * 1024 })
-  const fonts = await readFile(input.fontPath)
-  assert(fonts.byteLength <= 8 * 1024 * 1024, 'MARKDOWN_FONT_INVALID', 'The bundled document font exceeds its limit.')
-  await renderer.registerFont({ data: fonts })
+  const fontFamilies: string[] = []
+  for (const filename of input.fontPaths as string[]) {
+    const fonts = await readFile(filename)
+    assert(fonts.byteLength <= 8 * 1024 * 1024, 'MARKDOWN_FONT_INVALID', 'A bundled document font exceeds its limit.')
+    const families = await renderer.registerFont({ data: fonts })
+    fontFamilies.push(...families.map(family => family.name))
+  }
   const parser = new MarkdownIt({ html: false, linkify: false, typographer: false, maxNesting: 24,
     highlight(code, language) {
       if (code.length > 24000 || !hljs.getLanguage(language)) return ''
@@ -146,7 +151,7 @@ async function run(): Promise<readonly MarkdownPngPage[]> {
   } : source
   const node = canonical(parsedNode)
   const css = [STYLE]
-  const renderOptions = { width, css, images, lang: 'zh-CN' }
+  const renderOptions = { width, css, images, fontFamilies, lang: 'zh-CN' }
   const measured = await renderer.measure(node, renderOptions)
   const totalHeight = Math.ceil(measured.height)
   assert(Number.isSafeInteger(totalHeight) && totalHeight > 0 && totalHeight <= pageHeight * maxPages,

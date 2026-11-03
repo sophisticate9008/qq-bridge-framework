@@ -23,6 +23,15 @@ let checked = 0;
 const publicAssets = new Map([['assets/fonts/wqy-microhei.ttc', {
   size: 5_177_387,
   sha256: '2420e8078af796b19a3f6ef13de527a1a91c1e7171eea115926c614ced1009b3',
+}], ['assets/fonts/NotoSansMath-Regular.ttf', {
+  size: 1_015_396,
+  sha256: '3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d',
+}], ['assets/fonts/NotoSansSymbols2-Regular.ttf', {
+  size: 1_233_128,
+  sha256: '7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21',
+}], ['assets/fonts/NotoSans-Regular.ttf', {
+  size: 569_208,
+  sha256: 'b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5',
 }]]);
 
 function walk(directory: string) {

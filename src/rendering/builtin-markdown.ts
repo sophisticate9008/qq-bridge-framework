@@ -17,6 +17,8 @@ export function createBuiltinMarkdownRenderer(options: BuiltinMarkdownOptions = 
   const maxPages = options.maxPages ?? 6
   const timeoutMs = options.timeoutMs ?? 12000
   const fontPath = options.fontPath ?? fileURLToPath(new URL('../../assets/fonts/wqy-microhei.ttc', import.meta.url))
+  const fontPaths = [fontPath, ...['NotoSansMath-Regular.ttf', 'NotoSansSymbols2-Regular.ttf', 'NotoSans-Regular.ttf']
+    .map(filename => fileURLToPath(new URL(`../../assets/fonts/${filename}`, import.meta.url)))]
   assert(Number.isSafeInteger(width) && width >= 480 && width <= 1600
     && Number.isSafeInteger(pageHeight) && pageHeight >= 600 && pageHeight <= 3000
     && Number.isSafeInteger(maxPages) && maxPages >= 1 && maxPages <= 6
@@ -36,7 +38,7 @@ export function createBuiltinMarkdownRenderer(options: BuiltinMarkdownOptions = 
         const fail = (code: string) => reject(new FrameworkError(code, 'The Markdown image could not be rendered.'))
         worker = new Worker(new URL(import.meta.url.endsWith('.ts') ? './builtin-markdown-worker.ts' : './builtin-markdown-worker.js', import.meta.url), {
           execArgv: [],
-          workerData: { markdown: request.markdown, title: request.title, width, pageHeight, maxPages, fontPath },
+          workerData: { markdown: request.markdown, title: request.title, width, pageHeight, maxPages, fontPaths },
           resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 },
         })
         const timer = setTimeout(() => fail('MARKDOWN_TIMEOUT'), timeoutMs)

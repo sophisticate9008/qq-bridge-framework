@@ -63,7 +63,9 @@ export async function packFrameworkRelease(options: {
     for (const filename of files) { assert(!filename.endsWith('.tgz')); await copy(filename); }
     for (const directory of ['dist/src', 'dist/scripts', 'dist/admin-web', 'dist/assets']) await built(directory);
     for (const required of ['dist/scripts/cli.js', 'dist/src/admin/server.js', 'dist/admin-web/index.html',
-      'dist/admin-web/app.js', 'dist/src/storage/windows-acl-worker.js', 'dist/assets/fonts/wqy-microhei.ttc']) assert((await lstat(join(stage, required))).isFile());
+      'dist/admin-web/app.js', 'dist/src/storage/windows-acl-worker.js', 'dist/assets/fonts/wqy-microhei.ttc',
+      'dist/assets/fonts/NotoSansMath-Regular.ttf', 'dist/assets/fonts/NotoSansSymbols2-Regular.ttf',
+      'dist/assets/fonts/NotoSans-Regular.ttf']) assert((await lstat(join(stage, required))).isFile());
     assert((await readFile(join(stage, 'dist/src/admin/gateway.js'), 'utf8'))
       .includes(`const FRAMEWORK_VERSION = '${options.version}'`), 'Build the matching framework before packing');
     const manifest = frameworkRuntimeManifest(JSON.parse(await readFile(join(stage, 'package.json'), 'utf8')));
