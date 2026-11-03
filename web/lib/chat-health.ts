@@ -18,6 +18,7 @@ export function chatHealthGuidance(layer: ChatHealthLayer): string {
   if (layer.id === 'receive') return layer.reason === 'onebot_account_offline' ? '请在协议端重新登录 QQ；框架等待连接恢复。'
     : '请检查协议端 WebSocket 服务、网络和访问密钥；连接恢复后框架会重新接收消息。';
   if (layer.id === 'send') {
+    if (layer.reason === 'http_account_offline') return 'HTTP 接口报告 QQ 已离线，请在协议端核对登录和账号状态。';
     if (layer.reason === 'http_identity_mismatch') return 'HTTP 接口与消息接收连接的 QQ 账号不同，请核对协议端配置。';
     if (layer.reason === 'http_identity_unverified') return 'HTTP 接口已响应；等待消息接收连接确认同一 QQ 账号。';
     if (layer.reason === 'http_authentication_failed') return 'HTTP 接口拒绝鉴权，请核对协议端 HTTP 服务的专用密钥。';
@@ -36,9 +37,13 @@ export function chatHealthGuidance(layer: ChatHealthLayer): string {
     const cause = layer.reason && Object.hasOwn(causes, layer.reason) ? causes[layer.reason] : '会话回复监听已中断。';
     return `${cause}框架正在重新连接；旧请求不重发。持续失败可重新连接聊天，或重启框架。`;
   }
-  if (layer.id === 'tools') return layer.state === 'recovering'
-    ? '工具轮询连接中断，框架会重连只读轮询；已执行或结果未知的工具不重做。'
-    : '工具通道未恢复。核对未确认的执行后重启聊天或框架；不要反复发送同一请求。';
+  if (layer.id === 'tools') {
+    if (layer.state === 'recovering') return '工具轮询连接中断，框架会重连只读轮询；已执行或结果未知的工具不重做。';
+    const cause = ['dsh_invalid_response', 'dsh_tool_invalid_response'].includes(layer.reason ?? '')
+      ? 'DSH 工具接口返回了无法核验的数据，框架已停止该通道。'
+      : layer.reason === 'dsh_timeout' ? '工具通道请求超时，执行或回执结果尚未确认。' : '工具通道未恢复。';
+    return `${cause}核对未确认的执行后重启聊天或框架；不要反复发送同一请求。`;
+  }
   if (layer.id === 'interactions') return 'DSH 的模型提问连接已中断，当前无法接收新的提问。使用“重新连接聊天”恢复，持续失败可重启框架；旧提问按原记录核对，不重复答复。';
   return layer.reason ? chatRuntimeReason(layer.reason).text : '查看聊天运行详情；持续异常可重启框架，保留原会话。';
 }

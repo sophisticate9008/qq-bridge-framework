@@ -23,6 +23,9 @@ export function createNativeChatHealthRoutes(directory: string, runtime: NativeC
     const frameworkReasons = status.missingReasons.filter(reason => !['agent_follow_unavailable', 'framework_tool_channel_unavailable',
       'interaction_channel_unavailable', 'onebot_protocol_not_connected', 'onebot_account_offline', 'onebot_account_unhealthy'].includes(reason));
     const tool = status.frameworkTools;
+    const toolCode = tool?.channel.lastError;
+    const toolReason = toolCode && ['DSH_INVALID_RESPONSE', 'DSH_TOOL_INVALID_RESPONSE', 'DSH_TIMEOUT', 'DSH_TRANSPORT_UNKNOWN',
+      'DSH_ABORTED', 'TOOL_CHANNEL_UNKNOWN', 'TOOL_CALL_CAPACITY'].includes(toolCode) ? toolCode.toLowerCase() : 'framework_tool_channel_unavailable';
     const replyCode = status.host?.followRecovery.lastError;
     const replyReason = replyCode && ['DSH_FOLLOW_ENDED', 'DSH_FOLLOW_PONG_TIMEOUT', 'DSH_FOLLOW_SEQUENCE_GAP',
       'DSH_FOLLOW_INVALID_FRAME', 'DSH_FOLLOW_TRANSPORT_UNKNOWN', 'DSH_FOLLOW_BACKPRESSURE', 'DSH_FOLLOW_CALLBACK_FAILED'].includes(replyCode)
@@ -40,7 +43,7 @@ export function createNativeChatHealthRoutes(directory: string, runtime: NativeC
         : (status.host?.followedSessions ?? 0) > 0 ? 'ready' : 'idle',
         (status.host?.unhealthyFollows ?? 0) > 0 ? replyReason : null),
       layer('tools', !tool ? 'stopped' : tool.channel.state === 'recovering' ? 'recovering' : !tool.available ? 'unavailable'
-        : tool.channel.state === 'idle' ? 'idle' : 'ready', tool && !tool.available ? 'framework_tool_channel_unavailable' : null),
+        : tool.channel.state === 'idle' ? 'idle' : 'ready', tool && !tool.available ? toolReason : null),
       layer('interactions', status.state !== 'running' ? 'stopped' : status.interactionChannel?.state === 'connected' ? 'ready'
         : status.interactionChannel?.state === 'connecting' ? 'recovering' : 'unavailable',
         status.state === 'running' && status.interactionChannel?.state !== 'connected' ? 'interaction_channel_unavailable' : null),
