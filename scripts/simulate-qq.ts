@@ -2,6 +2,7 @@
 import { appendFileSync, constants } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { resolveLocalDshModelSettings } from '../src/host/local-dsh-model-settings.ts'
 import { lstat, mkdir, mkdtemp, open, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -151,7 +152,7 @@ export async function publishSimulationActivityIndex(options: {
 
 async function copyConfiguration(source: string, destination: string, modelOverride?: { readonly provider: string; readonly model: string }) {
   // Explicit configuration allowlist. In particular no journal, outbox, history, account registry, or running intent is copied.
-  for (const name of ['chat-plans.json', 'chat-personas.json', 'chat-providers.json', 'chat-execution.json', 'chat-assistant.json', 'package-chat-output.configuration.json', 'package-media.configuration.json']) {
+  for (const name of ['chat-plans.json', 'chat-personas.json', 'chat-providers.json', 'chat-execution.json', 'chat-assistant.json', 'provider-model-capabilities.json', 'package-chat-output.configuration.json', 'package-media.configuration.json']) {
     const filename = join(source, name)
     const information = await lstat(filename).catch((error: unknown) => {
       if (isRecord(error) && error.code === 'ENOENT') return null
@@ -183,7 +184,7 @@ async function copyConfiguration(source: string, destination: string, modelOverr
   }
 }
 
-function messageInput(value: unknown): SimulatedMessage {
+export function messageInput(value: unknown): SimulatedMessage {
   if (!isRecord(value) || typeof value.text !== 'string' || value.text.length > 100_000
     || value.actor !== undefined && !['owner', 'member'].includes(String(value.actor))
     || value.kind !== undefined && !['private', 'group'].includes(String(value.kind))
@@ -193,9 +194,17 @@ function messageInput(value: unknown): SimulatedMessage {
     || value.segments !== undefined && (!Array.isArray(value.segments) || value.segments.length > 64 || !value.segments.every(isRecord))) {
     throw new Error('simulation_invalid_message')
   }
+  let sentAt: number | undefined
+  if (value.sentAt !== undefined) {
+    if (typeof value.sentAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.sentAt))
+      throw new Error('simulation_invalid_sent_at')
+    sentAt = Date.parse(value.sentAt)
+    if (!Number.isSafeInteger(sentAt) || sentAt <= 0 || new Date(sentAt).toISOString() !== value.sentAt)
+      throw new Error('simulation_invalid_sent_at')
+  }
   const memberIndex = simulatedMemberIndex(value.actor, value.memberIndex)
   return { actor: value.actor === 'member' ? 'member' : 'owner', kind: value.kind === 'private' ? 'private' : 'group',
-    text: value.text, mention: value.mention !== false,
+    text: value.text, mention: value.mention !== false, ...(sentAt === undefined ? {} : { sentAt }),
     ...(value.actor === 'member' ? { memberIndex } : {}),
     ...(typeof value.groupId === 'string' ? { groupId: value.groupId } : {}),
     ...(typeof value.replyTo === 'number' ? { replyTo: value.replyTo } : {}),
@@ -398,7 +407,16 @@ export async function simulateQq(values = process.argv.slice(2)) {
     await dsh.start(lifetime.signal)
     const load = () => readNativeChatConfiguration(nativeDirectory)
     const deployment = createNativeDshDeploymentRuntime({ sessionDirectory: nativeDirectory, verificationTimeoutMs: 20_000 })
-    const configuration = await load()
+    const repository = new NativeConfigurationRepository(nativeDirectory)
+    let configuration = await load()
+    const resolvedSettings = await resolveLocalDshModelSettings(configuration, dsh.target, lifetime.signal, nativeDirectory)
+    const savedDeployment = await repository.readDeployment()
+    const modelSettings = { ...resolvedSettings.modelSettings,
+      maxTokens: Math.min(resolvedSettings.modelSettings.maxTokens, configuration.deployment.modelSettings?.maxTokens ?? resolvedSettings.modelSettings.maxTokens) }
+    await repository.replaceDeployment(savedDeployment.revision, { ...savedDeployment.value.deployment, modelSettings })
+    configuration = await load()
+    record({ type: 'simulation-model-settings-prepared', source: resolvedSettings.source,
+      inputModalities: modelSettings.inputModalities, maxTokens: modelSettings.maxTokens })
     const prepared = await deployment.prepare(configuration)
     if (prepared.state !== 'prepared') throw new Error(`simulation_chat_prepare_failed:${prepared.missingReasons.join(',')}`)
     const applied = await deployment.apply(configuration, lifetime.signal, prepared.targetRevision)
@@ -409,7 +427,6 @@ export async function simulateQq(values = process.argv.slice(2)) {
       const verified = await deployment.reconcile(configuration)
       if (verified.missingReasons.length > 0) throw new Error(`simulation_chat_reconcile_failed:${verified.missingReasons.join(',')}`)
     } else if (applied.state !== 'verified') throw new Error(`simulation_chat_apply_${applied.state}:${applied.missingReasons.join(',')}`)
-    const repository = new NativeConfigurationRepository(nativeDirectory)
     const assistant = createNativeAssistantTarget({ directory: nativeDirectory, deploymentNamespace: 'qqsimwork',
       loadConfiguration: load, loadAssistant: () => repository.readAssistant() })
     const assistantDocument = await repository.readAssistant()

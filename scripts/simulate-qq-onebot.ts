@@ -14,6 +14,7 @@ export interface SimulatedMessage {
   readonly text: string
   readonly mention?: boolean
   readonly groupId?: string
+  readonly sentAt?: number
   readonly replyTo?: number
   readonly segments?: readonly Record<string, unknown>[]
 }
@@ -386,12 +387,14 @@ export async function startSimulatedOneBot(options: {
     },
     inject(input: SimulatedMessage) {
       if (![...sockets].some(socket => socket.readyState === WebSocket.OPEN)) throw new Error('simulation_protocol_not_connected')
+      if (input.sentAt !== undefined && (!Number.isSafeInteger(input.sentAt) || input.sentAt <= 0
+        || !Number.isFinite(new Date(input.sentAt).getTime()))) throw new Error('simulation_invalid_sent_at')
       const senderId = sender(input.actor, input.memberIndex)
       const messageId = ++sequence
       const segments = [...(input.replyTo === undefined ? [] : [{ type: 'reply', data: { id: String(input.replyTo) } }]),
         ...(input.mention && input.kind === 'group' ? [{ type: 'at', data: { qq: options.selfId } }] : []),
         ...(input.segments ?? []), ...(input.text ? [{ type: 'text', data: { text: input.text } }] : [])]
-      const event = { time: Math.floor(Date.now() / 1000), self_id: Number(options.selfId), post_type: 'message',
+      const event = { time: Math.floor((input.sentAt ?? Date.now()) / 1000), self_id: Number(options.selfId), post_type: 'message',
         message_type: input.kind, sub_type: input.kind === 'group' ? 'normal' : 'friend', message_id: messageId,
         user_id: Number(senderId), ...(input.kind === 'group' ? { group_id: Number(input.groupId ?? options.groupId) } : {}),
         message: segments, raw_message: input.text, font: 0,

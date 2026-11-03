@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { WebSocket } from 'ws'
 import { createSimulatedMembers, simulatedMemberIndex, startSimulatedOneBot } from '../scripts/simulate-qq-onebot.ts'
+import { messageInput } from '../scripts/simulate-qq.ts'
 import { isRecord } from '../src/core/values.ts'
 
 test('simulated member indexes preserve the default identity and avoid owner or bot collisions', () => {
@@ -84,4 +85,33 @@ test('local simulated group messages, member queries and history agree on eight 
   const uploaded: unknown = JSON.parse(String(uploadBytes))
   assert(isRecord(uploaded))
   assert.equal(uploaded.user_id, Number(peer.members[1]!.userId))
+})
+
+
+test('simulated source timestamps validate canonical UTC and survive quote and history reads without changing host time', async context => {
+  const source = '2026-11-03T01:02:03.456Z'
+  assert.equal(messageInput({ text: 'old', sentAt: source }).sentAt, Date.parse(source))
+  for (const sentAt of ['2026-02-30T01:02:03.456Z', '2026-11-03T01:02:03+08:00', '2026-11-03T01:02:03Z', 123])
+    assert.throws(() => messageInput({ text: 'old', sentAt }), /simulation_invalid_sent_at/)
+  const directory = await mkdtemp(join(tmpdir(), 'simulation-timestamps-'))
+  const peer = await startSimulatedOneBot({ selfId: '900000000001', ownerId: '123', memberId: '900000000002',
+    groupId: '900000000003', directory, record() {} })
+  const socket = new WebSocket(peer.websocketEndpoint, { headers: { authorization: `Bearer ${peer.secret}` } })
+  context.after(async () => { socket.terminate(); await peer.close(); await rm(directory, { recursive: true, force: true }) })
+  await once(socket, 'open')
+  const before = Date.now()
+  const received = once(socket, 'message')
+  const id = peer.inject(messageInput({ text: 'old', sentAt: source }))
+  const [bytes] = await received
+  const event: unknown = JSON.parse(String(bytes))
+  assert(isRecord(event)); assert.equal(event.time, Math.floor(Date.parse(source) / 1000))
+  for (const [name, params] of [['get_msg', { message_id: id }], ['get_group_msg_history', { group_id: '900000000003', count: 10 }]] as const) {
+    const response = await fetch(`${peer.endpoint}/${name}`, { method: 'POST', headers: {
+      authorization: `Bearer ${peer.secret}`, 'content-type': 'application/json' }, body: JSON.stringify(params) })
+    const result: unknown = await response.json()
+    assert(isRecord(result) && isRecord(result.data))
+    const message = name === 'get_msg' ? result.data : (result.data.messages as Record<string, unknown>[])[0]!
+    assert.equal(message.time, event.time)
+  }
+  assert(Date.now() >= before && Date.now() - before < 5000)
 })
