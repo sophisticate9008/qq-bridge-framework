@@ -13,6 +13,8 @@ const labels: Readonly<Record<ChatRepairOperation['phase'], string>> = {
 const reasons: Readonly<Record<string, string>> = {
   chat_repair_local_dsh_required: '尚未配置受管的本机 DSH，请在连接设置中自动连接本机服务。',
   chat_repair_dsh_target_mismatch: '已连接的 DSH 与受管实例不同，请在连接设置中选择本机 DSH。',
+  chat_repair_guardian_unavailable: '恢复守护进程未能就绪，本次尚未停服；可以再次点击恢复。',
+  chat_repair_application_unknown: '应用结果尚未确认，已保留原操作记录；可再次恢复并查看应用详情。',
   chat_repair_worker_start_failed: '后台恢复进程未能启动，请检查本机服务管理器后再次修复。',
   chat_repair_services_not_restored: '部分受管服务尚未恢复，请查看服务状态；可再次点击修复。',
   chat_repair_configuration_changed: '已保存设置在预检期间发生变化，请再次点击修复以读取最新设置。',

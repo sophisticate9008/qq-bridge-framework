@@ -58,6 +58,11 @@ export function asRecord(value: unknown): Record<string, unknown> { return isRec
 
 export function errorMessage(error: unknown): string {
   const code = error instanceof ApiError ? error.code : '';
+  if (code === 'chat_repair_busy') return '正在一键恢复聊天，完成后可继续配置；恢复进度会自动更新。';
+  if (code === 'chat_repair_accounts_require_individual_recovery') return '当前部署有多个账号，此统一恢复入口暂不支持；请进入各账号查看恢复条件。';
+  if (code === 'chat_repair_unavailable') return '当前部署尚未接入受管的本机服务恢复入口。';
+  if (code === 'chat_repair_history_full') return '恢复记录已达到保留上限，请先维护记录后再发起新恢复；原记录仍可查询。';
+  if (code === 'chat_repair_retired') return '此恢复编号已确认未受理，请重新点击一键恢复开始新操作。';
   if (code === 'unauthorized') return '访问会话已失效，请重新登录。';
   if (code === 'protocol_connection_invalid') return '协议服务连接验证未通过，请检查地址与访问令牌。';
   if (code === 'managed_gateway_endpoint_changed') return '连接地址已在其他位置修改，请重新载入后应用。';
