@@ -40,3 +40,34 @@ test('unavailable or cross-scope quotes stay missing and local retained history 
     content: [{ type: 'text', text: 'already retained' }] }], new AbortController().signal), []);
   assert.equal(calls, 2);
 });
+
+test('expired quote neighborhoods prefer eight before and seven after and fill from the available side', async () => {
+  const { selectExpiredQuoteContext } = await import('../src/host/native-quoted-context.ts');
+  const history = Array.from({ length: 40 }, (_, index) => ({ id: `m${index}`, actor: `actor${index % 3}`,
+    receivedAt: index + 1, content: [{ type: 'text' as const, text: `body${index}` }] }));
+  const middle = selectExpiredQuoteContext(history, [], ['m20']);
+  assert.deepEqual(middle.messages.map(item => item.id), Array.from({ length: 16 }, (_, index) => `m${index + 12}`));
+  assert.deepEqual(middle.messages.map(item => item.actor), history.slice(12, 28).map(item => item.actor));
+  assert.deepEqual(middle.messages.map(item => item.receivedAt), history.slice(12, 28).map(item => item.receivedAt));
+  for (const target of ['m0', 'm1']) assert.deepEqual(selectExpiredQuoteContext(history, [], [target]).messages.map(item => item.id),
+    history.slice(0, 16).map(item => item.id));
+  for (const target of ['m38', 'm39']) assert.deepEqual(selectExpiredQuoteContext(history, [], [target]).messages.map(item => item.id),
+    history.slice(-16).map(item => item.id));
+});
+
+test('multiple expired quote neighborhoods share sixteen deduplicated entries and missing adjacency never uses unrelated history', async () => {
+  const { selectExpiredQuoteContext } = await import('../src/host/native-quoted-context.ts');
+  const history = Array.from({ length: 80 }, (_, index) => ({ id: `m${index}`, actor: '123', receivedAt: index + 1,
+    content: [{ type: 'text' as const, text: `body${index}` }] }));
+  const result = selectExpiredQuoteContext(history, [], ['m10', 'm30', 'm50', 'm70']);
+  assert.equal(result.messages.length, 16); assert.equal(new Set(result.messages.map(item => item.id)).size, 16);
+  for (const id of result.targetIds) assert(result.messages.some(item => item.id === id));
+  assert.deepEqual(result.messages, result.messages.slice().sort((a, b) => a.receivedAt - b.receivedAt));
+  assert.equal(result.partial, true);
+  assert.equal(selectExpiredQuoteContext(history, [], ['m10'], false, 13).messages.length, 13);
+  const missing = { id: 'dropped', actor: '789', receivedAt: 0, content: [{ type: 'text' as const, text: 'only the restored target' }] };
+  const restored = selectExpiredQuoteContext(history, [missing], ['dropped'], true);
+  assert.deepEqual(restored.messages, [missing]); assert.deepEqual(restored.unavailableAdjacencyIds, ['dropped']); assert.equal(restored.partial, true);
+  assert.equal(selectExpiredQuoteContext(history, [], ['missing']).messages.length, 0);
+  assert.equal(selectExpiredQuoteContext(history.slice(0, 3), [], ['m1']).partial, true);
+});

@@ -1,3 +1,4 @@
+import type { HistoryInputConsumption } from './history.ts'
 import type { AccountScope } from '../contracts/account-scope.ts'
 import type { OneBotWebSocketOptions } from '../adapters/onebot-websocket.ts'
 import { projectOneBotNoticeForChat, validateOneBotProtocolEventData } from '../adapters/onebot-events.ts'
@@ -67,7 +68,7 @@ export function createNativeInboundController(options: {
   const { activity, controlDefinitions, getControlCommands, checkpoint, guard, safeCode } = options
   const participationReasons = new Map<string, NativeParticipationReason>()
   const groupWakes = new Map<string, readonly NativeGroupWake[]>()
-  const preparedReadCursors = new Map<string, number>()
+  const preparedReadCursors = new Map<string, { readonly sequence: number; readonly consumption?: HistoryInputConsumption }>()
   const inputSequences = new Map<string, number>()
   const admissionTimes = new Map<string, number>()
   const activeConversations = new Map<string, number>()
@@ -308,7 +309,7 @@ export function createNativeInboundController(options: {
       accepted = receipt.status === 'accepted'
       if (receipt.status === 'accepted' && readCursor !== undefined && current === runtime.host && runtime.lifetime === generation) {
         const prior = current.history.snapshot(message.conversationId)
-        current.history.markRead(message.conversationId, Math.max(prior.readThrough, readCursor), Date.now())
+        current.history.markRead(message.conversationId, Math.max(prior.readThrough, readCursor.sequence), Date.now(), readCursor.consumption)
       }
       if (receipt.status === 'rejected') rejected++
       if (receipt.status === 'unknown') unknown++
@@ -348,7 +349,7 @@ export function createNativeInboundController(options: {
     status: () => ({ activeConversations: activeConversations.size, received, rejected, unknown, droppedWhileStopped, lastReceipt }),
     admittedAt: (requestId: string) => admissionTimes.get(requestId),
     inputSequence: (requestId: string) => inputSequences.get(requestId),
-    preparedReadCursor(requestId: string, sequence: number) { preparedReadCursors.set(requestId, sequence) },
+    preparedReadCursor(requestId: string, sequence: number, consumption?: HistoryInputConsumption) { preparedReadCursors.set(requestId, { sequence, consumption }) },
     participation: (requestId: string) => participationReasons.get(requestId),
     observationActive(conversationId: string, continuationMs: number, at = Date.now()) {
       const activatedAt = activationTimes.get(conversationId)

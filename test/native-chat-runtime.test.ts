@@ -99,6 +99,7 @@ async function fixture(context: TestContext, options: {
   holdCreate?: boolean
   pluginMissing?: boolean
   holdPrompt?: boolean
+  promptFailure?: 'rejected' | 'unknown'
   suppressClaims?: boolean
   failFollow?: boolean
   bootstrap?: LoadedNativeBootstrap
@@ -260,6 +261,9 @@ async function fixture(context: TestContext, options: {
     } else if (envelope.method === 'session/selectModel') {
       value = { selected: options.migrationChannel ? { provider: input.provider, model: input.model, ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }) } : { provider: 'external-provider', model: 'model', reasoningEffort: 'off' } }
     } else if (envelope.method === 'session/prompt') {
+      if (options.promptFailure === 'unknown') { response.destroy(); return }
+      if (options.promptFailure === 'rejected') { response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId,
+        result: { ok: false, error: { code: 'SYNTHETIC_SUBMIT_REJECTED', message: 'Synthetic rejection' } } })); return }
       if (!options.suppressClaims) plugin.accepted(String(input.sessionId), String(input.requestId))
       if (options.holdPrompt) { heldPrompt = { response, rpcId: envelope.rpcId }; return }
       value = { accepted: true }
@@ -2650,7 +2654,7 @@ test('native wake submits 32 dated unread messages and preserves its accepted-in
     content: [{ type: 'text', text: '我去吃饭了' }] })
   history.markRead('group:456', 1, previous)
   for (let index = 0; index < 40; index++) history.append('group:456', { id: `sleep-${index}`, actor: '789',
-    receivedAt: now - 3_600_000 + index * 1000, content: [{ type: 'text', text: `闲聊${index}` }] })
+    receivedAt: now - 14 * 60_000 + index * 1000, content: [{ type: 'text', text: `闲聊${index}` }] })
   assert.equal(history.snapshot('group:456').lastReadAt, previous)
   fake.message(6001, { message_type: 'group', group_id: 456,
     message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '早呀，换个话题' } }] })
@@ -2971,4 +2975,64 @@ test('coalesced queued quotes preserve the current reference and fill four targe
   assert.equal(facts.quotedLimited, true)
   assert.equal(facts.unread.partial, true)
   assert.doesNotMatch(text, /queued-target-9014/)
+})
+
+test('accepted TTL skips survive restart and only their explicit quotes recover a bounded real neighborhood', async context => {
+  const fake = await fixture(context)
+  await fake.configure()
+  await fake.save('personas', { personas: [{ ...persona, wake: { ...DEFAULT_PERSONA_WAKE, continuationMs: 0, groupWakeProbabilityPercent: 0 } }] })
+  await fake.start()
+  const initial = fake.runtime().host()!.history
+  const oldAt = Date.now() - 3600000
+  for (let index = 0; index < 30; index++) initial.append('group:456', { id: String(10400 + index), actor: index % 2 ? '123' : '789',
+    receivedAt: oldAt + index * 1000, content: [{ type: 'text', text: `过期邻接正文-${index}` }] })
+  fake.message(10300, { message_type: 'group', group_id: 456, user_id: 123,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '现在只打个招呼' } }] })
+  const prompts = () => fake.rpc.filter(item => item.method === 'session/prompt')
+  await until(() => prompts().length === 1 && initial.snapshot('group:456').expiredUnreadIds.length === 30)
+  assert.doesNotMatch(JSON.stringify(prompts()[0]!.request.content), /过期邻接正文/)
+  await fake.answer(1)
+  await until(() => fake.runtime().executions()!.forConversation('group:456') === null)
+  await fake.restart()
+  const history = fake.runtime().host()!.history
+  assert.equal(history.snapshot('group:456').expiredUnreadIds.length, 30)
+  fake.message(10301, { message_type: 'group', group_id: 456, user_id: 123,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'reply', data: { id: '10415' } },
+      { type: 'text', data: { text: '这句具体指什么？' } }] })
+  await until(() => prompts().length === 2)
+  await until(() => !history.snapshot('group:456').expiredUnreadIds.includes('10415')).catch(error => { throw new Error(JSON.stringify({expired: history.snapshot('group:456').expiredUnreadIds, status: fake.runtime().inboxSummary()}), {cause: error}) })
+  const text = normalizeContent(prompts()[1]!.request.content).flatMap(part => part.type === 'text' ? [part.text] : []).join('')
+  const facts = JSON.parse(text.slice('会话事实：\n'.length, text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n'))) as {
+    recent: { id: string }[]; quoteContext: { purpose: string; targetIds: string[]; messages: { id: string; actor: string; at: string }[]; partial: boolean };
+  }
+  assert.equal(facts.quoteContext.purpose, 'interpret-quotes-only')
+  assert.deepEqual(facts.quoteContext.targetIds, ['10415'])
+  assert.deepEqual(facts.quoteContext.messages.map(item => item.id), Array.from({ length: 16 }, (_, index) => String(index + 10407)))
+  assert.equal(facts.quoteContext.messages[0]!.actor, '123')
+  assert.equal(facts.quoteContext.messages[0]!.at, new Date(oldAt + 7000).toISOString())
+  assert(!facts.recent.some(item => Number(item.id) >= 10400))
+  assert.doesNotMatch(text, /过期邻接正文-0"|过期邻接正文-29"/)
+  assert(history.snapshot('group:456').expiredUnreadIds.includes('10400'))
+  await fake.answer(2)
+  await until(() => fake.runtime().executions()!.forConversation('group:456') === null)
+  fake.message(10302, { message_type: 'group', group_id: 456, user_id: 123,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'reply', data: { id: '10415' } },
+      { type: 'text', data: { text: '再解释一下这个已读引用。' } }] })
+  await until(() => prompts().length === 3)
+  assert.doesNotMatch(JSON.stringify(prompts()[2]!.request.content), /quoteContext/)
+  await fake.answer(3)
+})
+
+for (const promptFailure of ['rejected', 'unknown'] as const) test(`unaccepted ${promptFailure} input never registers prepared TTL skips`, async context => {
+  const fake = await fixture(context, { promptFailure })
+  await fake.configure(); await fake.start()
+  const history = fake.runtime().host()!.history
+  history.append('group:456', { id: '10500', actor: '789', receivedAt: Date.now() - 3600000,
+    content: [{ type: 'text', text: '超时背景未提交成功不能记为跳过已读' }] })
+  fake.message(10501, { message_type: 'group', group_id: 456, user_id: 123,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '当前问候' } }] })
+  await until(() => fake.rpc.some(item => item.method === 'session/prompt'))
+  await until(() => fake.runtime().inboxSummary().items.some(item => item.state === 'blocked' || item.state === 'idle'))
+  assert.deepEqual(history.snapshot('group:456').expiredUnreadIds, [])
+  assert.equal(history.snapshot('group:456').readThrough, 0)
 })

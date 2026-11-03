@@ -1,6 +1,6 @@
 import type { OneBotActionPort } from '../adapters/onebot-actions.ts';
 import { normalizeOneBotContent, type OneBotIncomingAssetRegistrar } from '../adapters/onebot.ts';
-import { snapshot } from '../core/values.ts';
+import { assert, snapshot } from '../core/values.ts';
 import type { HistoryMessage } from './history.ts';
 import type { InboundMessage } from './types.ts';
 import { withDeadline } from './deadlines.ts';
@@ -63,4 +63,40 @@ export function createNativeQuotedContext(options: {
     },
     clear() { cache.clear(); },
   });
+}
+
+/** Explain only TTL-skipped quote targets; neighbors must come from their actual retained timeline. */
+export function selectExpiredQuoteContext(history: readonly HistoryMessage[], targets: readonly HistoryMessage[],
+  targetIds: readonly string[], historyPartial = false, limit = 16) {
+  assert(Number.isSafeInteger(limit) && limit >= 4 && limit <= 16, 'INVALID_QUOTE_CONTEXT_LIMIT', 'Quote context needs a bounded message limit.');
+  const ids = [...new Set(targetIds)].slice(0, 4);
+  const selected = new Map<string, HistoryMessage>();
+  const candidates = ids.map(id => {
+    const index = history.findIndex(message => message.id === id);
+    const target = index >= 0 ? history[index] : targets.find(message => message.id === id);
+    if (target) selected.set(id, target);
+    if (index < 0) return { id, retained: false, messages: [] as HistoryMessage[] };
+    // Prefer eight preceding and seven following entries; either side can fill a shortfall.
+    let before = Math.min(8, index), after = Math.min(7, history.length - index - 1);
+    before += Math.min(15 - before - after, index - before);
+    after += Math.min(15 - before - after, history.length - index - 1 - after);
+    const messages: HistoryMessage[] = [];
+    for (let offset = 1; offset <= Math.max(before, after); offset++) {
+      if (offset <= before) messages.push(history[index - offset]!);
+      if (offset <= after) messages.push(history[index + offset]!);
+    }
+    return { id, retained: true, messages };
+  });
+  for (let offset = 0; selected.size < limit && candidates.some(candidate => offset < candidate.messages.length); offset++) {
+    for (const candidate of candidates) {
+      const message = candidate.messages[offset];
+      if (message && selected.size < limit) selected.set(message.id, message);
+    }
+  }
+  const order = new Map(history.map((message, index) => [message.id, index]));
+  const messages = [...selected.values()].sort((left, right) => (order.get(left.id) ?? history.length + ids.indexOf(left.id))
+    - (order.get(right.id) ?? history.length + ids.indexOf(right.id)));
+  return { targetIds: ids, messages, partial: historyPartial || selected.size < limit
+    || candidates.some(candidate => !candidate.retained || candidate.messages.some(message => !selected.has(message.id))),
+    unavailableAdjacencyIds: candidates.filter(candidate => !candidate.retained).map(candidate => candidate.id) };
 }

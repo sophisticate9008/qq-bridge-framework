@@ -11,11 +11,12 @@ export interface HistoryMessage {
   displayName?: string;
 }
 export interface HistoryEntry extends HistoryMessage { sequence: number }
-interface Timeline { sequence: number; readThrough: number; droppedThrough: number; lastReadAt: number | null; messages: HistoryEntry[] }
+export interface HistoryInputConsumption { readonly expiredUnreadIds: readonly string[]; readonly includedMessageIds: readonly string[] }
+interface Timeline { expiredUnreadIds: string[]; sequence: number; readThrough: number; droppedThrough: number; lastReadAt: number | null; messages: HistoryEntry[] }
 const namespace = 'history';
 
 function decode(value: unknown): Timeline {
-  if (value === null) return { sequence: 0, readThrough: 0, droppedThrough: 0, lastReadAt: null, messages: [] };
+  if (value === null) return { expiredUnreadIds: [], sequence: 0, readThrough: 0, droppedThrough: 0, lastReadAt: null, messages: [] };
   const data = object(value);
   assert(Number.isSafeInteger(data.sequence) && Number(data.sequence) >= 0 && Number.isSafeInteger(data.readThrough)
     && Number(data.readThrough) >= 0 && Number(data.readThrough) <= Number(data.sequence)
@@ -31,7 +32,13 @@ function decode(value: unknown): Timeline {
       ...(displayName === undefined ? {} : { displayName }),
       sequence: Number(message.sequence), content: normalizeContent(message.content) };
   });
-  return { sequence: Number(data.sequence), readThrough: Number(data.readThrough), droppedThrough: Number(data.droppedThrough),
+  assert(data.expiredUnreadIds === undefined || Array.isArray(data.expiredUnreadIds)
+    && data.expiredUnreadIds.length <= 1000 && data.expiredUnreadIds.every(reference)
+    && new Set(data.expiredUnreadIds).size === data.expiredUnreadIds.length
+    && data.expiredUnreadIds.every(id => messages.some(message => message.id === id)),
+  'INVALID_STORED_DATA', 'Stored TTL-skipped history references are invalid.');
+  const expiredUnreadIds = (data.expiredUnreadIds ?? []) as string[];
+  return { expiredUnreadIds, sequence: Number(data.sequence), readThrough: Number(data.readThrough), droppedThrough: Number(data.droppedThrough),
     lastReadAt: typeof data.lastReadAt === 'number' ? data.lastReadAt : null, messages };
 }
 
@@ -77,6 +84,7 @@ export function createConversationHistory({ store, maxMessages = 100, maxBytes =
           const removed = timeline.messages.shift();
           assert(removed, 'HISTORY_TOO_LARGE', 'A history message exceeds the retention bound.');
           timeline.droppedThrough = removed.sequence;
+          timeline.expiredUnreadIds = timeline.expiredUnreadIds.filter(id => id !== removed.id);
         }
       });
       return result.messages.find(entry => entry.id === message.id)?.sequence ?? result.sequence;
@@ -89,9 +97,13 @@ export function createConversationHistory({ store, maxMessages = 100, maxBytes =
       const after = afterSequence ?? timeline.readThrough;
       const unread = timeline.messages.filter(message => message.sequence > after);
       return snapshot({ messages: unread.slice(0, limit), readThrough: timeline.readThrough, lastReadAt: timeline.lastReadAt, latestSequence: timeline.sequence,
-        droppedThrough: timeline.droppedThrough, partial: after < timeline.droppedThrough || unread.length > limit });
+        droppedThrough: timeline.droppedThrough, expiredUnreadIds: timeline.expiredUnreadIds, partial: after < timeline.droppedThrough || unread.length > limit });
     },
-    markRead(conversationId: string, throughSequence: number, acceptedAt?: number) {
+    markRead(conversationId: string, throughSequence: number, acceptedAt?: number, consumption?: HistoryInputConsumption) {
+      assert(consumption === undefined || isRecord(consumption)
+        && [consumption.expiredUnreadIds, consumption.includedMessageIds].every(ids => Array.isArray(ids)
+          && ids.length <= 1000 && ids.every(reference)),
+      'INVALID_HISTORY_CONSUMPTION', 'Accepted input references must be bounded history identifiers.');
       return mutate(conversationId, timeline => {
         assert(Number.isSafeInteger(throughSequence) && throughSequence >= timeline.readThrough && throughSequence <= timeline.sequence,
           'INVALID_READ_CURSOR', 'The read cursor must be monotonic and within received history.');
@@ -101,6 +113,13 @@ export function createConversationHistory({ store, maxMessages = 100, maxBytes =
         // passive history appends must not make a sleeping conversation look active.
         if (throughSequence > timeline.readThrough) timeline.lastReadAt = acceptedAt ?? null;
         timeline.readThrough = throughSequence;
+        if (consumption) {
+          const included = new Set(consumption.includedMessageIds);
+          const expired = new Set([...timeline.expiredUnreadIds, ...consumption.expiredUnreadIds]);
+          timeline.expiredUnreadIds = timeline.messages.filter(message => message.sequence <= throughSequence
+            && expired.has(message.id) && !included.has(message.id)).map(message => message.id);
+          while (timeline.expiredUnreadIds.length && Buffer.byteLength(JSON.stringify(timeline)) > maxBytes) timeline.expiredUnreadIds.shift();
+        }
       }).readThrough;
     },
   });

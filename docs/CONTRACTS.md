@@ -12,6 +12,11 @@ DSH 部署运行时可提供可选的 `sessionsReloaded(configuration, signal)`�
 
 人设 `wake.unreadRetentionMs` 为可选安全整数，范围 60000–86400000 毫秒，缺省 900000（15 分钟）；`chat-input` 配置沿用同名字段，effective 配置始终提供实际数值。旧 schema 1 人设与配置无需迁移，读取不回写缺省字段。普通未读超过该时长，或时间未知／晚于本轮宿主时间时，不自动补入；当前输入、明确排队或延期的请求，以及引用接续旧话题保留各自入口。此设置限制自动补读，不删除历史、清空模型会话或解除绑定。控制台以分钟编辑，随人设保存后后续输入即时生效。
 
+历史 timeline 可选持久字段 `expiredUnreadIds` 只保存当前有界保留历史中因超过未读时限未送给模型的消息 ID；旧记录缺省为空，随历史裁剪清除。`history.snapshot()` 返回该列表；`markRead(conversationId, throughSequence, acceptedAt?, consumption?)` 的可选 `consumption` 为 `{ expiredUnreadIds, includedMessageIds }`，宿主仅在确认输入 accepted 后登记最终预算投影中真正跳过的超时项，实际作为当前、recent、quoted、quoteContext 或待答快照送入的消息从列表清除。相同游标可清除已补读证据，但不刷新 `lastReadAt`；未知或拒绝受理不登记。此证据不等价于完整已读账本，未保留的 ID 不推定为超时跳过。
+
+显式引用目标仍未读且本轮确因 age 超时过滤，或具有 `expiredUnreadIds` 证据时，输入可附独立 `quoteContext: { purpose: "interpret-quotes-only", targetIds, messages, partial, unavailableAdjacencyIds }`。仅这些目标展开；已读旧引用、正常新引用不展开。每轮最多四个目标仍优先当前消息引用，所有邻接与目标共享 16 条去重总额。单目标优先前八、后七，不足从另一侧补齐；多目标有界轮流分配邻接，最终按真实保留历史顺序呈现原 ID、actor、at/localAt 与最多 300 字符正文，仍受背景字符预算、60 KiB 和八块总限额约束。邻接只取同会话本轮边界内的真实保留历史，不调整历史容量；目标仅由同会话 get_msg 恢复且邻接已裁剪时仅提供目标，列入 `unavailableAdjacencyIds` 并标 `partial`，不以最新无关历史替代。该字段仅解释本次引用，不新增待答任务、不扩大工具权限；图片和转发仍以登记资源经原媒体工具读取。
+
+
 历史快照增加 `lastReadAt: number | null`，`markRead(conversationId, throughSequence, acceptedAt?)` 可在读取位置前进时一同保存确认受理时间。原生入站只在当前宿主和生命周期仍匹配且模型请求明确 accepted 后写入；被动消息、重复读取位置、准备输入、拒绝与未知结果不刷新。记录独立于保留消息，正文被裁剪后、重启后仍可比较；旧记录缺省为未知，旧调用方不传时间仍保持原读取用法。
 公共接口的类型和校验集中在 [src/contracts](../src/contracts)、[src/core](../src/core) 与 SDK 导出。HTTP、协议响应和持久文件均在边界校验；TypeScript 类型不能替代运行时解码。扩展 API 用法见 [扩展开发](EXTENDING.md)，操作恢复见 [恢复手册](RECOVERY.md)。
 

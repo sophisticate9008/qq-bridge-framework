@@ -1,7 +1,8 @@
 import { normalizeContent } from '../core/content.ts';
 import { assert } from '../core/values.ts';
 import type { FrameworkEvent, MessageContent, JsonValue } from '../core/types.ts';
-import type { HistoryMessage } from './history.ts';
+import { selectExpiredQuoteContext } from './native-quoted-context.ts';
+import type { HistoryInputConsumption, HistoryMessage } from './history.ts';
 import type { InboundMessage } from './types.ts';
 import type { NativeMemoryContext } from '../contracts/native-memory.ts';
 import { normalizeSenderDisplayName } from '../contracts/sender-display-name.ts';
@@ -146,6 +147,10 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   readonly quotedMessages?: readonly HistoryMessage[];
   readonly quotedMessageIds?: readonly string[];
   readonly quotedContextLimited?: boolean;
+  readonly quoteHistory?: readonly HistoryMessage[];
+  readonly quoteHistoryPartial?: boolean;
+  readonly expiredUnreadIds?: readonly string[];
+  readonly onContextPrepared?: (consumption: HistoryInputConsumption) => void;
   readonly unread?: { readonly ids: readonly string[]; readonly readThrough: number; readonly through: number; readonly partial: boolean };
   readonly memory?: NativeMemoryContext;
   readonly stickerHints?: JsonValue;
@@ -221,6 +226,27 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     unreadRetentionMs, excludedUnread } : undefined;
   const consumedWakeIds = new Set(wake?.mode === 'read-unread'
     ? [event.id, ...history.filter(entry => nativeChatWakeKind(entry.id, entry.content, options.selfId) !== null).map(entry => entry.id)] : []);
+  const expiredUnreadIds = allUnreadMessages.filter(entry => !unreadMessages.some(item => item.id === entry.id)
+    && messageTime(entry.receivedAt) !== null && now - entry.receivedAt > unreadRetentionMs).map(entry => entry.id);
+  const quotedIds = [...new Set(options.quotedMessageIds ?? original.flatMap(part => part.type === 'reply' ? [part.messageId] : []))].slice(0, 4);
+  const expiredEvidence = new Set([...(options.expiredUnreadIds ?? []), ...expiredUnreadIds]);
+  const contextTargetIds = quotedIds.filter(id => expiredEvidence.has(id));
+  const contextSelection = selectExpiredQuoteContext(options.quoteHistory ?? history, options.quotedMessages ?? [],
+    contextTargetIds, options.quoteHistoryPartial ?? false, 16 - (quotedIds.length - contextTargetIds.length));
+  const quoteContextMessages = contextSelection.messages.map(entry => {
+    const full = contentText(entry.content);
+    return { id: entry.id, actor: entry.actor, at: messageTime(entry.receivedAt), localAt: localTime(entry.receivedAt),
+      text: full.slice(0, 300), truncated: full.length > 300 };
+  });
+  let quoteContextPartial = contextSelection.partial;
+  let quoteTextLimit = 300;
+  while (quoteTextLimit > 0 && JSON.stringify(quoteContextMessages).length > budget) {
+    quoteTextLimit = Math.floor(quoteTextLimit / 2);
+    for (const item of quoteContextMessages) if (item.text.length > quoteTextLimit) {
+      item.text = item.text.slice(0, quoteTextLimit); item.truncated = true; quoteContextPartial = true;
+    }
+  }
+  const recentBudget = Math.max(0, budget - (quotedIds.some(id => expiredEvidence.has(id)) ? JSON.stringify(quoteContextMessages).length : 0));
   const selectedUnread = selectNativeChatMessages(unreadMessages, addressedMessageIds);
   const priorityIds = new Set(addressedMessageIds);
   const recentItem = (entry: HistoryMessage, textLimit: number) => {
@@ -233,20 +259,20 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   let priorityTextLimit = 800;
   const priorityMessages = selectedUnread.filter(entry => priorityIds.has(entry.id));
   let priorityItems = priorityMessages.map(entry => recentItem(entry, priorityTextLimit));
-  while (priorityTextLimit > 0 && priorityItems.reduce((sum, item) => sum + JSON.stringify(item).length, 0) > budget) {
+  while (priorityTextLimit > 0 && priorityItems.reduce((sum, item) => sum + JSON.stringify(item).length, 0) > recentBudget) {
     priorityTextLimit = Math.floor(priorityTextLimit / 2);
     priorityItems = priorityMessages.map(entry => recentItem(entry, priorityTextLimit));
   }
   for (const item of [...priorityItems, ...selectedUnread.filter(entry => !priorityIds.has(entry.id))
     .slice().reverse().map(entry => recentItem(entry, 800))]) {
     const length = JSON.stringify(item).length;
-    if (size + length > budget) { historyTruncated = true; continue; }
+    if (size + length > recentBudget) { historyTruncated = true; continue; }
     recent.push(item); size += length;
   }
   const unreadOrder = new Map(unreadMessages.map((entry, index) => [entry.id, index]));
   recent.sort((left, right) => unreadOrder.get(left.id)! - unreadOrder.get(right.id)!);
   if (recent.length < unreadMessages.length) historyTruncated = true;
-  const quotedIds = [...new Set(options.quotedMessageIds ?? original.flatMap(part => part.type === 'reply' ? [part.messageId] : []))].slice(0, 4);
+
   const quoted = quotedIds.map(id => {
     const entry = history.find(candidate => candidate.id === id)
       ?? options.quotedMessages?.find(candidate => candidate.id === id);
@@ -264,7 +290,7 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const currentDisplayName = normalizeSenderDisplayName(event.data.senderDisplayName);
   if (event.userId && currentDisplayName !== undefined) displayNames.set(event.userId, currentDisplayName);
   const relevantActors = [...new Set([event.userId, ...recent.slice().reverse().map(item => item.actor),
-    ...quoted.map(item => item.actor),
+    ...quoted.map(item => item.actor), ...quoteContextMessages.map(item => item.actor),
     ...currentAddressing.mentions, ...currentAddressing.replies.map(item => item.actor),
     ...recent.flatMap(item => [...(item.addressing?.mentions ?? []), ...(item.addressing?.replies.map(reply => reply.actor) ?? [])]),
     ...history.filter(item => options.unsentReplyMessageIds?.includes(item.id)).slice(-32).map(item => item.actor),
@@ -310,7 +336,9 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
       count: options.unread.ids.length, retentionMs: unreadRetentionMs, excluded: excludedUnread, included: recent.filter(item => item.unread).length
         + (options.unread.ids.includes(event.id) && wake?.mode !== 'read-unread' ? 1 : 0),
       partial: options.unread.partial || historyTruncated } : null,
-    recent, quoted, ...(options.quotedContextLimited ? { quotedLimited: true } : {}), memory: options.memory ?? null, stickerHints: options.stickerHints ?? null,
+    recent, quoted, ...(contextSelection.targetIds.length ? { quoteContext: { purpose: 'interpret-quotes-only',
+      targetIds: contextSelection.targetIds, messages: quoteContextMessages, partial: quoteContextPartial,
+      unavailableAdjacencyIds: contextSelection.unavailableAdjacencyIds } } : {}), ...(options.quotedContextLimited ? { quotedLimited: true } : {}), memory: options.memory ?? null, stickerHints: options.stickerHints ?? null,
     tools: options.tools ? { available: options.tools.available, tools: options.tools.tools.map(tool => ({ name: tool.name })), reason: options.tools.reason } : { available: false, tools: [] }, output: options.output ? { ...options.output, sendMode: 'explicit-tool', sendTool: 'qbf_reply' } : null, historyTruncated, currentTruncated });
 
   function build(length: number): readonly MessageContent[] {
@@ -337,6 +365,9 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     const ordinaryIndex = recent.findIndex(item => !priorityIds.has(item.id));
     if (ordinaryIndex !== -1) {
       recent.splice(ordinaryIndex, 1); historyTruncated = true;
+    } else if (quoteContextMessages.some(item => !contextSelection.targetIds.includes(item.id))) {
+      quoteContextMessages.splice(quoteContextMessages.findIndex(item => !contextSelection.targetIds.includes(item.id)), 1);
+      quoteContextPartial = true; historyTruncated = true;
     } else if (length > 0) {
       length = Math.floor(length * 0.8);
     } else {
@@ -346,5 +377,8 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
     }
     parts = build(length);
   }
+  options.onContextPrepared?.({ expiredUnreadIds, includedMessageIds: [...new Set([event.id, ...recent.filter(item => item.text.length > 0).map(item => item.id),
+    ...quoted.filter(item => item.available).map(item => item.id), ...quoteContextMessages.filter(item => item.text.length > 0).map(item => item.id),
+    ...unsentRequests.filter(item => item.text.length > 0).map(item => item.id)])] });
   return normalizeContent([...parts, ...imageParts]);
 }

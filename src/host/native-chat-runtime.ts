@@ -1251,7 +1251,6 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               const quotedContextLimited = quotedIds.length > quotedMessageIds.length
               const quotedMessages = await quotedContext?.read({ conversationId: event.conversationId,
                 content: quotedMessageIds.map(messageId => ({ type: 'reply' as const, messageId })) }, visibleHistory, execution.signal)
-              inbound.preparedReadCursor(digest([event.conversationId, event.id, 'prompt']), through)
               return prepareNativeChatInput(event, visibleHistory, { owner, selfId, partial: historyPartial || quotedContextLimited, now: inputNow, unreadRetentionMs,
                 unsentReplyMessageIds: replyContext?.unsentReplyMessageIds, unsentReplyRequests: replyContext?.unsentReplyRequests,
                 unsentAddressedMessageIds: replyContext?.addressedMessageIds,
@@ -1260,7 +1259,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
                 attachImages: active.deployment.modelSettings?.inputModalities?.includes('image') !== false,
                 unread: { ids: unreadMessages.map(item => item.id), readThrough: unread.readThrough,
                   through, partial: historyPartial || quotedContextLimited },
-                quotedMessages, quotedMessageIds, quotedContextLimited, stickerHints: await stickerLibrary?.hints(event.conversationId, execution.signal),
+                quotedMessages, quotedMessageIds, quotedContextLimited, quoteHistory: retainedHistory, quoteHistoryPartial: history.partial,
+                expiredUnreadIds: history.expiredUnreadIds,
+                onContextPrepared: consumption => inbound.preparedReadCursor(requestId, through, consumption), stickerHints: await stickerLibrary?.hints(event.conversationId, execution.signal),
                 tools: await frameworkTools?.context(event.conversationId, execution.signal),
                 output: { ...await output.context(execution.signal), forwardAuthorized: !host.policy.describe().paused && host.policy.describe().grants.some(grant =>
                   grant.active && grant.featureId === 'agent-relay' && grant.conversationId === event.conversationId

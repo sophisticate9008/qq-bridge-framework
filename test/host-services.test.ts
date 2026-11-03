@@ -255,3 +255,28 @@ test('accepted-input time survives pruning and reopen without passive messages o
     assert.equal(restarted.snapshot('room:1').lastReadAt, null);
   } finally { fixture.close(); }
 });
+
+test('TTL-skipped unread evidence persists only within retained history and clears on actual inclusion without refreshing a duplicate cursor', () => {
+  const fixture = database();
+  try {
+    const store = fixture.open();
+    const history = createConversationHistory({ store, maxMessages: 3 });
+    for (const id of ['one', 'two', 'three']) history.append('room:1', { id, actor: '123', receivedAt: 1,
+      content: [{ type: 'text', text: id }] });
+    assert.deepEqual(history.snapshot('room:1').expiredUnreadIds, []);
+    history.markRead('room:1', 3, 1000, { expiredUnreadIds: ['one', 'two', 'three', 'unretained'], includedMessageIds: ['three'] });
+    const reopened = createConversationHistory({ store: fixture.open(), maxMessages: 3 });
+    assert.deepEqual(reopened.snapshot('room:1').expiredUnreadIds, ['one', 'two']);
+    reopened.markRead('room:1', 3, 2000, { expiredUnreadIds: [], includedMessageIds: ['two'] });
+    assert.deepEqual(reopened.snapshot('room:1').expiredUnreadIds, ['one']);
+    assert.equal(reopened.snapshot('room:1').lastReadAt, 1000);
+    reopened.append('room:1', { id: 'four', actor: '123', receivedAt: 2, content: [{ type: 'text', text: 'new' }] });
+    assert.deepEqual(reopened.snapshot('room:1').expiredUnreadIds, []);
+    assert.deepEqual(reopened.snapshot('room:other').expiredUnreadIds, []);
+    assert.throws(() => reopened.markRead('room:1', 4, 3000, { expiredUnreadIds: [''], includedMessageIds: [] }),
+      { code: 'INVALID_HISTORY_CONSUMPTION' });
+    const saved = store.read('history', digest('room:1'))!;
+    store.write('history', saved.key, { ...object(saved.value), expiredUnreadIds: 'invalid' }, { expectedRevision: saved.revision });
+    assert.throws(() => reopened.snapshot('room:1'), { code: 'INVALID_STORED_DATA' });
+  } finally { fixture.close(); }
+});

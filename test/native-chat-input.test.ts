@@ -388,7 +388,7 @@ test('contact time filtering preserves an explicitly deferred request outside th
   assert.doesNotMatch(result.text, /message-old-background/);
 });
 
-test('an explicit current message remains while only its quoted target revives old context', () => {
+test('an explicit current message retains an already-read old quote without expanding its neighbors', () => {
   const old = contactHistory('old-question', contactNow - 3_600_000);
   const other = contactHistory('old-unrelated', contactNow - 3_600_000);
   for (const quoted of [false, true]) {
@@ -397,7 +397,8 @@ test('an explicit current message remains while only its quoted target revives o
       { type: 'text', text: '继续指定的问题，不用处理其他旧内容' }];
     const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '123',
       data: { content: json(content) } };
-    const parts = prepareNativeChatInput(event, [old, other], { owner: null, selfId: '999', partial: false, participation: 'direct', now: contactNow });
+    const parts = prepareNativeChatInput(event, [old, other], { owner: null, selfId: '999', partial: false, participation: 'direct', now: contactNow,
+      unread: { ids: [], readThrough: 2, through: 3, partial: false } });
     const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
     assert.match(text, /继续指定的问题/);
     if (quoted) assert.match(text, /message-old-question/);
@@ -419,4 +420,31 @@ test('the unread retention option applies to ordinary background and preserves a
   assert.match(text, /message-boundary/);
   assert.match(text, /message-queued-correction/);
   assert.match(text, /当前有正文的明确问题/);
+});
+
+test('quote neighborhoods need actual TTL evidence and only projected nonempty content clears skip evidence', () => {
+  const now = contactNow;
+  const entries = Array.from({ length: 30 }, (_, index) => contactHistory(`old-${index}`, now - 3600000));
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '123',
+    data: { content: [{ type: 'reply', messageId: 'old-15' }, { type: 'text', text: '解释引用' }] } };
+  const render = (settings: Partial<Parameters<typeof prepareNativeChatInput>[2]> = {}) => {
+    let selected: { readonly expiredUnreadIds: readonly string[]; readonly includedMessageIds: readonly string[] } | undefined;
+    const parts = prepareNativeChatInput(event, entries, { owner: null, partial: false, now,
+      unread: { ids: [], readThrough: 30, through: 31, partial: false }, ...settings, onContextPrepared: value => { selected = value; } });
+    const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+    return { parts, text, selected: selected!, facts: JSON.parse(text.slice('会话事实：\n'.length,
+      text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n'))) as { quoteContext?: { messages: { id: string; text: string }[]; partial: boolean } } };
+  };
+  assert.equal(render().facts.quoteContext, undefined, 'Age alone cannot expand an already consumed quote');
+  const withEvidence = render({ expiredUnreadIds: ['old-15'] });
+  assert.equal(withEvidence.facts.quoteContext?.messages.length, 16);
+  assert(withEvidence.selected.includedMessageIds.includes('old-7'));
+  const constrained = render({ expiredUnreadIds: ['old-15'], maxHistoryCharacters: 100 });
+  assert(constrained.facts.quoteContext?.partial);
+  for (const item of constrained.facts.quoteContext?.messages ?? []) if (!item.text && item.id !== 'old-15')
+    assert(!constrained.selected.includedMessageIds.includes(item.id));
+  assert(Buffer.byteLength(JSON.stringify(constrained.parts)) <= 60 * 1024); assert(constrained.parts.length <= 8);
+  const unknown = { ...entries[15]!, receivedAt: 0 };
+  const unknownParts = prepareNativeChatInput(event, [unknown], { owner: null, partial: false, now });
+  assert(!JSON.stringify(unknownParts).includes('quoteContext'));
 });
