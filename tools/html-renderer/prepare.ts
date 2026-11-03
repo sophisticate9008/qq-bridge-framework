@@ -14,3 +14,5 @@ if (!original.includes(before) || !original.includes('    db.load_system_fonts()
 const patched = original.replace(before, `${before}\n        image_href_resolver: usvg::ImageHrefResolver {\n            resolve_data: Box::new(|_, _, _| None),\n            resolve_string: Box::new(|_, _| None),\n        },`)
   .replace('    db.load_system_fonts();', '    // Framework worker uses explicit fonts, never system discovery.');
 await writeFile(utilityPath, patched);
+
+await copyFile(new URL('./Cargo.lock', import.meta.url), resolve(upstream, 'Cargo.lock'));

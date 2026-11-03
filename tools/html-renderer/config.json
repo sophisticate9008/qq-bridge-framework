@@ -1,0 +1,7 @@
+{
+  "upstream": "16ebc29363826d43917d2e3cb91d37f7d2156fdd",
+  "rust": "1.92.0",
+  "profile": "production",
+  "windowsRustFlags": "-C target-feature=+crt-static",
+  "protocol": 1
+}

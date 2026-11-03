@@ -6,7 +6,7 @@ use blitz_html::HtmlDocument;
 use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use linebender_resource_handle::Blob;
-use parley::{FontContext, fontique::{Collection, CollectionOptions, SourceCache}};
+use parley::{FontContext, fontique::{Collection, CollectionOptions, SourceCache, GenericFamily, Script}};
 use peniko::{Fill, kurbo::Rect};
 use std::{error::Error, fs, io, sync::Arc, time::Instant};
 
@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 4 {
-        return Err("usage: qbf-html-probe INPUT.html OUTPUT.png WIDTH FONT...".into());
+        return Err("usage: qbf-html-renderer INPUT.html OUTPUT.png WIDTH FONT...".into());
     }
     let html = fs::read_to_string(&args[0])?;
     if html.len() > 4 * 1024 * 1024 {
@@ -31,6 +31,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     fonts.collection.register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT.to_vec())), None);
     for path in &args[3..] {
         fonts.collection.register_fonts(Blob::new(Arc::new(fs::read(path)?)), None);
+    }
+    // Explicit collections have no platform generic/fallback maps. Populate both
+    // so model-authored CSS naming unavailable system fonts still has glyphs.
+    let text_families: Vec<_> = ["WenQuanYi Micro Hei", "Noto Sans", "Noto Sans Math", "Noto Sans Symbols 2"]
+        .iter().filter_map(|name| fonts.collection.family_id(name)).collect();
+    if text_families.is_empty() { return Err("no framework text fonts loaded".into()); }
+    for generic in GenericFamily::all() {
+        let mut families = text_families.clone();
+        if matches!(generic, GenericFamily::Monospace | GenericFamily::UiMonospace) {
+            if let Some(id) = fonts.collection.family_id("WenQuanYi Micro Hei Mono") { families.insert(0, id); }
+        }
+        fonts.collection.set_generic_families(*generic, families.into_iter());
+    }
+    for script in [*b"Latn", *b"Hani", *b"Zyyy", *b"Grek", *b"Cyrl", *b"Hira", *b"Kana", *b"Hang"] {
+        fonts.collection.set_fallbacks(Script::from_bytes(script), text_families.iter().copied());
     }
     let mut document = HtmlDocument::from_html(&html, DocumentConfig {
         viewport: Some(Viewport::new(width, 1, 1.0, ColorScheme::Light)),

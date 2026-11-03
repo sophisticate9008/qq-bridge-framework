@@ -1,3 +1,4 @@
+import { htmlRendererBuildHash } from '../../scripts/html-renderer-component.ts';
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -35,6 +36,7 @@ await copyFile(join(upstream, 'Cargo.lock'), join(output, 'Cargo.lock'));
 await writeFile(join(output, 'licenses/dependencies.json'), JSON.stringify(notices, null, 2) + '\n');
 await writeFile(join(output, 'component.json'), JSON.stringify({ schema: 1, protocol: 1, engine: 'blitz', target, binary,
   upstream: process.env.BLITZ_REV, sourceCommit: process.env.GITHUB_SHA,
+  buildHash: await htmlRendererBuildHash(process.cwd()), rust: "1.92.0",
   sha256: createHash('sha256').update(await readFile(join(output, binary))).digest('hex'), maxHtmlBytes: 4 * 1024 * 1024,
   resourcePolicy: 'no-network-no-files-no-scripts',
 }, null, 2) + '\n');

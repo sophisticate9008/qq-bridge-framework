@@ -1,7 +1,16 @@
 name: HTML 原生渲染组件
 on:
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 忽略已有组件并从固定依赖重建
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      force_rebuild:
+        type: boolean
+        default: false
   push:
     branches: ['experiment/blitz-renderer-build']
     paths: ['.github/workflows/html-renderer.yml', 'tools/html-renderer/**']
@@ -30,26 +39,60 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - name: 计算独立组件指纹
+        id: component
+        run: node tools/html-renderer/fingerprint.ts
+      - name: 复用已验证的组件缓存
+        id: cache
+        if: ${{ !inputs.force_rebuild }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+        with:
+          path: runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
+          key: html-renderer-v1-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.component.outputs.hash }}
+      - name: 缓存失效时从正式发行附件恢复
+        if: ${{ !inputs.force_rebuild && steps.cache.outputs.cache-hit != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/html-renderer/restore.ts
+      - name: 核对是否需要编译
+        id: required
+        run: |
+          if [ -f "runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}/component.json" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: steps.required.outputs.build == 'true'
         with:
           repository: DioxusLabs/blitz
           ref: ${{ env.BLITZ_REV }}
           path: .cache/blitz-source
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: '24.12.0'
-      - name: Rust 工具链
-        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: 固定 Rust 工具链
+        if: steps.required.outputs.build == 'true'
+        run: rustup toolchain install 1.92.0 --profile minimal && rustup default 1.92.0
       - name: Linux 编译工具
-        if: runner.os == 'Linux'
+        if: steps.required.outputs.build == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config python3 libclang-dev
-      - run: node tools/html-renderer/prepare.ts
-      - run: cargo build --manifest-path .cache/blitz-source/Cargo.toml --profile production --example qbf-html-probe
-      - name: 原生运行中文彩色图与长图
-        run: node tools/blitz-probe/measure.ts
+      - if: steps.required.outputs.build == 'true'
+        run: node tools/html-renderer/prepare.ts
+      - if: steps.required.outputs.build == 'true'
+        run: cargo build --locked --manifest-path .cache/blitz-source/Cargo.toml --profile production --example qbf-html-probe
       - name: 包装平台组件与依赖许可
+        if: steps.required.outputs.build == 'true'
         run: node tools/html-renderer/package.ts
+      - name: 原生验证字体回退、长图与外部文件隔离
+        run: node tools/html-renderer/smoke.ts
+      - name: 保存已验证的组件缓存
+        if: ${{ !inputs.force_rebuild && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
+        with:
+          path: runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
+          key: html-renderer-v1-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.component.outputs.hash }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: html-renderer-${{ matrix.platform }}-${{ matrix.arch }}
