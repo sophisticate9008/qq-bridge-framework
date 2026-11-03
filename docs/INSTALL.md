@@ -14,7 +14,7 @@
 
 当前在 Linux 上部署；本机 DSH 发现依赖同用户进程及 `/proc`，服务管理器的 screen 运维也面向 Linux。普通安装、构建和运行无需 Playwright。
 
-v1.9.1 使用原生 CI 验收同源完整包：
+v1.9.2 使用原生 CI 验收同源完整包：
 
 | 环境 | 验收范围 |
 | --- | --- |
@@ -23,7 +23,7 @@ v1.9.1 使用原生 CI 验收同源完整包：
 | Windows Server 2022 x64 | ZIP 与启动器、以上完整安装项，以及 ACL 防护和模拟聊天链路 |
 | Windows 10／11、Windows ARM64、macOS | 尚未实机验收 |
 
-Windows 直接从 Release 下载 `qq-bridge-framework-1.9.1-windows-x64.zip`，按 [Windows 安装说明](WINDOWS.md)校验、解压并运行启动器；不需要本地构建。Node.js、QQ 协议端和 DSH 独立准备。CI 不包含真实 QQ 登录或真实 DSH／模型联调，其他发行版、libc 和系统版本以实际依赖支持为准，详见 [验收记录](VALIDATION.md)。
+Windows 直接从 Release 下载 `qq-bridge-framework-1.9.2-windows-x64.zip`，按 [Windows 安装说明](WINDOWS.md)校验、解压并运行启动器；不需要本地构建。Node.js、QQ 协议端和 DSH 独立准备。CI 不包含真实 QQ 登录或真实 DSH／模型联调，其他发行版、libc 和系统版本以实际依赖支持为准，详见 [验收记录](VALIDATION.md)。
 
 检查本机版本：
 
@@ -37,12 +37,12 @@ git --version
 
 ## 2. 下载完整框架包并安装依赖
 
-从 [v1.9.1 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.9.1) 下载 `qq-bridge-framework-1.9.1.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
+从 [v1.9.2 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.9.2) 下载 `qq-bridge-framework-1.9.2.tar.gz` 与 `SHA256SUMS`。在保存下载文件的目录运行：
 
 ```sh
 sha256sum --ignore-missing --check SHA256SUMS
-tar -xzf qq-bridge-framework-1.9.1.tar.gz
-cd qq-bridge-framework-1.9.1
+tar -xzf qq-bridge-framework-1.9.2.tar.gz
+cd qq-bridge-framework-1.9.2
 npm ci --omit=dev
 ```
 
@@ -95,7 +95,7 @@ npm start
 
 ## 5. 准备 DSH 桥接插件
 
-按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.9.1.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
+按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.9.2.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
 
 确认独立 DSH web 已启动，并在控制台“连接设置”选择自动连接本机 DSH。本机自动鉴权要求 DSH 与框架由同一系统用户运行，凭据文件归该用户所有且权限为 `0600` 或 `0400`。默认无需手填地址、令牌和凭据路径。远程实例使用高级手动接入。
 
