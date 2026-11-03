@@ -5,6 +5,7 @@ import { access, chmod, lstat, mkdir, open, readFile, readdir, rename, stat, unl
 import { createConnection } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { selectServiceProcesses, type ServiceProcessIdentity as ProcessIdentity } from './service-processes.ts';
 
 type Protocol = 'napcat' | 'snowluma';
 type Group = 'core' | Protocol | 'optional';
@@ -38,7 +39,6 @@ interface Configuration {
 }
 interface CommandResult { code: number; output: string }
 interface ServiceHealth { state: 'ready' | 'unavailable' | 'unknown' | 'unverified'; check: 'command' | 'http' | 'none'; reason: string | null }
-interface ProcessIdentity { pid: number; parent: number; started: string }
 
 const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
 const root = path.basename(sourceRoot) === 'dist' ? path.dirname(sourceRoot) : sourceRoot;
@@ -291,18 +291,14 @@ async function identity(pid: number): Promise<ProcessIdentity | undefined> {
     const content = await readFile(`/proc/${pid}/stat`, 'utf8');
     const fields = content.slice(content.lastIndexOf(')') + 2).split(' ');
     if (fields[0] === 'Z') return undefined;
-    return { pid, parent: Number(fields[1]), started: fields[19]! };
+    return { pid, parent: Number(fields[1]), session: Number(fields[3]), started: fields[19]! };
   } catch { return undefined; }
 }
 async function descendants(parents: number[]): Promise<ProcessIdentity[]> {
   const all = (await Promise.all((await readdir('/proc')).filter(name => /^\d+$/.test(name)).map(name => identity(Number(name))))).filter((item): item is ProcessIdentity => item !== undefined);
-  const included = new Set(parents);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const item of all) if (included.has(item.parent) && !included.has(item.pid)) { included.add(item.pid); changed = true; }
-  }
-  return all.filter(item => included.has(item.pid) && !parents.includes(item.pid));
+  const controller = await identity(process.pid);
+  if (!controller || !Number.isSafeInteger(controller.session) || controller.session <= 0) fail('无法核对运维进程身份，已取消停止。');
+  return selectServiceProcesses(all, parents, controller.session);
 }
 async function alive(item: ProcessIdentity): Promise<boolean> { return (await identity(item.pid))?.started === item.started; }
 async function signal(item: ProcessIdentity, value: NodeJS.Signals): Promise<void> {

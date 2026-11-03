@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { selectServiceProcesses } from '../scripts/service-processes.ts';
 
 const extension = import.meta.url.endsWith('.js') ? 'js' : 'ts';
 
@@ -13,6 +14,7 @@ function fixture() {
   mkdirSync(join(directory, 'runtime/live'), { recursive: true });
   const entry = join(directory, `scripts/service-manager.${extension}`);
   copyFileSync(new URL(`../scripts/service-manager.${extension}`, import.meta.url), entry);
+  copyFileSync(new URL(`../scripts/service-processes.${extension}`, import.meta.url), join(directory, `scripts/service-processes.${extension}`));
   const service = (id: string, extra: Record<string, unknown> = {}) => ({
     command: process.execPath, args: [], cwd: directory, screen: `qbf-scope-${id}`,
     group: 'core', ...extra,
@@ -34,6 +36,15 @@ function fixture() {
   save();
   return { directory, configuration, save, run };
 }
+
+test('self restart preserves its detached controller and helpers while stopping the service tree', () => {
+  const process = (pid: number, parent: number, session: number) => ({ pid, parent, session, started: String(pid) });
+  const processes = [process(10, 1, 10), process(11, 10, 10), process(12, 11, 12), process(13, 12, 12),
+    process(20, 13, 20), process(21, 20, 20), process(22, 21, 20), process(23, 22, 23),
+    process(30, 13, 30), process(40, 1, 40)];
+  assert.deepEqual(selectServiceProcesses(processes, [10], 20).map(item => item.pid), [11, 12, 13, 30]);
+  assert.deepEqual(selectServiceProcesses(processes, [10], 40).map(item => item.pid), [11, 12, 13, 20, 21, 22, 23, 30]);
+});
 
 test('service lists require explicit management for additional local processes', () => {
   const values = fixture();
