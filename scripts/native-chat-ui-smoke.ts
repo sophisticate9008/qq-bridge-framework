@@ -39,6 +39,9 @@ try {
   const start = page.getByRole('dialog', { name: '启动与检查聊天', exact: true });
   await start.locator('#chat-runtime-start').click();
   await capabilityUntil(async () => (await fixture.status()).chatReady === true, 'Browser start must reach the actual native runtime');
+  const health = await fixture.api('/api/chat/health');
+  assert.equal(health.healthy, true, 'Read-only probes must verify the actual configured protocol and DSH paths');
+  assert.equal(health.modelExecutionVerified, false);
   await start.getByRole('button', { name: '关闭', exact: true }).click();
   fixture.inbound(1);
   await capabilityUntil(() => fixture.calls.filter(call => call.method === 'session/prompt').length === 1, 'Real local prompt is required');
