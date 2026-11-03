@@ -24,6 +24,11 @@ test('persona content version excludes plan, instructions, provider, model, reas
     assert.equal(createNativePersonaIdentity(changed).version, original.version)
     assert.equal(hash(buildChatSessionDefinition(plan, changed)), hash(first))
   }
+  for (const unreadRetentionMs of [60_000, 900_000, 86_400_000]) {
+    const changed = { ...persona, wake: { nicknames: [], wakeOnReply: true, continuationMs: 90000, unreadRetentionMs } }
+    assert.equal(createNativePersonaIdentity(changed).version, original.version)
+    assert.equal(hash(buildChatSessionDefinition(plan, changed)), hash(first))
+  }
   for (const changes of [{ id: 'other-plan' }, { instructions: 'Different runtime instructions.' },
     { provider: 'provider-2' }, { model: 'model-2' }, { reasoningEffort: 'high' as const },
     { contextLimits: { group: 10_000, private: 20_000 } }]) {

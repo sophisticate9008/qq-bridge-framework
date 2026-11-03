@@ -23,6 +23,8 @@ import { DshDeploymentManager } from '../components/dsh-deployment-manager.tsx';
 
 import { validateChatPersona, type ChatPersona as Persona } from '../../src/contracts/chat-plans.ts';
 import { DEFAULT_PERSONA_WAKE, validatePersonaWake } from '../../src/contracts/persona-wake.ts';
+import { DEFAULT_UNREAD_RETENTION_MS } from '../../src/contracts/chat-input-configuration.ts';
+import { parseUnreadRetentionMinutes } from '../lib/chat-input-ui.ts';
 
 interface PersonaCatalog {
   readonly revision: string;
@@ -238,7 +240,7 @@ export function PersonaPage(props: PageProps) {
     if (!connected || connection.current.api !== api || !connection.current.connected || !catalog || !dirty || editingDisabled || currentView.current.blocked || pendingDelete.current || saveController.current) return;
     const normalized = { ...draft, id: draft.id.trim(), name: draft.name.trim() };
     try { if (normalized.wake) normalized.wake = validatePersonaWake({ ...normalized.wake, nicknames: normalized.wake.nicknames.filter(name => name.length > 0) }); }
-    catch { setFieldError('昵称最多 16 个，每个不超过 128 字且不能重复；续聊时长为 0–300 秒，群聊唤醒概率为 0–100%，支持 0.5 等小数。'); return; }
+    catch { setFieldError('昵称最多 16 个，每个不超过 128 字且不能重复；续聊时长为 0–300 秒，群聊唤醒概率为 0–100%，未读保留时长为 1–1440 分钟。'); return; }
     if (!normalized.id || !normalized.name || !normalized.identity.trim() || !normalized.style.trim()) {
       setFieldError('内部标识、名称、身份和表达风格必须填写。');
       return;
@@ -392,6 +394,7 @@ export function PersonaPage(props: PageProps) {
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                   <label className="flex items-center gap-2 text-xs"><input type="checkbox" disabled={editingDisabled} checked={(draft.wake ?? DEFAULT_PERSONA_WAKE).wakeOnReply} onChange={event => update('wake', { ...(draft.wake ?? DEFAULT_PERSONA_WAKE), wakeOnReply: event.target.checked })} />引用机器人时唤醒</label>
                   <Field id="persona-group-wake-probability" label="群聊唤醒概率（%）" tip="未唤醒且空闲时，每条群消息按此概率唤醒，支持 0.5% 等小数。默认 1%，0% 关闭；已唤醒期间不重复触发。"><Input id="persona-group-wake-probability" type="number" min={0} max={100} step="any" disabled={editingDisabled} value={(draft.wake ?? DEFAULT_PERSONA_WAKE).groupWakeProbabilityPercent ?? 1} onChange={event => update('wake', { ...(draft.wake ?? DEFAULT_PERSONA_WAKE), groupWakeProbabilityPercent: Number(event.target.value) })} /></Field>
+                  <Field id="persona-unread-retention" label="未读保留时长（分钟）" tip="默认 15 分钟，范围 1–1440 分钟。超时或时间不明确的普通未读不再自动补入，历史仍保留；明确排队、延期请求以及引用接续旧话题继续可用。保存后后续输入即时生效。"><Input id="persona-unread-retention" type="number" min={1} max={1440} step="any" disabled={editingDisabled} value={((draft.wake ?? DEFAULT_PERSONA_WAKE).unreadRetentionMs ?? DEFAULT_UNREAD_RETENTION_MS) / 60_000} onChange={event => update('wake', { ...(draft.wake ?? DEFAULT_PERSONA_WAKE), unreadRetentionMs: parseUnreadRetentionMinutes(event.target.value) ?? 0 })} /></Field>
                   <p className="small muted">基础续聊时长和每轮发言追加时长在概览的“续聊策略”中设置。</p>
                 </div>
                 <div className="row border-t pt-2"><Button disabled={!dirty || editingDisabled} onClick={() => void save()}>{saving ? '正在保存' : '保存人设设置'}</Button></div>

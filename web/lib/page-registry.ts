@@ -42,7 +42,7 @@ const definitions = [
     navigation: { label: '用量统计', order: 7 }, searchAliases: 'token tokens 费用 花费 用量',
     shortcut: { order: 6, description: '原生宿主接入后查看用量' } },
   { id: 'persona', configurationCategory: true, label: '人设与唤醒', description: '管理伙伴的人设、表达和唤醒方式', icon: 'UserRound',
-    navigation: { label: '人设编辑', order: 2 }, subpageLabel: '人设', searchAliases: '人设库', shortcut: { order: 2, description: '管理身份、表达与唤醒方式' } },
+    navigation: { label: '人设编辑', order: 2 }, subpageLabel: '人设', searchAliases: '人设库 未读保留时长 未读丢弃 消息过期', shortcut: { order: 2, description: '管理身份、表达与唤醒方式' } },
   { id: 'features', configurationCategory: true, label: '功能与扩展', description: '查看 MCP 与本地注册工具、扩展包和框架服务', icon: 'Sparkles',
     navigation: { label: '功能与扩展', order: 8 }, searchAliases: 'MCP 工具 插件 本地工具 扩展包 框架服务', shortcut: { order: 3, description: '查看工具清单与本地扩展包' } },
   { id: 'security', configurationCategory: true, label: '访问与设置', description: '管理访问控制、聊天处理和管理服务', icon: 'ShieldCheck',

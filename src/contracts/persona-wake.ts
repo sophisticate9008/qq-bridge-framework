@@ -1,4 +1,4 @@
-import { DEFAULT_CHAT_INPUT_CONFIGURATION, validateChatInputConfiguration } from './chat-input-configuration.ts'
+import { DEFAULT_CHAT_INPUT_CONFIGURATION, DEFAULT_UNREAD_RETENTION_MS, validateChatInputConfiguration } from './chat-input-configuration.ts'
 
 export interface PersonaWake {
   readonly nicknames: readonly string[]
@@ -6,15 +6,17 @@ export interface PersonaWake {
   readonly continuationMs: number
   readonly replyExtensionMs?: number
   readonly groupWakeProbabilityPercent?: number
+  readonly unreadRetentionMs?: number
 }
 
 export const DEFAULT_PERSONA_WAKE: PersonaWake = Object.freeze({
-  nicknames: Object.freeze([]), wakeOnReply: true, continuationMs: 90_000, replyExtensionMs: 500, groupWakeProbabilityPercent: 1
+  nicknames: Object.freeze([]), wakeOnReply: true, continuationMs: 90_000, replyExtensionMs: 500, groupWakeProbabilityPercent: 1,
+  unreadRetentionMs: DEFAULT_UNREAD_RETENTION_MS
 })
 
 export function validatePersonaWake(value: unknown): PersonaWake {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some(key => !['nicknames', 'wakeOnReply', 'continuationMs', 'replyExtensionMs', 'groupWakeProbabilityPercent'].includes(key))
+    || Object.keys(value).some(key => !['nicknames', 'wakeOnReply', 'continuationMs', 'replyExtensionMs', 'groupWakeProbabilityPercent', 'unreadRetentionMs'].includes(key))
     || !['nicknames', 'wakeOnReply', 'continuationMs'].every(key => Object.hasOwn(value, key))) {
     throw new TypeError('Invalid persona wake configuration')
   }
@@ -22,6 +24,7 @@ export function validatePersonaWake(value: unknown): PersonaWake {
   return Object.freeze({ nicknames: configuration.nicknames, wakeOnReply: configuration.wakeOnReply,
     continuationMs: configuration.continuationMs,
     ...(Object.hasOwn(value, 'replyExtensionMs') ? { replyExtensionMs: configuration.replyExtensionMs ?? 500 } : {}),
+    ...(Object.hasOwn(value, 'unreadRetentionMs') ? { unreadRetentionMs: configuration.unreadRetentionMs ?? DEFAULT_UNREAD_RETENTION_MS } : {}),
     ...(Object.hasOwn(value, 'groupWakeProbabilityPercent') ? { groupWakeProbabilityPercent: configuration.groupWakeProbabilityPercent ?? 1 } : {}) })
 }
 

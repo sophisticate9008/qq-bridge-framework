@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_CHAT_INPUT_CONFIGURATION } from '../src/contracts/chat-input-configuration.ts';
-import { chatInputConfiguration, chatInputForm, parseChatInputSnapshot, parseGroupWakeProbabilityPercent } from '../web/lib/chat-input-ui.ts';
+import { chatInputConfiguration, chatInputForm, parseChatInputSnapshot, parseGroupWakeProbabilityPercent, parseUnreadRetentionMinutes } from '../web/lib/chat-input-ui.ts';
 
 test('trigger form preserves domain defaults and converts seconds without broadening conversation scopes', () => {
   const form = chatInputForm(DEFAULT_CHAT_INPUT_CONFIGURATION);
@@ -14,6 +14,22 @@ test('trigger form preserves domain defaults and converts seconds without broade
   for (const patch of [{ continuationSeconds: '301' }, { continuationSeconds: '1e2' }, { nicknames: 'Name\nname' }, { include: '123' },
     { groupWakeProbabilityPercent: '101' }, { groupWakeProbabilityPercent: '-0.5' }, { groupWakeProbabilityPercent: '' }]) {
     assert.equal(chatInputConfiguration({ ...form, ...patch }), null);
+  }
+});
+
+test('unread minutes default for older forms and preserve custom millisecond values on unrelated saves', () => {
+  const form = chatInputForm(DEFAULT_CHAT_INPUT_CONFIGURATION);
+  assert.equal(form.unreadRetentionMinutes, '15');
+  const { unreadRetentionMinutes: _removed, ...legacy } = form;
+  assert.equal(chatInputConfiguration(legacy)?.unreadRetentionMs, 900_000);
+  for (const milliseconds of [60_000, 60_001, 90_000, 900_000, 86_399_999, 86_400_000]) {
+    const custom = chatInputForm({ ...DEFAULT_CHAT_INPUT_CONFIGURATION, unreadRetentionMs: milliseconds });
+    assert.equal(chatInputConfiguration({ ...custom, nicknames: 'New name' })?.unreadRetentionMs, milliseconds);
+  }
+  assert.equal(parseUnreadRetentionMinutes('1.5'), 90_000);
+  for (const value of ['', ' ', '0', '0.999999', '1440.001', '-1', '1e2', 'NaN', 'Infinity', '0x10', '15分钟']) {
+    assert.equal(parseUnreadRetentionMinutes(value), null);
+    assert.equal(chatInputConfiguration({ ...form, unreadRetentionMinutes: value }), null);
   }
 });
 

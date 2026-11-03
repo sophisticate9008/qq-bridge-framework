@@ -28,6 +28,39 @@ test('group wake probability defaults to one percent for legacy personas and rej
   assert.throws(() => validatePersonaWake({ ...legacy, unknown: 1 }), TypeError)
 })
 
+test('unread retention defaults legacy configuration without mutating it and enforces its independent bounds', async context => {
+  const { unreadRetentionMs: _removed, ...legacyInput } = DEFAULT_CHAT_INPUT_CONFIGURATION
+  const legacyWake = { nicknames: ['Fixture'], wakeOnReply: true, continuationMs: 90_000 }
+  const original = JSON.stringify(legacyWake)
+  assert.equal(validateChatInputConfiguration(legacyInput).unreadRetentionMs, 900_000)
+  assert.equal(resolveChatInputConfiguration(legacyInput, 'group:123').unreadRetentionMs, 900_000)
+  assert.deepEqual(validatePersonaWake(legacyWake), legacyWake)
+  assert.equal((await readChatInputConfiguration('/unused-fixture-path', 'group:123', 'Fixture', legacyWake)).effective.unreadRetentionMs, 900_000)
+  assert.equal(JSON.stringify(legacyWake), original)
+  for (const value of [60_000, 60_001, 900_000, 86_400_000]) {
+    assert.equal(validatePersonaWake({ ...legacyWake, unreadRetentionMs: value }).unreadRetentionMs, value)
+  }
+  for (const value of [0, -1, 59_999, 86_400_001, 900_000.5, Number.MAX_SAFE_INTEGER, NaN, Infinity, '900000', null, undefined]) {
+    assert.throws(() => validateChatInputConfiguration({ ...legacyInput, unreadRetentionMs: value }), TypeError)
+    assert.throws(() => validatePersonaWake({ ...legacyWake, unreadRetentionMs: value }), TypeError)
+  }
+  const { directory } = await fixture(context)
+  const filename = join(directory, 'chat-personas.json')
+  const persona = { id: 'fixture', name: 'Fixture', identity: 'Fixture identity', style: 'Brief', wake: legacyWake }
+  const bytes = `${JSON.stringify({ schema: 1, personas: [persona] })}\n`
+  await writeFile(filename, bytes, { mode: 0o600 })
+  const repository = new NativeConfigurationRepository(directory)
+  const before = await repository.readPersonas()
+  assert.equal(await readFile(filename, 'utf8'), bytes)
+  assert.deepEqual(before.value.personas[0]?.wake, legacyWake)
+  const saved = await repository.replacePersonas(before.revision, [{ ...persona, wake: { ...legacyWake, unreadRetentionMs: 120_000 } }])
+  assert.equal(saved.value.personas[0]?.wake?.unreadRetentionMs, 120_000)
+  const readback = await repository.readPersonas()
+  const effective = await readChatInputConfiguration(directory, 'group:123', 'Fixture', readback.value.personas[0]?.wake)
+  assert.equal(effective.effective.unreadRetentionMs, 120_000)
+  assert.equal(effective.effective.continuationMs, 90_000)
+})
+
 async function fixture(context: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'package-configuration-'))
   context.after(() => rm(directory, { recursive: true, force: true }))

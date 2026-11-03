@@ -2,6 +2,9 @@ import { isNativeAccessScope } from './native-access.ts'
 
 export const CHAT_INPUT_PACKAGE_ID = 'chat-input'
 export const CHAT_INPUT_CONFIGURATION_SCHEMA = 1 as const
+export const DEFAULT_UNREAD_RETENTION_MS = 900_000
+export const MIN_UNREAD_RETENTION_MS = 60_000
+export const MAX_UNREAD_RETENTION_MS = 86_400_000
 
 export type ChatInputConfiguration = {
   readonly schema: 1
@@ -12,6 +15,7 @@ export type ChatInputConfiguration = {
   readonly continuationMs: number
   readonly replyExtensionMs?: number
   readonly groupWakeProbabilityPercent?: number
+  readonly unreadRetentionMs?: number
   readonly scopes: {
     readonly group: boolean
     readonly private: boolean
@@ -22,6 +26,7 @@ export type ChatInputConfiguration = {
 
 export const DEFAULT_CHAT_INPUT_CONFIGURATION: ChatInputConfiguration = Object.freeze({ schema: 1,
   enabled: true, nicknames: Object.freeze([]), wakeOnMention: true, wakeOnReply: true, continuationMs: 90_000, replyExtensionMs: 500, groupWakeProbabilityPercent: 1,
+  unreadRetentionMs: DEFAULT_UNREAD_RETENTION_MS,
   scopes: Object.freeze({ group: true, private: true, include: Object.freeze([]), exclude: Object.freeze([]) }) })
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -36,11 +41,14 @@ export function validateChatInputConfiguration(input: unknown): ChatInputConfigu
   const invalid = (): never => { throw new TypeError('Invalid chat input configuration') }
   if (!record(input) || !keys(input, ['schema', 'enabled', 'nicknames', 'wakeOnMention', 'wakeOnReply', 'continuationMs', 'scopes',
     ...(Object.hasOwn(input, 'replyExtensionMs') ? ['replyExtensionMs'] : []),
+    ...(Object.hasOwn(input, 'unreadRetentionMs') ? ['unreadRetentionMs'] : []),
     ...(Object.hasOwn(input, 'groupWakeProbabilityPercent') ? ['groupWakeProbabilityPercent'] : [])])
     || input.schema !== 1 || typeof input.enabled !== 'boolean' || typeof input.wakeOnMention !== 'boolean'
     || typeof input.wakeOnReply !== 'boolean' || typeof input.continuationMs !== 'number'
     || !Number.isSafeInteger(input.continuationMs) || input.continuationMs < 0 || input.continuationMs > 300_000
     || input.replyExtensionMs !== undefined && (!Number.isSafeInteger(input.replyExtensionMs) || Number(input.replyExtensionMs) < 0 || Number(input.replyExtensionMs) > 60000)
+    || Object.hasOwn(input, 'unreadRetentionMs') && (typeof input.unreadRetentionMs !== 'number'
+      || !Number.isSafeInteger(input.unreadRetentionMs) || input.unreadRetentionMs < MIN_UNREAD_RETENTION_MS || input.unreadRetentionMs > MAX_UNREAD_RETENTION_MS)
     || input.groupWakeProbabilityPercent !== undefined && (!Number.isFinite(input.groupWakeProbabilityPercent)
       || Number(input.groupWakeProbabilityPercent) < 0 || Number(input.groupWakeProbabilityPercent) > 100)
     || !Array.isArray(input.nicknames) || input.nicknames.length > 16
@@ -56,6 +64,7 @@ export function validateChatInputConfiguration(input: unknown): ChatInputConfigu
   return Object.freeze({ schema: 1, enabled: input.enabled, nicknames: Object.freeze([...input.nicknames] as string[]),
     wakeOnMention: input.wakeOnMention, wakeOnReply: input.wakeOnReply, continuationMs: input.continuationMs, replyExtensionMs: Number(input.replyExtensionMs ?? 500),
     groupWakeProbabilityPercent: Number(input.groupWakeProbabilityPercent ?? 1),
+    unreadRetentionMs: Number(input.unreadRetentionMs ?? DEFAULT_UNREAD_RETENTION_MS),
     scopes: Object.freeze({ group: scopes.group, private: scopes.private,
       include: Object.freeze([...scopes.include]), exclude: Object.freeze([...scopes.exclude]) }) })
 }
@@ -69,6 +78,7 @@ export interface EffectiveChatInputConfiguration {
   readonly continuationMs: number
   readonly replyExtensionMs?: number
   readonly groupWakeProbabilityPercent?: number
+  readonly unreadRetentionMs: number
 }
 
 /** Legacy switches and secondary scope lists are ignored; access is enforced by the whitelist. */
@@ -81,5 +91,6 @@ export function resolveChatInputConfiguration(configuration: ChatInputConfigurat
     .filter(name => name.length <= 128 && !/[\u0000-\u001f\u007f]/.test(name)).slice(0, 16)
   return Object.freeze({ enabled: true, reason: 'active', names: Object.freeze(names), wakeOnMention: true,
     wakeOnReply: current.wakeOnReply, continuationMs: current.continuationMs, replyExtensionMs: current.replyExtensionMs ?? 500,
-    groupWakeProbabilityPercent: current.groupWakeProbabilityPercent ?? 1 })
+    groupWakeProbabilityPercent: current.groupWakeProbabilityPercent ?? 1,
+    unreadRetentionMs: current.unreadRetentionMs ?? DEFAULT_UNREAD_RETENTION_MS })
 }
