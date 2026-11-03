@@ -1229,10 +1229,7 @@ export function createNativeRuntimeApplicationPorts(options: {
           const target = await discoverLocalDshDeployment({ endpoint: adapter.endpoint,
             localCredentialsPath: adapter.localCredentialsPath, signal })
           const resolved = await resolveLocalDshModelSettings(configuration, target, signal, directory)
-          const previousOutputBudget = configuration.deployment.modelSettings?.maxTokens
-          const modelSettings = previousOutputBudget === undefined ? resolved.modelSettings
-            : { ...resolved.modelSettings, maxTokens: Math.min(resolved.modelSettings.maxTokens, previousOutputBudget) }
-          deployment = { ...configuration.deployment, target, modelSettings }
+          deployment = { ...configuration.deployment, target, modelSettings: resolved.modelSettings }
         } catch (error) {
           if (signal.aborted) requestError(499, 'request_aborted')
           if (isRecord(error) && error.code === 'LOCAL_DSH_MODEL_SETTINGS_MISSING') requestError(422, 'local_dsh_model_settings_missing')

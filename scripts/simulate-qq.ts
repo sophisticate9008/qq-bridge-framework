@@ -411,8 +411,7 @@ export async function simulateQq(values = process.argv.slice(2)) {
     let configuration = await load()
     const resolvedSettings = await resolveLocalDshModelSettings(configuration, dsh.target, lifetime.signal, nativeDirectory)
     const savedDeployment = await repository.readDeployment()
-    const modelSettings = { ...resolvedSettings.modelSettings,
-      maxTokens: Math.min(resolvedSettings.modelSettings.maxTokens, configuration.deployment.modelSettings?.maxTokens ?? resolvedSettings.modelSettings.maxTokens) }
+    const modelSettings = resolvedSettings.modelSettings
     await repository.replaceDeployment(savedDeployment.revision, { ...savedDeployment.value.deployment, modelSettings })
     configuration = await load()
     record({ type: 'simulation-model-settings-prepared', source: resolvedSettings.source,

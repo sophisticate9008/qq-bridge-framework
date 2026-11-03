@@ -210,10 +210,8 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     const target = await discoverLocalDshDeployment({ endpoint: adapter.endpoint, localCredentialsPath: adapter.localCredentialsPath, signal })
     if (await realpath(target.credentialsPath) !== await realpath(adapter.localCredentialsPath)) fail('chat_repair_dsh_target_mismatch')
     const resolved = await resolveLocalDshModelSettings(configuration, target, signal, directory)
-    const modelSettings = { ...resolved.modelSettings, maxTokens: Math.min(resolved.modelSettings.maxTokens,
-      configuration.deployment.modelSettings?.maxTokens ?? resolved.modelSettings.maxTokens) }
     const prepared = await createNativeDshDeploymentRuntime({ sessionDirectory: directory }).prepare({ ...configuration,
-      deployment: { ...configuration.deployment, target, modelSettings } })
+      deployment: { ...configuration.deployment, target, modelSettings: resolved.modelSettings } })
     if (prepared.state !== 'prepared') fail(prepared.missingReasons[0] ?? 'chat_repair_configuration_missing')
     if (!isDeepStrictEqual((await readNativeChatConfigurationUnlocked(directory)).revisions, configuration.revisions)) fail('chat_repair_configuration_changed')
     await assertSingleAccount()
