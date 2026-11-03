@@ -41,3 +41,33 @@ Linux `ldd` 仅列出系统加载器、libc、libm 和 libgcc_s，不需要桌�
 65537 字节 HTML、超过 16777216 像素的文档及宽度为 0 的请求均以非零状态明确退出，未写出 PNG。当前探针的 64 KiB 限制作用于最终 HTML；正式接入时须区分原始正文与公式展开后的内部 HTML，避免把内部膨胀变成公式数量限制。
 
 后续适合接入宿主的持久后台排版队列，以独立进程执行并复用现有字体、资源登记和发送策略。仍需完善进程取消与内存预算、崩溃恢复、字体回退、受控图片资源和完整许可证清单；现有 Markdown 路径保持现状。
+
+## Markdown 同文档对比（2026-11-03）
+
+当前决定保留两套方案：已启用的 Markdown 继续使用 Takumi，Blitz 保留预编译组件与构建、验证入口，后续用于 HTML 排版接入。没有切换本机聊天排版后端，也没有将探针表述为已启用的框架能力。
+
+Takumi 本身也是 Rust 核心，本项目使用 `@takumi-rs/core` 的预编译 Node 原生绑定，通过 npm 安装匹配平台的包，用户不需要自行编译。本机 Linux ARM64 上三个 `@takumi-rs` 包安装后合计约 7.15 MiB，其中原生组件约 6.71 MiB、Node 绑定及 HTML 辅助库合计约 0.44 MiB；不含共用字体、MathJax 等。Blitz 当前 ARM64 可执行文件为 14.51 MiB。两者均为安装后体积，不能拿它们与压缩包体积直接比较。
+
+`compare-markdown.ts` 从当前 Markdown worker 的实际源码提取文档准备函数到忽略的 `runtime/research/markdown-render-comparison`，复用既有解析、转义、任务列表、高亮和数学排版规则，避免另维护一套解析器。探针将内部公式图像替换为等尺寸的静态内联 SVG，再向两个引擎提供同一份 HTML/CSS 与四份框架字体。遇到 worker 源码结构变化时明确失败，不修改运行时源码。
+
+运行方式：
+
+```sh
+node tools/blitz-probe/compare-markdown.ts /path/to/qbf-html-probe /path/to/blitz/packages/blitz-dom/assets/moz-bullet-font.otf
+```
+
+第二个参数提供 Blitz 自带的圆点字体。默认文档上下文本会登记它，而本探针手动提供 FontContext，因此需要显式补齐；补充后列表圆点正常显示。该字体属于上游资源，不复制进项目源码仓库。
+
+下表取本机最后一轮每类三次独立进程的中位数，交替执行两个后端。文档准备在计时外，两者均限制为 1080 像素宽、16777216 像素与 8 MiB PNG。
+
+| 内容 | Takumi 子进程总耗时 | Blitz 子进程总耗时 | Takumi 采样 RSS | Blitz 采样 RSS |
+| --- | ---: | ---: | ---: | ---: |
+| 中文、代码、表格与公式混排 | 507 ms | 114 ms | 84.9 MiB | 27.0 MiB |
+| 约 8880 像素长文档 | 537 ms | 431 ms | 125.5 MiB | 63.8 MiB |
+| 22 行四列表格 | 479 ms | 208 ms | 90.6 MiB | 35.8 MiB |
+
+RSS 以 5 ms 间隔采样 Linux `/proc` 的子进程 HWM，仅为下界；不包含两者共用的 Markdown/MathJax 准备进程，也不代表整个框架内存。Takumi 栏包含新 Node 进程与原生绑定加载，Blitz 栏是原生 CLI，进程启动成本不同；单看内部长图排版绘制，Takumi 中位 324 ms、Blitz 402 ms，不能据此宣称 Blitz 全面更快。之前轮次存在明显宿主负载波动，结果只用于该环境的接入评估。
+
+人工查看确认中文、高亮代码、普通公式、数学符号与长文档末尾均可显示；字体粗细、斜体、列表样式与间距仍有差异，正式切换前需要继续适配。Blitz PNG 在所测样例中也更大，例如长文档约 1.10 MiB，Takumi 约 0.32 MiB；该结果同时受两者编码配置影响。
+
+60 条短公式由 818 字节 Markdown 展开为 158833 字节 HTML。Takumi 可生成完整图片，当前 Blitz CLI 因自身 64 KiB 最终 HTML 上限明确拒绝；这不是公式数量限制或 Blitz 引擎不支持。正式接入必须区分原始输入和公式展开后的内部资源预算。另通过实际 `createBuiltinMarkdownRenderer()` 入口核对混排与 60 条公式，均生成一张完整 PNG；没有使用真实 QQ 会话或模型请求。
