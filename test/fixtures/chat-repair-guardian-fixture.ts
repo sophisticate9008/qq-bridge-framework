@@ -40,7 +40,18 @@ if (mode === 'writer') {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'admin', directory, id], { stdio: 'ignore', detached: false })
       child.unref()
       for (let step = 0; step < 100; step++) {
-        try { await readFile(addressFile); return } catch { await new Promise<void>(resolve => setTimeout(resolve, 20)) }
+        try {
+          // A newly created address file can still be empty while writeFile is
+          // pending. The start port promises readiness, not file existence.
+          const address: unknown = JSON.parse(await readFile(addressFile, 'utf8'))
+          if (address && typeof address === 'object' && 'url' in address && typeof address.url === 'string') {
+            const response = await fetch(`${address.url}/api/chat/repair?id=${id}`, {
+              headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(1000) })
+            await response.body?.cancel()
+            if (response.ok) return
+          }
+        } catch { /* Wait until the same fixture listener is actually ready. */ }
+        await new Promise<void>(resolve => setTimeout(resolve, 20))
       }
       throw new Error('Isolated admin did not start')
     }
