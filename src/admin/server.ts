@@ -52,6 +52,7 @@ export interface AdminServerOptions {
   routes?: readonly AdminRoute[]
   handlerTimeoutMs?: number
   accessSessionTtlMs?: number
+  accessSessionFilename?: string
   publicOrigin?: string
   trustedLoopbackProxy?: boolean
   setup?: {
@@ -384,6 +385,7 @@ export function createAdminServer({
   setup,
   handlerTimeoutMs = DEFAULT_HANDLER_TIMEOUT_MS,
   accessSessionTtlMs = DEFAULT_ACCESS_SESSION_TTL_MS,
+  accessSessionFilename,
   publicOrigin,
   trustedLoopbackProxy
 }: AdminServerOptions): Server {
@@ -440,7 +442,7 @@ export function createAdminServer({
     return typeof value === 'string' && value.length >= 24 ? value : null
   }
   const staticCache = new Map<string, Promise<Buffer>>()
-  const accessSessions = createAccessSessionStore({ ttlMs: accessSessionTtlMs })
+  const accessSessions = createAccessSessionStore({ ttlMs: accessSessionTtlMs, filename: accessSessionFilename })
   const server = createServer({
     connectionsCheckingInterval: 1000,
     headersTimeout: HEADERS_TIMEOUT_MS,
@@ -665,7 +667,7 @@ export function createAdminServer({
   server.setTimeout(SOCKET_TIMEOUT_MS)
   server.once('close', () => {
     staticCache.clear()
-    accessSessions.clear()
+    accessSessions.clear(false)
   })
   return server
 }
