@@ -14,6 +14,7 @@ export interface ChatRepairOperation {
 export interface ChatRepairSnapshot {
   readonly schema: 1
   readonly available: boolean
+  readonly applicationId?: string | null
   readonly operation: ChatRepairOperation | null
 }
 export function parseChatRepairOperation(value: unknown): ChatRepairOperation | null {
@@ -27,7 +28,9 @@ export function parseChatRepairOperation(value: unknown): ChatRepairOperation | 
     createdAt: value.createdAt as number, updatedAt: value.updatedAt as number, reasons: value.reasons as string[] }
 }
 export function parseChatRepairSnapshot(value: unknown): ChatRepairSnapshot | null {
-  if (!isRecord(value) || value.schema !== 1 || typeof value.available !== 'boolean') return null
+  if (!isRecord(value) || value.schema !== 1 || typeof value.available !== 'boolean'
+    || value.applicationId !== undefined && value.applicationId !== null && !isNativeApplicationId(value.applicationId)) return null
   const operation = value.operation === null ? null : parseChatRepairOperation(value.operation)
-  return value.operation !== null && !operation ? null : { schema: 1, available: value.available, operation }
+  return value.operation !== null && !operation ? null : { schema: 1, available: value.available, operation,
+    ...(value.applicationId === undefined ? {} : { applicationId: value.applicationId as string | null }) }
 }

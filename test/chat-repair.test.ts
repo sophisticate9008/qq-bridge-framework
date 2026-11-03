@@ -103,3 +103,17 @@ test('accepting a fresh repair seals a delayed unclaimed worker before it could 
     assert.deepEqual(journal.value.records.find(entry => entry.operation.id === delayed.id)?.operation.reasons, ['chat_repair_worker_interrupted'])
   } finally { await setup.dispose() }
 })
+
+test('repair snapshots retain the exact application ID even after a newer repair is recorded', linux, async () => {
+  const setup = await fixture()
+  try {
+    const completed = operation({ state: 'completed', phase: 'verifying' })
+    const applicationId = randomUUID()
+    await setup.storage.modify(value => ({ ...value, records: [{ operation: completed, applicationId, worker: null },
+      { operation: operation({ state: 'failed' }), worker: null }] }))
+    const snapshot = parseChatRepairSnapshot(await setup.invoke(setup.route('GET'), null, new URLSearchParams({ id: completed.id })))
+    assert.equal(snapshot?.applicationId, applicationId)
+    assert.equal(snapshot?.operation?.id, completed.id)
+    assert.equal(parseChatRepairSnapshot({ schema: 1, available: true, applicationId: 'arbitrary', operation: completed }), null)
+  } finally { await setup.dispose() }
+})

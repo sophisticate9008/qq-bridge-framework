@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, open, readFile, unlink } from 'node:fs/promises'
+import { link, lstat, open, readFile, unlink } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { parseChatRepairOperation, type ChatRepairOperation } from '../contracts/chat-repair.ts'
 import { isNativeApplicationId } from '../contracts/native-application.ts'
@@ -77,12 +77,16 @@ export function createChatRepairStorage(directory: string) {
     await ensurePrivateDirectory(root)
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const handle = await open(lockname, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+        const temporary = join(root, `.writer-${randomUUID()}.tmp`)
+        const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
         const metadata = await handle.stat()
         try {
+          // Publish a complete PID identity atomically. A crash cannot leave a partially written live lock.
           await handle.writeFile(JSON.stringify({ pid: process.pid, started: await chatRepairProcessStart(process.pid) }))
           await handle.sync()
-        } catch (error) { await handle.close(); await unlink(lockname).catch(() => undefined); throw error }
+          await link(temporary, lockname)
+        } catch (error) { await handle.close(); throw error }
+        finally { await unlink(temporary).catch(() => undefined) }
         return async () => {
           await handle.close()
           const current = await lstat(lockname).catch(() => null)
@@ -96,7 +100,7 @@ export function createChatRepairStorage(directory: string) {
         })
         try {
           const before = await handle.stat()
-          if (!before.isFile() || before.nlink !== 1 || before.size > 1024 || !privatePermissions(lockname, before, 0o600)
+          if (!before.isFile() || ![1, 2].includes(before.nlink) || before.size > 1024 || !privatePermissions(lockname, before, 0o600)
             || process.getuid && before.uid !== process.getuid()) throw new Error('chat_repair_lock_invalid')
           const content = await handle.readFile('utf8')
           if (!content && Date.now() - before.mtimeMs < 15_000) throw new Error('chat_repair_busy')

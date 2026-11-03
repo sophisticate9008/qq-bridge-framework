@@ -15,7 +15,7 @@ export function createChatRepairRoutes(options: { readonly directory: string; re
   async function read(id?: string): Promise<ChatRepairSnapshot> {
     const journal = await storage.read()
     const record = id ? journal.value.records.find(entry => entry.operation.id === id) : journal.value.records.at(-1)
-    return { schema: 1, available, operation: record ? await projectChatRepair(record) : null }
+    return { schema: 1, available, operation: record ? await projectChatRepair(record) : null, applicationId: record?.applicationId ?? null }
   }
   return [{ method: 'GET', pathname: CHAT_REPAIR_PATH, async handle({ query }) {
     const id = query.get('id')
