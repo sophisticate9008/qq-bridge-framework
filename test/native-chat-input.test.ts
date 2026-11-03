@@ -79,7 +79,7 @@ function prepare(content: InboundMessage['content'], entries = history, budget =
     userId: message.userId, data: { directed: true, content: JSON.parse(JSON.stringify(content)),
       ...(context.senderDisplayName === undefined ? {} : { senderDisplayName: context.senderDisplayName }) } };
   const result = prepareNativeChatInput(event, entries, { owner: '123', partial: false,
-    maxHistoryCharacters: budget, participation: 'reply', groupWake: context.groupWake, quotedMessages: context.quotedMessages });
+    maxHistoryCharacters: budget, now: 150, participation: 'reply', groupWake: context.groupWake, quotedMessages: context.quotedMessages });
   const text = result.map(part => part.type === 'text' ? part.text : '').join('');
   const start = text.indexOf('\n') + 1;
   const end = text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n');
@@ -123,11 +123,11 @@ test('unread metadata distinguishes retained context from newly consumed bounded
     data: { content: [{ type: 'text', text: 'new input' }], directed: true } }, history,
   { owner: null, partial: false, unread: { ids: ['answer', 'new'], readThrough: 1, through: 3, partial: false } });
   const text = result.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
-  assert.match(text, /"unread":\{"readThrough":1,"through":3,"count":2,"included":1,"partial":false\}/);
+  assert.match(text, /"unread":\{"readThrough":1,"through":3,"count":2,"retentionMs":900000,"excluded":0,"included":1,"partial":false\}/);
   assert.doesNotMatch(text, /"id":"answer"/, 'Assistant output already belongs to the DSH conversation.');
 });
 
-test('resuming input carries current time, a day-long gap and the latest 32 timestamped unread messages', () => {
+test('resuming input keeps elapsed time and a quoted target while excluding expired unread background', () => {
   const now = Date.parse('2026-11-01T00:01:00Z');
   const previous = now - 86_400_000;
   const entries: HistoryMessage[] = Array.from({ length: 40 }, (_, index) => ({ id: `idle-${index}`, actor: '123',
@@ -146,12 +146,9 @@ test('resuming input carries current time, a day-long gap and the latest 32 time
   assert.equal(facts.time.currentMessageAt, new Date(now - 1000).toISOString());
   assert.equal(facts.time.previousInputAcceptedAt, new Date(previous).toISOString());
   assert.equal(facts.time.elapsedSincePreviousInputMs, 86_400_000);
-  assert.equal(facts.recent.length, 32);
-  assert.deepEqual(facts.recent.map(item => item.id), entries.slice(8, 40).map(item => item.id));
-  assert.equal(facts.recent[0]!.at, new Date(entries[8]!.receivedAt).toISOString());
-  assert.match(facts.recent[0]!.localAt, /2026-11-01.*07:01:08/);
+  assert.deepEqual(facts.recent, []);
   assert.equal(facts.quoted[0]!.at, new Date(entries[0]!.receivedAt).toISOString());
-  assert.equal(facts.unread.included, 33);
+  assert.equal(facts.unread.included, 1);
   assert.equal(facts.unread.partial, true);
 });
 
@@ -325,4 +322,101 @@ test('a queued explicit question survives more than 32 newer ordinary messages w
   assert.match(facts.recent[0]!.text, /明确原题/);
   assert(facts.recent.length <= 32);
   assert.equal(facts.historyTruncated, true);
+});
+
+const contactNow = 1_800_000_000_000;
+function contactInput(kind: 'mention' | 'poke', entries: readonly HistoryMessage[], extra: Partial<Parameters<typeof prepareNativeChatInput>[2]> = {}) {
+  const id = kind === 'poke' ? `onebot-notice:${'a'.repeat(64)}` : 'contact';
+  const content: InboundMessage['content'] = kind === 'poke' ? [{ type: 'text', text: '[拍一拍] 对方戳了戳你。' }]
+    : [{ type: 'mention', userId: '999' }];
+  const event: FrameworkEvent = { id, type: 'message.received', conversationId: 'group:456', userId: '123', data: { content: json(content) } };
+  const parts = prepareNativeChatInput(event, [...entries, { id, actor: '123', receivedAt: contactNow, content }], {
+    owner: null, selfId: '999', partial: false, participation: 'direct', now: contactNow,
+    unread: { ids: [...entries.map(item => item.id), id], readThrough: 0, through: entries.length + 1, partial: false }, ...extra });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  const current = text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n');
+  const facts = JSON.parse(text.slice('会话事实：\n'.length, current === -1 ? undefined : current)) as {
+    wake: { kind: string; mode: string; excludedUnread: number; unreadRetentionMs: number };
+    recent: { id: string; text: string }[];
+    groupParticipation: { mode: string; addressedMessageIds: string[] };
+    replyDelivery?: { requests: { id: string; text: string }[] };
+    unread: { count: number; included: number; partial: boolean };
+  };
+  return { text, facts };
+}
+const contactHistory = (id: string, at: number): HistoryMessage => ({ id, actor: '123', receivedAt: at,
+  content: [{ type: 'text', text: `message-${id}` }] });
+
+for (const kind of ['mention', 'poke'] as const) test(`${kind} implicit unread has an inclusive fifteen-minute bound and excludes unknown or future times`, () => {
+  const result = contactInput(kind, [contactHistory('old', contactNow - 900_001), contactHistory('boundary', contactNow - 900_000),
+    contactHistory('recent', contactNow - 899_999), contactHistory('unknown', 0), contactHistory('future', contactNow + 1)]);
+  assert.deepEqual(result.facts.recent.map(item => item.id), ['boundary', 'recent']);
+  assert.equal(result.facts.wake.mode, 'read-unread');
+  assert.equal(result.facts.wake.unreadRetentionMs, 900_000);
+  assert.equal(result.facts.wake.excludedUnread, 3);
+  assert.equal(result.facts.unread.partial, true);
+});
+
+for (const kind of ['mention', 'poke'] as const) test(`${kind} with only old unread remains a current greeting rather than resuming old work`, () => {
+  const result = contactInput(kind, [contactHistory('old', contactNow - 3_600_000)]);
+  assert.equal(result.facts.wake.mode, 'greet');
+  assert.equal(result.facts.wake.excludedUnread, 1);
+  assert.deepEqual(result.facts.recent, []);
+  assert.doesNotMatch(result.text, /message-old/);
+  assert.match(result.text, kind === 'poke' ? /对方戳了戳你/ : /对方 @ 了你/);
+  assert.equal(result.facts.unread.included, 1);
+});
+
+test('contact filtering keeps explicit queued sources even when their time is old or unknown', () => {
+  const result = contactInput('poke', [contactHistory('old-request', contactNow - 3_600_000), contactHistory('unknown-request', 0),
+    contactHistory('old-chatter', contactNow - 3_600_000)], { groupWake: [
+    { messageId: 'old-request', actor: '123', reason: 'direct' }, { messageId: 'unknown-request', actor: '789', reason: 'nickname' }] });
+  assert.deepEqual(result.facts.recent.map(item => item.id), ['old-request', 'unknown-request']);
+  assert.equal(result.facts.wake.mode, 'read-unread');
+  assert.equal(result.facts.wake.excludedUnread, 1);
+});
+
+test('contact time filtering preserves an explicitly deferred request outside the implicit window', () => {
+  const result = contactInput('poke', [contactHistory('old-background', contactNow - 3_600_000)], {
+    unsentReplyMessageIds: ['deferred'], unsentAddressedMessageIds: ['deferred'],
+    unsentReplyRequests: [{ id: 'deferred', actor: '123', receivedAt: contactNow - 3_600_000,
+      text: '明确等待的原题', truncated: false }] });
+  assert.equal(result.facts.wake.mode, 'read-unread');
+  assert.equal(result.facts.groupParticipation.mode, 'addressed');
+  assert(result.facts.groupParticipation.addressedMessageIds.includes('deferred'));
+  assert.equal(result.facts.replyDelivery?.requests[0]?.text, '明确等待的原题');
+  assert.doesNotMatch(result.text, /message-old-background/);
+});
+
+test('an explicit current message remains while only its quoted target revives old context', () => {
+  const old = contactHistory('old-question', contactNow - 3_600_000);
+  const other = contactHistory('old-unrelated', contactNow - 3_600_000);
+  for (const quoted of [false, true]) {
+    const content: InboundMessage['content'] = [{ type: 'mention', userId: '999' },
+      ...(quoted ? [{ type: 'reply' as const, messageId: 'old-question' }] : []),
+      { type: 'text', text: '继续指定的问题，不用处理其他旧内容' }];
+    const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '123',
+      data: { content: json(content) } };
+    const parts = prepareNativeChatInput(event, [old, other], { owner: null, selfId: '999', partial: false, participation: 'direct', now: contactNow });
+    const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+    assert.match(text, /继续指定的问题/);
+    if (quoted) assert.match(text, /message-old-question/);
+    else assert.doesNotMatch(text, /message-old-question/);
+    assert.doesNotMatch(text, /message-old-unrelated/);
+    assert.doesNotMatch(text, /"wake":/);
+  }
+});
+
+test('the unread retention option applies to ordinary background and preserves admitted queued continuations', () => {
+  const entries = [contactHistory('expired', contactNow - 60_001), contactHistory('boundary', contactNow - 60_000),
+    contactHistory('queued-correction', contactNow - 3_600_000)];
+  const event: FrameworkEvent = { id: 'current', type: 'message.received', conversationId: 'group:456', userId: '123',
+    data: { content: [{ type: 'text', text: '当前有正文的明确问题' }] } };
+  const parts = prepareNativeChatInput(event, entries, { owner: null, partial: false, participation: 'direct', now: contactNow,
+    unreadRetentionMs: 60_000, groupWake: [{ messageId: 'queued-correction', actor: '123', reason: 'continuation' }] });
+  const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('');
+  assert.doesNotMatch(text, /message-expired/);
+  assert.match(text, /message-boundary/);
+  assert.match(text, /message-queued-correction/);
+  assert.match(text, /当前有正文的明确问题/);
 });

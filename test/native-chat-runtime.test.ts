@@ -2867,3 +2867,108 @@ test('a bare real mention retains the unread question after a picture and finish
   assert.match(JSON.stringify(fake.sends), /Final answer 2/)
   assert.doesNotMatch(JSON.stringify(fake.sends), /Final answer 1/)
 })
+
+test('a fresh poke excludes old passive media from implicit input and the withheld greeting snapshot', async context => {
+  const fake = await fixture(context)
+  await fake.configure(); await fake.start()
+  const group = { message_type: 'group', group_id: 456, user_id: 123 }
+  fake.message(9980, { ...group, time: Math.floor(Date.now() / 1000) - 3600,
+    message: [{ type: 'image', data: { file: 'stale-passive-media' } }] })
+  const history = () => fake.runtime().host()!.history.snapshot('group:456', { afterSequence: 0 })
+  await until(() => history().messages.length === 1)
+  const asset = history().messages[0]!.content.find(part => part.type === 'image')!
+  assert.equal(asset.type, 'image')
+  const prompts = () => fake.rpc.filter(item => item.method === 'session/prompt')
+  fake.message(9981, { ...group, post_type: 'notice', notice_type: 'notify', sub_type: 'poke', target_id: 999 })
+  await until(() => prompts().length === 1)
+  const first = JSON.stringify(prompts()[0]!.request.content)
+  assert.match(first, /greet/)
+  assert.match(first, /拍一拍/)
+  assert(!first.includes(asset.assetId))
+  fake.message(9982, { ...group, message: [{ type: 'text', data: { text: '刚刚只是打个招呼' } }] })
+  await until(() => fake.runtime().inboxSummary().pending === 1)
+  await fake.answer(1)
+  await until(() => prompts().length === 2)
+  const successor = JSON.stringify(prompts()[1]!.request.content)
+  assert.match(successor, /unsentFor/)
+  assert(!successor.includes(asset.assetId), 'Expired passive media must not reappear through the withheld reply snapshot')
+  assert.equal(history().messages.some(item => item.id === '9980'), true, 'Original history remains available')
+})
+
+test('a quoted target is automatically included beyond unread retention without reviving unrelated old background', async context => {
+  const fake = await fixture(context, { quotedMessages: {
+    '9010': { message_id: 9010, message_type: 'group', group_id: 456, time: Math.floor(Date.now() / 1000) - 3600,
+      sender: { user_id: 124 }, message: [{ type: 'text', data: { text: '指定引用的一小时前消息' } }] },
+  } })
+  await fake.configure(); await fake.start()
+  const group = { message_type: 'group', group_id: 456 }
+  fake.message(9990, { ...group, user_id: 124, time: Math.floor(Date.now() / 1000) - 3600,
+    message: [{ type: 'text', data: { text: '不应自动恢复的其他过期背景' } }] })
+  await until(() => fake.runtime().host()!.history.snapshot('group:456', { afterSequence: 0 }).messages.length === 1)
+  fake.message(9991, { ...group, user_id: 123, message: [{ type: 'at', data: { qq: '999' } },
+    { type: 'reply', data: { id: '9010' } }, { type: 'text', data: { text: '解释这句' } }] })
+  await until(() => fake.rpc.some(item => item.method === 'session/prompt'))
+  const content = JSON.stringify(fake.rpc.find(item => item.method === 'session/prompt')!.request.content)
+  assert.match(content, /指定引用的一小时前消息/)
+  assert.match(content, /9010/)
+  assert.doesNotMatch(content, /不应自动恢复的其他过期背景/)
+  assert.equal(fake.toolCalls.length, 0, 'Quote context is prepared by the host before the model needs a tool')
+})
+
+test('an explicit queued request survives old age and rolling history eviction using its bounded inbox source', async context => {
+  const fake = await fixture(context)
+  await fake.configure(); await fake.start()
+  const group = { message_type: 'group', group_id: 456 }
+  const prompts = () => fake.rpc.filter(item => item.method === 'session/prompt')
+  fake.message(10000, { ...group, user_id: 123, message: [{ type: 'at', data: { qq: '999' } },
+    { type: 'text', data: { text: '正在处理的第一个问题' } }] })
+  await until(() => prompts().length === 1)
+  fake.message(10001, { ...group, user_id: 123, time: Math.floor(Date.now() / 1000) - 3600,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '必须保留的排队原问题' } }] })
+  await until(() => fake.runtime().inboxSummary().pending === 1)
+  for (let index = 0; index < 105; index++) fake.runtime().host()!.history.append('group:456', { id: String(10002 + index),
+    actor: '789', receivedAt: Date.now(), content: [{ type: 'text', text: `普通群聊背景-${index}` }] })
+  fake.message(10107, { ...group, user_id: 789, message: [{ type: 'text', data: { text: '新的普通群聊发言' } }] })
+  const history = () => fake.runtime().host()!.history.snapshot('group:456', { afterSequence: 0 })
+  await until(() => history().messages.some(item => item.id === '10107'))
+  assert(!history().messages.some(item => item.id === '10001'), 'The explicit queue source was evicted from rolling history')
+  await fake.answer(1)
+  await until(() => prompts().length === 2)
+  const input = normalizeContent(prompts()[1]!.request.content).flatMap(part => part.type === 'text' ? [part.text] : []).join('')
+  assert.match(input, /必须保留的排队原问题/)
+  assert.match(input, /"senderId":"789"/)
+  assert.match(input, /"id":"10001","actor":"123"/)
+})
+
+test('coalesced queued quotes preserve the current reference and fill four targets in source order before model input', async context => {
+  const targets = Object.fromEntries([9011, 9012, 9013, 9014, 9015].map(id => [String(id), {
+    message_id: id, message_type: 'group', group_id: 456, sender: { user_id: 124 },
+    message: [{ type: 'text', data: { text: `queued-target-${id}` } }],
+  }]))
+  const fake = await fixture(context, { quotedMessages: targets })
+  await fake.configure(); await fake.start()
+  const group = { message_type: 'group', group_id: 456 }
+  const prompts = () => fake.rpc.filter(item => item.method === 'session/prompt')
+  fake.message(10200, { ...group, user_id: 123, message: [{ type: 'at', data: { qq: '999' } },
+    { type: 'text', data: { text: '第一个正在处理的问题' } }] })
+  await until(() => prompts().length === 1)
+  for (const [index, references] of [[9011, 9012, 9013], [9013, 9014, 9015]].entries()) {
+    fake.message(10201 + index, { ...group, user_id: 123 + index, time: Math.floor(Date.now() / 1000) - 3600,
+      message: [{ type: 'at', data: { qq: '999' } }, ...references.map(id => ({ type: 'reply', data: { id: String(id) } })),
+        { type: 'text', data: { text: '解释指定引用' } }] })
+  }
+  fake.message(10203, { ...group, user_id: 789, message: [{ type: 'reply', data: { id: '9015' } },
+    { type: 'text', data: { text: '旁人最后一条普通发言' } }] })
+  await until(() => fake.runtime().inboxSummary().pending === 3)
+  await fake.answer(1)
+  await until(() => prompts().length === 2)
+  const text = normalizeContent(prompts()[1]!.request.content).flatMap(part => part.type === 'text' ? [part.text] : []).join('')
+  const facts = JSON.parse(text.slice('会话事实：\n'.length, text.indexOf('本批最新消息（结合未读消息选择回应对象）：\n'))) as {
+    quoted: { id: string; text: string }[]; quotedLimited: boolean; unread: { partial: boolean };
+  }
+  assert.deepEqual(facts.quoted.map(item => item.id), ['9011', '9012', '9013', '9015'])
+  assert.deepEqual(facts.quoted.map(item => item.text), ['queued-target-9011', 'queued-target-9012', 'queued-target-9013', 'queued-target-9015'])
+  assert.equal(facts.quotedLimited, true)
+  assert.equal(facts.unread.partial, true)
+  assert.doesNotMatch(text, /queued-target-9014/)
+})

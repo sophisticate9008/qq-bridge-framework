@@ -18,7 +18,7 @@ import { nativeActivityContent, type createNativeActivity } from './native-activ
 import type { createControlCommands } from './control-commands.ts'
 import type { LifecycleCheckpoint } from './lifecycle-hooks.ts'
 import type { InboundMessage } from './types.ts'
-import { nativeParticipation, type NativeParticipationReason } from './native-chat-input.ts'
+import { nativeParticipation, type NativeParticipationReason, type NativeGroupWake } from './native-chat-input.ts'
 import { nativeChatWakeKind } from './native-chat-wake.ts'
 import { buildChatSessionDefinition } from './chat-plans.ts'
 import { digest, json, object } from './data.ts'
@@ -66,7 +66,7 @@ export function createNativeInboundController(options: {
   const runtime = options.resources
   const { activity, controlDefinitions, getControlCommands, checkpoint, guard, safeCode } = options
   const participationReasons = new Map<string, NativeParticipationReason>()
-  const groupWakes = new Map<string, readonly { readonly messageId: string; readonly actor: string; readonly reason: NativeParticipationReason }[]>()
+  const groupWakes = new Map<string, readonly NativeGroupWake[]>()
   const preparedReadCursors = new Map<string, number>()
   const inputSequences = new Map<string, number>()
   const admissionTimes = new Map<string, number>()
@@ -367,7 +367,7 @@ export function createNativeInboundController(options: {
     },
     setParticipation(requestId: string, reason: NativeParticipationReason) { participationReasons.set(requestId, reason) },
     groupWake: (requestId: string) => groupWakes.get(requestId),
-    setGroupWake(requestId: string, wake: readonly { readonly messageId: string; readonly actor: string; readonly reason: NativeParticipationReason }[]) {
+    setGroupWake(requestId: string, wake: readonly NativeGroupWake[]) {
       if (groupWakes.size >= 256 && !groupWakes.has(requestId)) groupWakes.delete(groupWakes.keys().next().value!)
       groupWakes.set(requestId, wake.slice(-16))
     },

@@ -106,7 +106,7 @@ import { createDurableTransport } from './outbox.ts'
 import { applyNativeAccessGrants, rememberNativeAccessGrants, restoredNativeAccessGrants } from './native-access-application.ts'
 import type { JsonObject } from '../core/types.ts'
 import { composeAgentInputPreparation } from './input-preparation.ts'
-import { prepareNativeChatInput } from './native-chat-input.ts'
+import { prepareNativeChatInput, selectNativeUnreadContext } from './native-chat-input.ts'
 import { createNativeQuotedContext } from './native-quoted-context.ts'
 import { readScopedProtocolMessage } from './native-protocol-message.ts'
 import { normalizeContent } from '../core/content.ts'
@@ -1215,34 +1215,52 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               const source = history.messages.find(item => item.id === event.id)
               const through = inbound.inputSequence(digest([event.conversationId, event.id, 'prompt'])) ?? source?.sequence
               if (through === undefined) failure('NATIVE_CHAT_INPUT_HISTORY_UNAVAILABLE')
-              const visibleHistory = history.messages.filter(item => item.sequence <= through)
-              const historyPartial = unread.partial || history.partial || source?.sequence !== through
-              const binding = host.sessions.get(event.conversationId)
               const requestId = digest([event.conversationId, event.id, 'prompt'])
               const participation = inbound.participation(requestId)
               const groupWake = inbound.groupWake(requestId)
+              const retainedHistory = history.messages.filter(item => item.sequence <= through)
+              const retainedIds = new Set(retainedHistory.map(item => item.id))
+              const queuedMessages = (groupWake ?? []).flatMap(item => {
+                if (!item.message || retainedIds.has(item.messageId)) return []
+                retainedIds.add(item.messageId)
+                return [item.message]
+              })
+              const visibleHistory = [...queuedMessages, ...retainedHistory]
+              const historyPartial = unread.partial || history.partial || source?.sequence !== through || queuedMessages.length > 0
+              const binding = host.sessions.get(event.conversationId)
               const addressedMessages = [...(groupWake ?? []).filter(item => ['direct', 'nickname', 'reply'].includes(item.reason)),
                 ...(['direct', 'nickname', 'reply'].includes(participation ?? '') && event.userId
                   ? [{ messageId: event.id, actor: event.userId }] : [])]
+              const inputNow = Date.now()
+              const inputSettings = await inbound.readInputConfiguration(event.conversationId)
+              const unreadRetentionMs = inputSettings.effective.unreadRetentionMs
+              const unreadMessages = [...queuedMessages, ...unread.messages.filter(item => item.sequence <= through
+                && item.actor !== 'assistant' && item.actor !== 'system')]
+              const replyUnread = selectNativeUnreadContext(unreadMessages, inputNow, unreadRetentionMs,
+                [event.id, ...(groupWake ?? []).map(item => item.messageId)])
               const replyContext = event.userId
                 ? replyFreshness?.prepare(event.conversationId, binding, event.userId, event.id, { addressedMessages,
-                  contextMessageIds: unread.messages.filter(item => item.sequence <= through
-                    && item.actor !== 'assistant' && item.actor !== 'system').map(item => item.id),
-                  contextMessages: unread.messages.filter(item => item.sequence <= through
-                    && item.actor !== 'assistant' && item.actor !== 'system') }) : undefined
+                  contextMessageIds: replyUnread.map(item => item.id), contextMessages: replyUnread }) : undefined
               const owner = active.access.owner
+              // A coalesced batch retains its original quote order, not only the last speaker's references.
+              const quotedIds = [...new Set([...(groupWake ?? []).flatMap(item => item.message?.content ?? []),
+                ...normalizeContent(event.data.content)].flatMap(part => part.type === 'reply' ? [part.messageId] : []))]
+              const currentQuotedIds = normalizeContent(event.data.content).flatMap(part => part.type === 'reply' ? [part.messageId] : [])
+              const selectedQuotedIds = new Set([...new Set([...currentQuotedIds, ...quotedIds])].slice(0, 4))
+              const quotedMessageIds = quotedIds.filter(id => selectedQuotedIds.has(id))
+              const quotedContextLimited = quotedIds.length > quotedMessageIds.length
               const quotedMessages = await quotedContext?.read({ conversationId: event.conversationId,
-                content: normalizeContent(event.data.content) }, visibleHistory, execution.signal)
+                content: quotedMessageIds.map(messageId => ({ type: 'reply' as const, messageId })) }, visibleHistory, execution.signal)
               inbound.preparedReadCursor(digest([event.conversationId, event.id, 'prompt']), through)
-              return prepareNativeChatInput(event, visibleHistory, { owner, selfId, partial: historyPartial,
+              return prepareNativeChatInput(event, visibleHistory, { owner, selfId, partial: historyPartial || quotedContextLimited, now: inputNow, unreadRetentionMs,
                 unsentReplyMessageIds: replyContext?.unsentReplyMessageIds, unsentReplyRequests: replyContext?.unsentReplyRequests,
                 unsentAddressedMessageIds: replyContext?.addressedMessageIds,
                 previousInputAcceptedAt: unread.lastReadAt,
                 sentWhileQueued: history.messages.filter(item => item.actor === 'assistant' && item.sequence > through).slice(-4),
                 attachImages: active.deployment.modelSettings?.inputModalities?.includes('image') !== false,
-                unread: { ids: unread.messages.filter(item => item.sequence <= through && item.actor !== 'assistant' && item.actor !== 'system').map(item => item.id), readThrough: unread.readThrough,
-                  through, partial: historyPartial },
-                quotedMessages, stickerHints: await stickerLibrary?.hints(event.conversationId, execution.signal),
+                unread: { ids: unreadMessages.map(item => item.id), readThrough: unread.readThrough,
+                  through, partial: historyPartial || quotedContextLimited },
+                quotedMessages, quotedMessageIds, quotedContextLimited, stickerHints: await stickerLibrary?.hints(event.conversationId, execution.signal),
                 tools: await frameworkTools?.context(event.conversationId, execution.signal),
                 output: { ...await output.context(execution.signal), forwardAuthorized: !host.policy.describe().paused && host.policy.describe().grants.some(grant =>
                   grant.active && grant.featureId === 'agent-relay' && grant.conversationId === event.conversationId
@@ -1652,6 +1670,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               : trigger === 'observation' ? 'ambient' : trigger)
             if (entry.message.conversationId.startsWith('group:')) inbound.setGroupWake(requestId, enabled.map(item => ({
               messageId: item.message.id, actor: item.message.userId,
+              message: { id: item.message.id, actor: item.message.userId, receivedAt: item.message.receivedAt,
+                content: item.message.content, ...(item.message.displayName === undefined ? {} : { displayName: item.message.displayName }) },
               reason: item.trigger === 'mention' || item.trigger === 'private' ? 'direct'
                 : item.trigger === 'observation' ? 'ambient' : item.trigger ?? 'continuation'
             })))

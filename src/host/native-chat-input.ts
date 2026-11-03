@@ -6,6 +6,7 @@ import type { InboundMessage } from './types.ts';
 import type { NativeMemoryContext } from '../contracts/native-memory.ts';
 import { normalizeSenderDisplayName } from '../contracts/sender-display-name.ts';
 import { nativeChatWakeKind } from './native-chat-wake.ts';
+import { DEFAULT_UNREAD_RETENTION_MS } from '../contracts/chat-input-configuration.ts';
 
 export interface NativeUnsentReplyRequest {
   readonly id: string;
@@ -17,6 +18,13 @@ export interface NativeUnsentReplyRequest {
 }
 
 export type NativeParticipationReason = 'direct' | 'nickname' | 'reply' | 'probability' | 'continuation' | 'ambient';
+export interface NativeGroupWake {
+  readonly messageId: string;
+  readonly actor: string;
+  readonly reason: NativeParticipationReason;
+  /** Bounded admitted inbox source, used only if rolling history no longer retains it. */
+  readonly message?: HistoryMessage;
+}
 export interface NativeParticipationOptions {
   readonly names: readonly string[];
   readonly continuationMs: number;
@@ -107,6 +115,18 @@ function messageTime(value: number | null | undefined): string | null {
     ? new Date(value).toISOString() : null;
 }
 
+export const DEFAULT_NATIVE_UNREAD_RETENTION_MS = DEFAULT_UNREAD_RETENTION_MS;
+
+/** Automatic unread background has an age bound; admitted requests retain their own source. */
+export function selectNativeUnreadContext<T extends { readonly id: string; readonly receivedAt: number }>(
+  messages: readonly T[], now: number, retentionMs = DEFAULT_NATIVE_UNREAD_RETENTION_MS, preservedIds: readonly string[] = []): readonly T[] {
+  assert(Number.isSafeInteger(retentionMs) && retentionMs >= 0,
+    'INVALID_UNREAD_RETENTION', 'Unread retention needs a nonnegative safe millisecond duration.');
+  const preserved = new Set(preservedIds);
+  return messages.filter(item => preserved.has(item.id) || messageTime(item.receivedAt) !== null
+    && item.receivedAt <= now && now - item.receivedAt <= retentionMs);
+}
+
 export function prepareNativeChatInput(event: FrameworkEvent, history: readonly HistoryMessage[], options: {
   readonly owner: string | null;
   readonly selfId?: string;
@@ -116,13 +136,16 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   readonly now?: number;
   readonly timeZone?: string;
   readonly previousInputAcceptedAt?: number | null;
+  readonly unreadRetentionMs?: number;
   readonly participation?: NativeParticipationReason;
-  readonly groupWake?: readonly { readonly messageId: string; readonly actor: string; readonly reason: NativeParticipationReason }[];
+  readonly groupWake?: readonly NativeGroupWake[];
   readonly unsentReplyMessageIds?: readonly string[];
   readonly unsentReplyRequests?: readonly NativeUnsentReplyRequest[];
   readonly unsentAddressedMessageIds?: readonly string[];
   readonly sentWhileQueued?: readonly HistoryMessage[];
   readonly quotedMessages?: readonly HistoryMessage[];
+  readonly quotedMessageIds?: readonly string[];
+  readonly quotedContextLimited?: boolean;
   readonly unread?: { readonly ids: readonly string[]; readonly readThrough: number; readonly through: number; readonly partial: boolean };
   readonly memory?: NativeMemoryContext;
   readonly stickerHints?: JsonValue;
@@ -185,10 +208,17 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   let historyTruncated = options.partial;
   // DSH owns the continuous conversation. Only forward messages it has not seen.
   const unreadIds = options.unread ? new Set(options.unread.ids) : null;
-  const unreadMessages = history.filter(entry => entry.id !== event.id && entry.actor !== 'assistant'
+  const allUnreadMessages = history.filter(entry => entry.id !== event.id && entry.actor !== 'assistant'
     && entry.actor !== 'system' && (unreadIds === null || unreadIds.has(entry.id))
     && nativeChatWakeKind(entry.id, entry.content, options.selfId) === null);
-  const wake = wakeKind ? { kind: wakeKind, mode: unreadMessages.length > 0 ? 'read-unread' : 'greet' } : undefined;
+  const unreadRetentionMs = options.unreadRetentionMs ?? DEFAULT_NATIVE_UNREAD_RETENTION_MS;
+  const preservedUnreadIds = [...addressedMessageIds, ...(options.groupWake ?? []).map(item => item.messageId),
+    ...(options.unsentReplyMessageIds ?? [])];
+  const unreadMessages = selectNativeUnreadContext(allUnreadMessages, now, unreadRetentionMs, preservedUnreadIds);
+  const excludedUnread = allUnreadMessages.length - unreadMessages.length;
+  if (excludedUnread > 0) historyTruncated = true;
+  const wake = wakeKind ? { kind: wakeKind, mode: unreadMessages.length > 0 || options.unsentReplyMessageIds?.length ? 'read-unread' : 'greet',
+    unreadRetentionMs, excludedUnread } : undefined;
   const consumedWakeIds = new Set(wake?.mode === 'read-unread'
     ? [event.id, ...history.filter(entry => nativeChatWakeKind(entry.id, entry.content, options.selfId) !== null).map(entry => entry.id)] : []);
   const selectedUnread = selectNativeChatMessages(unreadMessages, addressedMessageIds);
@@ -216,11 +246,12 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
   const unreadOrder = new Map(unreadMessages.map((entry, index) => [entry.id, index]));
   recent.sort((left, right) => unreadOrder.get(left.id)! - unreadOrder.get(right.id)!);
   if (recent.length < unreadMessages.length) historyTruncated = true;
-  const quoted = original.filter(part => part.type === 'reply').slice(0, 4).map(part => {
-    const entry = history.find(candidate => candidate.id === part.messageId)
-      ?? options.quotedMessages?.find(candidate => candidate.id === part.messageId);
+  const quotedIds = [...new Set(options.quotedMessageIds ?? original.flatMap(part => part.type === 'reply' ? [part.messageId] : []))].slice(0, 4);
+  const quoted = quotedIds.map(id => {
+    const entry = history.find(candidate => candidate.id === id)
+      ?? options.quotedMessages?.find(candidate => candidate.id === id);
     const full = entry ? contentText(entry.content) : '';
-    return { id: part.messageId, available: entry !== undefined, actor: entry?.actor ?? null, at: messageTime(entry?.receivedAt), localAt: localTime(entry?.receivedAt),
+    return { id, available: entry !== undefined, actor: entry?.actor ?? null, at: messageTime(entry?.receivedAt), localAt: localTime(entry?.receivedAt),
       text: full.slice(0, 300), truncated: full.length > 300 };
   });
   // Names are scoped observations, never lookup keys or authorization facts. Include each relevant
@@ -270,15 +301,16 @@ export function prepareNativeChatInput(event: FrameworkEvent, history: readonly 
       note: '这些旧消息的模型回复尚未发送，因为会话有新消息需要结合理解。先合并原请求与后续纠正，保留数量等未被修改的要求；明确找你的未完成请求仍需处理，后续普通闲聊和图片不取消它。按真实发言账号理解追加、纠正或取消：原请求人的明确取消才撤销其请求，不把其他人的话当作撤销；受控工作变更仍按工具权限核验。其他人的顺嘴闲聊不是新的答复任务。此前模型回复未送达，不能把其中新编的玩笑、称呼、约定或事实当成双方共同语境，也不能把后续消息当作对这些草稿的回应。重新依据真实用户消息与已确认发送的内容判断；已执行的其他工具动作仍以真实结果为准，不重复执行。' } } : {}),
     senderId: event.userId ?? null, senderIsConfiguredOwner: options.owner !== null && event.userId === options.owner,
     participants, ...(relevantActors.length > participants.length ? { participantsLimited: true } : {}),
-    participation, ...(groupParticipation ? {
+    participation, ...(wake ? { wake } : {}), ...(groupParticipation ? {
       groupParticipation: wake?.mode === 'read-unread' ? { ...groupParticipation, currentAddressing: undefined,
         addressedMessageIds: groupParticipation.addressedMessageIds.filter(id => !consumedWakeIds.has(id)) } : groupParticipation,
-      groupWake: (options.groupWake ?? []).filter(item => !consumedWakeIds.has(item.messageId)) } : {}),
+      groupWake: (options.groupWake ?? []).filter(item => !consumedWakeIds.has(item.messageId))
+        .map(item => ({ messageId: item.messageId, actor: item.actor, reason: item.reason })) } : {}),
     unread: options.unread ? { readThrough: options.unread.readThrough, through: options.unread.through,
-      count: options.unread.ids.length, included: recent.filter(item => item.unread).length
+      count: options.unread.ids.length, retentionMs: unreadRetentionMs, excluded: excludedUnread, included: recent.filter(item => item.unread).length
         + (options.unread.ids.includes(event.id) && wake?.mode !== 'read-unread' ? 1 : 0),
       partial: options.unread.partial || historyTruncated } : null,
-    recent, quoted, memory: options.memory ?? null, stickerHints: options.stickerHints ?? null,
+    recent, quoted, ...(options.quotedContextLimited ? { quotedLimited: true } : {}), memory: options.memory ?? null, stickerHints: options.stickerHints ?? null,
     tools: options.tools ? { available: options.tools.available, tools: options.tools.tools.map(tool => ({ name: tool.name })), reason: options.tools.reason } : { available: false, tools: [] }, output: options.output ? { ...options.output, sendMode: 'explicit-tool', sendTool: 'qbf_reply' } : null, historyTruncated, currentTruncated });
 
   function build(length: number): readonly MessageContent[] {
