@@ -574,11 +574,12 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
       if (!owner) store.write(turns, turnKey, { executionId: id }, { expectedRevision: null })
       const next = update(id, value => {
         canRelease(value)
-        return { ...value, status: proof.outcome === 'completed' ? 'completed' : 'failed', externalStatus: proof.outcome,
+        return { ...value, status: value.deadlineReached ? 'timed-out' : proof.outcome === 'completed' ? 'completed' : 'failed', externalStatus: proof.outcome,
           isolated: false, cancelStatus: value.cancelStatus === 'accepted' ? 'confirmed' : value.cancelStatus,
           userMessage: value.userMessage ?? { eventId: proof.evidenceId, messageId: proof.userMessageId },
           turn: value.turn ?? { id: proof.turnId, evidenceId: proof.evidenceId }, lastEventId: proof.evidenceId,
-          lateOutcome: { eventId: proof.evidenceId, outcome: proof.outcome }, lastError: null }
+          lateOutcome: { eventId: proof.evidenceId, outcome: proof.outcome },
+          lastError: value.deadlineReached ? 'EXECUTION_DEADLINE_REACHED' : null }
       })
       release(next)
       return next

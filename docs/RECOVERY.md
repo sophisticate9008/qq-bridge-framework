@@ -92,6 +92,8 @@ GET /api/chat/application?id=<原 operationId>
 
 执行 journal 保留 request、外部 claim receipt、userMessage、turn、期限、取消和晚到结果。`GET /api/chat/executions/recovery?id=<id>` 读取已保存恢复计划；`POST .../preview` 和 `POST .../commit` 分别准备与明确提交，commit 要求计划 revision 和 `confirm: true`。该流程在检查外部执行证据后建立后续绑定边界，不代表原 prompt 会重新提交。普通历史读取不实例化 executor 或发起恢复。
 
+超时后的持久核对确认外部已完成或取消时，更新外部结果并解除可释放的隔离；本轮的超时状态和期限原因继续保留，晚到完成不会改写成本轮成功。
+
 停止或超时会阻止新投递，但不能证明外部模型已经停止。晚到 final 只进入原执行记录，默认不发回 QQ。特别是取消处于 requesting/unknown 时，旧 session 地址仍可能被迟到取消命中，不能直接复用给后继请求。见 [native-session-migration.ts](../src/host/native-session-migration.ts)、[native-execution-recovery.ts](../src/host/native-execution-recovery.ts)、[sessions.ts](../src/host/sessions.ts)。
 
 ## 队列、工作、提醒与交互
