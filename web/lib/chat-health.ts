@@ -25,8 +25,8 @@ export function chatHealthGuidance(layer: ChatHealthLayer): string {
     return '请检查协议端 HTTP 服务及发送地址；若使用框架网关，再检查网关状态。接口恢复后重新检查，未知送达的消息不重发。';
   }
   if (layer.id === 'dsh') return layer.reason === 'authentication_failed' || layer.reason === 'credentials_unavailable'
-    ? '请核对 DSH 的鉴权设置；框架只检查连接，不启停 DSH。'
-    : '请检查 DSH 服务和网络；服务恢复后重新检查。框架只管理自己的连接，不启停 DSH。';
+    ? '请核对 DSH 的鉴权设置；本机受管 DSH 可使用“一键恢复聊天”自动恢复。'
+    : '请检查 DSH 服务和网络；本机受管 DSH 可使用“一键恢复聊天”，远程 DSH 请在其部署端恢复。';
   if (layer.id === 'replies') {
     const causes: Readonly<Record<string, string>> = {
       dsh_follow_ended: 'DSH 会话订阅连接已关闭。', dsh_follow_pong_timeout: 'DSH 会话订阅心跳超时。',
@@ -35,16 +35,16 @@ export function chatHealthGuidance(layer: ChatHealthLayer): string {
       dsh_follow_callback_failed: '框架处理会话事件时失败。',
     };
     const cause = layer.reason && Object.hasOwn(causes, layer.reason) ? causes[layer.reason] : '会话回复监听已中断。';
-    return `${cause}框架正在重新连接；旧请求不重发。持续失败可重新连接聊天，或重启框架。`;
+    return `${cause}框架正在重新连接；旧请求不重发。持续失败可使用“一键恢复聊天”。`;
   }
   if (layer.id === 'tools') {
     if (layer.state === 'recovering') return '工具轮询连接中断，框架会重连只读轮询；已执行或结果未知的工具不重做。';
     const cause = ['dsh_invalid_response', 'dsh_tool_invalid_response'].includes(layer.reason ?? '')
       ? 'DSH 工具接口返回了无法核验的数据，框架已停止该通道。'
       : layer.reason === 'dsh_timeout' ? '工具通道请求超时，执行或回执结果尚未确认。' : '工具通道未恢复。';
-    return `${cause}核对未确认的执行后重启聊天或框架；不要反复发送同一请求。`;
+    return `${cause}可使用“一键恢复聊天”恢复通道；未确认的工具结果保留，不重复执行。`;
   }
-  if (layer.id === 'interactions') return 'DSH 的模型提问连接已中断，当前无法接收新的提问。使用“重新连接聊天”恢复，持续失败可重启框架；旧提问按原记录核对，不重复答复。';
+  if (layer.id === 'interactions') return 'DSH 的模型提问连接已中断，当前无法接收新的提问。可使用“重新连接聊天”或“一键恢复聊天”；旧提问按原记录核对，不重复答复。';
   return layer.reason ? chatRuntimeReason(layer.reason).text : '查看聊天运行详情；持续异常可重启框架，保留原会话。';
 }
 export function chatHealthBadge(health: ChatHealth | null, runtime: ChatRuntimeStatus | null): string {

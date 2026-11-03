@@ -20,6 +20,8 @@ import { Textarea } from './ui/textarea.tsx';
 import { SettingsWindow } from './settings-window.tsx';
 import { DshRestartControl } from './dsh-restart-control.tsx';
 import { useDshRestart } from '../lib/use-dsh-restart.ts';
+import { ChatRepairControl } from './chat-repair-control.tsx';
+import { useChatRepair } from '../lib/chat-repair.ts';
 import { parsePlanCatalog } from '../lib/chat-plans.ts';
 import { DetailsWindow, TechnicalDetails } from './read-only-details.tsx';
 
@@ -128,6 +130,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
 }) {
   const { application, state: applicationState, observationError, initialLoading: applicationLoading, refresh: refreshApplication } = useChatApplication(api, connected);
   const restart = useDshRestart(api, connected);
+  const repair = useChatRepair(api, connected);
   const runtimeResource = useReadResource(api, '/api/chat/runtime', connected, parseChatRuntimeStatus, { intervalMs: 5_000, pollWhen: () => !application.getSnapshot().busy });
   const planResource = useReadResource(api, '/api/chat/plans', connected && selectedPersonaId !== undefined, parsePlanCatalog, { intervalMs: 10_000 });
   const personaSelected = selectedPersonaId === undefined || planResource.snapshot?.plans.find(plan => plan.id === planResource.snapshot?.activePlanId)?.personaId === selectedPersonaId;
@@ -136,7 +139,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
   const [localBusy, setBusy] = useState(false);
   const [localBlocked, setBlocked] = useState(false);
   const [manualReview, setManualReview] = useState<symbol | null>(null);
-  const busy = localBusy || applicationState.busy || applicationState.reconciling || restart.pending;
+  const busy = repair.pending || localBusy || applicationState.busy || applicationState.reconciling || restart.pending;
   const blocked = localBlocked || applicationState.blocked;
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -152,6 +155,8 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
   const committedConfiguration = useRef<{ readonly api: ApiClient; readonly revision: string } | null>(null);
   const reconciledDeployment = useRef<string | null>(null);
   const epoch = useRef(0);
+  const repairEpoch = useRef(repair.state.epoch);
+  const acceptedRepair = useRef(repair.state.acceptedId);
   const connection = useRef({ api, connected, running, configurationDirty, configurationRevision });
   connection.current = { api, connected, running, configurationDirty, configurationRevision };
   const documentOwner = useRef<{ api: ApiClient; generation: number; snapshot: DeploymentSnapshot } | null>(null);
@@ -211,6 +216,24 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
       setError('伙伴配置已变化，先前应用操作的结果需重新核对；不会自动继续或重试。');
     }
   }, [api, configurationDirty, configurationRevision]);
+
+  useEffect(() => {
+    if (repairEpoch.current === repair.state.epoch) return;
+    repairEpoch.current = repair.state.epoch;
+    epoch.current++;
+    if (documentOwner.current?.api === api) documentOwner.current = { ...documentOwner.current, generation: epoch.current };
+    request.current?.abort(); request.current = null;
+    recoveryRequest.current?.abort(); recoveryRequest.current = null;
+    configurationRequest.current = null;
+    setBusy(false); setManualReview(null); setPreview(null); setError(''); setNotice('');
+  }, [api, repair.state.epoch]);
+  useEffect(() => {
+    if (!repair.state.acceptedId || acceptedRepair.current === repair.state.acceptedId) return;
+    acceptedRepair.current = repair.state.acceptedId;
+    setBlocked(false); setPendingReload(false); setManualReview(null); setError('');
+    setNotice('一键恢复已完成，已重新读取聊天设置与运行状态。');
+    if (!dirty) setReload(value => value + 1);
+  }, [api, repair.state.acceptedId]);
 
   function update(patch: Partial<DeploymentForm>): void {
     if (!currentDocument() || busy || blocked || frozen.current.has(api) || request.current) return;
@@ -324,6 +347,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
 
   async function autoApply(): Promise<void> {
     const state = application.getSnapshot();
+    if (repair.pending) return;
     if (primaryAction === 'observe') { showProgress(); return; }
     if (state.kind === 'manual' && state.blocked && state.manualSource === 'deployment') { await restoreManualOperations(); return; }
     if (state.kind === 'application' && state.busy && !request.current) { showProgress(); return; }
@@ -381,7 +405,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
   const waitingForReload = applicationState.operation?.phase === 'apply'
     && applicationState.operation.reasons.some(reason => ['pending_reload', 'session_configuration_reload_required',
       'session_configuration_reload_unknown'].includes(reason));
-  const primaryAction = chatApplicationPrimaryAction(applicationState, { connected, requestActive: request.current !== null,
+  const primaryAction = chatApplicationPrimaryAction(applicationState, { connected, requestActive: repair.pending || request.current !== null,
     updateReady: !applicationLoading && !observationError && !busy && saved !== null && form !== null && currentDocument() && !blocked && !dirty
       && personaSelected && !(prepareConfiguration ? configurationUpdateBlocked : configurationDirty) });
   const updateAvailable = primaryAction === 'update' || primaryAction === 'observe' || primaryAction === 'reconcile' || primaryAction === 'restore';
@@ -400,7 +424,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
 
   async function reconcileApplication(): Promise<void> {
     const operationId = application.getSnapshot().operationId;
-    if (!operationId || request.current || application.getSnapshot().busy || application.getSnapshot().reconciling) return;
+    if (repair.pending || !operationId || request.current || application.getSnapshot().busy || application.getSnapshot().reconciling) return;
     const controller = new AbortController(); const generation = epoch.current;
     request.current = controller;
     recoveryRequest.current = controller;
@@ -428,7 +452,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
 
   async function restoreManualOperations(): Promise<void> {
     const state = application.getSnapshot();
-    if (!connected || request.current || state.busy || state.reconciling || state.kind !== 'manual'
+    if (!connected || repair.pending || request.current || state.busy || state.reconciling || state.kind !== 'manual'
       || state.manualSource !== 'deployment' || !state.blocked) return;
     const controller = new AbortController();
     const generation = epoch.current;
@@ -461,7 +485,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
 
   if (!connected) return null;
   const runtimeStatus = runtimeResource.snapshot;
-  const statusLabel = waitingForReload || pendingReload ? '等待加载' : blocked ? '需要核对' : busy ? '正在应用'
+  const statusLabel = repair.pending ? '正在恢复聊天' : waitingForReload || pendingReload ? '等待加载' : blocked ? '需要核对' : busy ? '正在应用'
     : applicationState.operation?.state === 'blocked' ? '应用未完成' : configurationDirty ? '未保存' : !configurationActive ? '未选用' : runtimeResource.error ? '状态未更新'
       : !runtimeStatus ? '正在读取状态' : runtimeStatus.state === 'stopped' ? '已选用 · 聊天已停止'
         : runtimeStatus.state === 'starting' ? '正在启动聊天' : runtimeStatus.state === 'stopping' ? '正在停止聊天'
@@ -521,6 +545,7 @@ export function DshDeploymentManager({ api, connected, setDirty, running = false
     {configurationDirty && !prepareConfiguration && <p className="text-muted-foreground">请先保存人设。</p>}
     {error && <p className="text-destructive" role="alert">{error}</p>}
     {observationError && <p role="status">暂时无法读取应用进度，稍后刷新。</p>}
+    {(blocked || error || waitingForReload || pendingReload || applicationState.operation?.state === 'blocked') && <ChatRepairControl api={api} connected={connected} />}
     {(waitingForReload || pendingReload || restart.pending) && <div className="flex flex-wrap items-center gap-2">
       <span>配置尚未加载，可重启 DSH 后继续应用。</span><DshRestartControl api={api} connected={connected} compact />
     </div>}

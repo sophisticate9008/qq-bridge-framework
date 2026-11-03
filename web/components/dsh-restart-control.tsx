@@ -1,6 +1,7 @@
 import type { ApiClient } from '../lib/api.ts';
 import { requestDshRestart } from '../lib/dsh-restart.ts';
 import { useDshRestart } from '../lib/use-dsh-restart.ts';
+import { useChatRepair } from '../lib/chat-repair.ts';
 import { Button } from './ui/button.tsx';
 
 const phases = { stop: '正在停止聊天', restart: '正在重启 DSH', verify: '正在等待 DSH 就绪', restore: '正在恢复聊天' } as const;
@@ -17,6 +18,7 @@ const availability: Readonly<Record<string, string>> = {
 
 export function DshRestartControl({ api, connected, compact = false }: { readonly api: ApiClient; readonly connected: boolean; readonly compact?: boolean }) {
   const { state, pending, resource } = useDshRestart(api, connected);
+  const repair = useChatRepair(api, connected);
   const operation = state.snapshot?.operation;
   const unknown = state.uncertain || operation?.state === 'unknown';
   const running = operation?.state === 'running';
@@ -26,8 +28,8 @@ export function DshRestartControl({ api, connected, compact = false }: { readonl
   const label = running ? operation.phase ? phases[operation.phase] : '正在重启 DSH' : unknown ? '恢复原重启' : '重启 DSH';
   return <div className={compact ? 'inline-grid gap-1' : 'grid gap-2 rounded-lg border p-3 text-xs'} data-dsh-restart>
     <div className="flex flex-wrap items-center gap-2"><Button size="sm" variant="outline"
-      disabled={!connected || state.requestActive || running || !unknown && !state.snapshot?.available}
-      onClick={() => void requestDshRestart(api, unknown)}>{label}</Button>
+      disabled={!connected || repair.pending || state.requestActive || running || !unknown && !state.snapshot?.available}
+      onClick={() => { if (!repair.pending) void requestDshRestart(api, unknown); }}>{label}</Button>
       {(pending || resource.error || state.snapshot?.available === false) && <Button size="sm" variant="ghost" onClick={resource.refresh}>读取重启状态</Button>}
     </div>
     {!compact && <p>自动暂停聊天、重启本机 DSH，并恢复此前的运行状态；当前草稿与会话记录保留。</p>}

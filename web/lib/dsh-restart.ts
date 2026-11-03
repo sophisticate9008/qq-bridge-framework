@@ -13,12 +13,21 @@ export interface DshRestartState {
 }
 function createStore() {
   let state: DshRestartState = { snapshot: null, operationId: null, requestActive: false, uncertain: false, error: '' };
+  let ownershipGeneration = 0;
   const listeners = new Set<() => void>();
   const update = (next: DshRestartState) => { state = next; for (const listener of listeners) listener(); };
   return {
     getSnapshot: () => state,
+    getOwnershipGeneration: () => ownershipGeneration,
+    acceptChatRepair(snapshot: NativeDshRestartSnapshot, expectedGeneration?: number) {
+      if (expectedGeneration !== undefined && ownershipGeneration !== expectedGeneration) return false;
+      if (state.snapshot?.operation && snapshot.operation && state.snapshot.operation.createdAt > snapshot.operation.createdAt) return false;
+      if (snapshot.operation && ['running', 'unknown'].includes(snapshot.operation.state)) return false;
+      update({ snapshot, operationId: snapshot.operation?.id ?? null, requestActive: false, uncertain: false, error: '' });
+      return true;
+    },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    begin() { if (state.requestActive) return false; update({ ...state, requestActive: true, error: '' }); return true; },
+    begin() { if (state.requestActive) return false; ownershipGeneration++; update({ ...state, requestActive: true, error: '' }); return true; },
     identify(operationId: string) { update({ ...state, operationId, uncertain: true, snapshot: state.snapshot ? { ...state.snapshot, operation: null } : null }); },
     observe(snapshot: NativeDshRestartSnapshot, explicit = false): boolean {
       const next = snapshot.operation;

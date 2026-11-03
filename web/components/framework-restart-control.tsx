@@ -1,15 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
 import { asRecord, errorMessage, type ApiClient } from '../lib/api.ts';
+import { useChatRepair } from '../lib/chat-repair.ts';
 import { Button } from './ui/button.tsx';
 import { SettingsWindow } from './settings-window.tsx';
 
 /** Reuses the server-selected framework maintenance operation; no external service command. */
 export function FrameworkRestartControl({ api }: { readonly api: ApiClient }) {
+  const repair = useChatRepair(api, true);
+  const acceptedRepair = useRef(repair.state.acceptedId);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
+  useEffect(() => {
+    if (!repair.state.acceptedId || acceptedRepair.current === repair.state.acceptedId) return;
+    acceptedRepair.current = repair.state.acceptedId; setPending(false); setMessage('');
+  }, [repair.state.acceptedId]);
   async function restart(): Promise<void> {
-    if (pending) return;
+    if (pending || repair.pending) return;
     setPending(true); setMessage('');
     let dispatched = false;
     try {
@@ -28,8 +35,8 @@ export function FrameworkRestartControl({ api }: { readonly api: ApiClient }) {
     }
   }
   return <SettingsWindow title="重启框架" label="重启框架" description="重新启动框架宿主，恢复自己的聊天连接。">
-    <div className="stack"><p className="small">重启会短暂中断框架处理，保留配置、会话历史和执行记录。协议端和 DSH 继续由各自管理；结果未知的请求不会自动重发。</p>
-      <div className="actions"><Button variant="outline" disabled={pending} onClick={() => void restart()}><RotateCw className="size-3.5" />{pending ? '等待框架恢复' : '确认重启框架'}</Button></div>
+    <div className="stack"><p className="small">重启会短暂中断框架处理，保留配置、会话历史和执行记录。此操作仅重启框架宿主；需要同时恢复受管 DSH 时使用“一键恢复聊天”。结果未知的请求不会自动重发。</p>
+      <div className="actions"><Button variant="outline" disabled={pending || repair.pending} onClick={() => void restart()}><RotateCw className="size-3.5" />{pending ? '等待框架恢复' : '确认重启框架'}</Button></div>
       {message && <p role="status" className="small">{message}</p>}
       <p className="small muted">网页无法连接或该入口不可用时，在框架运行机器执行：</p><code>qbf-cli service status</code><code>qbf-cli restart framework-admin</code>
     </div>

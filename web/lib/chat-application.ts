@@ -38,15 +38,26 @@ export function chatApplicationPrimaryAction(state: ChatApplicationState, option
 function createStore() {
   let state: ChatApplicationState = { busy: false, blocked: false, reconciling: false, phase: null, kind: null, operationId: null, operation: null, manualSource: null };
   let owner: symbol | null = null;
+  let ownershipGeneration = 0;
   let manualReview: symbol | null = null;
   const listeners = new Set<() => void>();
   const update = (next: ChatApplicationState) => { state = next; for (const listener of listeners) listener(); };
   return {
     getSnapshot: () => state,
+    getOwnershipGeneration: () => ownershipGeneration,
+    acceptChatRepair(operation: NativeApplicationSnapshot, expectedGeneration?: number) {
+      if (operation.state !== 'completed' || expectedGeneration !== undefined && ownershipGeneration !== expectedGeneration
+        || state.operation && state.operation.createdAt > operation.createdAt) return false;
+      owner = null; manualReview = null;
+      update({ busy: false, blocked: false, reconciling: false, phase: operation.phase, kind: 'application',
+        operationId: operation.id, operation, manualSource: null });
+      return true;
+    },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     claim(kind: ChatApplicationState['kind'] = 'manual', manualSource: 'deployment' | 'runtime' = 'runtime') {
       if (owner || state.busy || state.blocked) throw new Error('另一项聊天操作正在进行或结果尚未确认，请先核对状态。');
       manualReview = null;
+      ownershipGeneration++;
       owner = Symbol('chat-application'); update({ ...state, busy: true, phase: null, kind, manualSource: kind === 'manual' ? manualSource : null,
         ...(kind === 'application' ? { operationId: null, operation: null } : {}) }); return owner;
     },
@@ -54,6 +65,7 @@ function createStore() {
       if (owner || state.busy || state.reconciling || state.kind !== 'application' || state.operationId !== operationId) {
         throw new Error('另一项操作仍在进行，或核对目标已经变化，请先重新读取。');
       }
+      ownershipGeneration++;
       owner = Symbol('chat-application-reconciliation'); update({ ...state, reconciling: true }); return owner;
     },
     owns: (token: symbol) => owner === token,

@@ -405,3 +405,16 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 `POST /api/chat/runtime/reconnect` 只接受当前八份 `{revisions}`，核验已运行的宿主、配置、权限与 DSH 插件代次，重建已有会话监听、模型提问连接并核对原工具投影；最多探查一个已有授权绑定，不创建会话、不提交模型输入、不回放历史或工具。插件代次变化及不明确的工具通道要求重启聊天或框架。连接中断后，回复监听按有界退避重连，空闲旧监听在池满时可退役；工具通道仅重试只读轮询，原票据去重状态保留。工具执行或完成回执未知不重试，继续显示诊断与恢复入口。
 
 网页“重启框架”复用现有 `/api/settings/apply` 的 `target: "admin"` 与当前配置 revision，只重启框架宿主。协议端、DSH 及其登录与会话由各自管理，框架诊断和重连不启停这些进程。框架无法响应时，运行机器上的 `qbf-cli restart framework-admin` 为独立恢复入口。
+
+
+## 受管聊天一键恢复
+
+`GET /api/chat/repair` 返回 `{schema:1, available, operation, applicationId?}`，可用 `?id=<UUID v4>` 查询原修复。operation 含 id、state（running/completed/failed）、phase（checking/stopping/starting-services/applying/starting-chat/verifying）、时间和有界原因码。`POST` 同路径仅接受 `{operationId}`，浏览器不能指定命令、路径或组件；受信配置指向的 `ops/qbf-cli` 启动独立恢复进程。重复 ID 返回原记录，已有存活修复时返回该修复，不并行重启。`applicationId` 指向该次修复自己的应用记录，完成读取不借用最新其他应用。
+
+`POST /api/chat/repair/reconcile` 仅接受 `{operationId}`：已有记录时返回原记录；缺失时在同一私有事务内封存 ID 并返回 409 `chat_repair_not_received`，迟到 POST 不得重新受理。修复 journal 独立存储，最多16条活动历史和8192个退役 ID，PID 与进程启动身份防止进程号复用；达到退役上限明确拒绝，不清空去重证据。未知响应不自动重复 POST。
+
+当前只支持可信本机 Linux 单账号维护范围。多账号登记或接管信息存在时受理前拒绝。只停止清单中的受管组件，并始终排除 napcat/snowluma 协议组。全停证据成立后备份并中断旧配置控制记录，不修改业务未知执行与发送。运行中的恢复对普通配置/管理 POST 加写屏障；恢复进程登记的原生应用 ID 单独放行，GET、修复读取与同 ID 核对保留。
+
+完成条件为真实 running/chatReady 与健康检查通过；工作进程退出投影为 failed，可使用新 ID 再次明确修复。浏览器的共享恢复状态跨卡片一致，观察同一 ID；只有本浏览器请求或见过运行中的修复完成后，才同步已确认的新应用/维护记录并解除旧本地锁。历史 completed 不代替当前链路检查。
+
+延期群聊原请求使用内部有界快照，最多32条、每条800字符；后继 `replyDelivery.unsentFor` 和 `requests` 最多32条，展示正文单条最多400字符、总预算12KiB，优先保留明确呼叫并标明截断。保留真实 actor、时间与 addressed 来源；昵称纳入本批明确呼叫，概率唤醒使用普通观察合并窗口。后继持有未送达请求时不再被持续新消息重复延期；已执行工具和旧草稿不重放。
