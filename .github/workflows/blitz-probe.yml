@@ -1,0 +1,81 @@
+name: HTML 渲染组件编译调研
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['experiment/blitz-renderer-build']
+    paths: ['.github/workflows/blitz-probe.yml', 'tools/blitz-probe/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blitz-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: CPU 渲染 ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, platform: linux, arch: x64}
+          - {runner: ubuntu-24.04-arm, platform: linux, arch: arm64}
+          - {runner: windows-2022, platform: win32, arch: x64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      BLITZ_REV: 16ebc29363826d43917d2e3cb91d37f7d2156fdd
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: DioxusLabs/blitz
+          ref: ${{ env.BLITZ_REV }}
+          path: .cache/blitz-source
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - name: 安装 Rust 工具链
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+      - name: Linux 构建工具
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config python3 libclang-dev
+      - name: 准备固定上游版本的 CPU 渲染入口
+        run: node tools/blitz-probe/prepare.ts
+      - name: 编译优化后的无窗口渲染程序
+        run: |
+          set -o pipefail
+          cargo build --manifest-path .cache/blitz-source/Cargo.toml --profile production --example qbf-html-probe 2>&1 | tee runtime/blitz-probe/build.log
+      - name: 原生运行、长图完整性与体积测量
+        run: node tools/blitz-probe/measure.ts
+      - name: Linux 动态依赖
+        if: runner.os == 'Linux'
+        run: ldd runtime/blitz-probe/package/qbf-html-probe | tee runtime/blitz-probe/dynamic-dependencies.txt
+      - name: 保存组件、样图与小型报告
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: blitz-probe-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            runtime/blitz-probe/*.tar.gz
+            runtime/blitz-probe/*.json
+            runtime/blitz-probe/*.png
+            runtime/blitz-probe/*.log
+            runtime/blitz-probe/*.txt
+            runtime/blitz-probe/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 3
