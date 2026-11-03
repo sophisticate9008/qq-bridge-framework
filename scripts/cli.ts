@@ -79,7 +79,7 @@ export interface CliIo {
 /** Explicit service namespace plus unambiguous maintenance shortcuts. */
 export function serviceArguments(argumentsList: readonly string[]): string[] | null {
   if (argumentsList[0] === 'service') return argumentsList.length === 1 ? ['help'] : argumentsList.slice(1);
-  return ['stop', 'restart', 'logs', 'console', 'protocol', 'extensions', 'maintenance', 'describe'].includes(argumentsList[0] ?? '')
+  return ['stop', 'restart', 'repair-chat', 'logs', 'console', 'protocol', 'extensions', 'maintenance', 'describe'].includes(argumentsList[0] ?? '')
     ? [...argumentsList] : null;
 }
 

@@ -124,11 +124,11 @@ async function load(): Promise<Configuration> {
   }
 }
 
-async function execute(executable: string, argumentsList: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number; inherit?: boolean } = {}): Promise<CommandResult> {
+async function execute(executable: string, argumentsList: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number; inherit?: boolean; detached?: boolean } = {}): Promise<CommandResult> {
   return new Promise(resolve => {
     let output = '';
     let finished = false;
-    const child = spawn(executable, argumentsList, { cwd: options.cwd, env: options.env, shell: false, detached: !options.inherit, stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'ignore'] });
+    const child = spawn(executable, argumentsList, { cwd: options.cwd, env: options.env, shell: false, detached: options.detached ?? !options.inherit, stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'ignore'] });
     const finish = (code: number): void => {
       if (finished) return;
       finished = true;
@@ -139,7 +139,7 @@ async function execute(executable: string, argumentsList: string[], options: { c
       if (output.length < 131072) output += data.toString('utf8').slice(0, 131072 - output.length);
     });
     const timer = setTimeout(() => {
-      if (!options.inherit && child.pid) {
+      if (!options.inherit && options.detached !== false && child.pid) {
         try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Process already exited. */ }
       } else child.kill('SIGKILL');
       finish(124);
@@ -151,6 +151,7 @@ async function execute(executable: string, argumentsList: string[], options: { c
 
 async function sessions(service: Service): Promise<string[]> {
   const result = await execute('/usr/bin/screen', ['-ls']);
+  if (result.code !== 0 && !(result.code === 1 && /No Sockets found/i.test(result.output))) fail('无法核对受管进程会话，已取消进程操作。');
   const names = new Set([service.screen, ...(service.screenAliases ?? [])]);
   return result.output.split('\n').flatMap(line => {
     const match = /^\s*(\d+)\.([^\s]+)\s+\(/.exec(line);
@@ -449,6 +450,59 @@ async function lockAndRun(config: Configuration, argumentsList: string[]): Promi
 async function main(): Promise<void> {
   const argumentsList = process.argv.slice(2);
   const action = argumentsList[0] ?? 'start';
+  if (action === 'repair-chat') {
+    const [id, flag, filename] = argumentsList.slice(1);
+    if (argumentsList.length !== 4 || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id ?? '')
+      || flag !== '--config' || !absolute(filename)) fail('聊天修复参数无效。');
+    const config = await load();
+    for (const id of ['dsh', 'framework-admin']) {
+      const service = component(config, id, true);
+      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管 DSH 与框架管理服务。');
+    }
+    const { runChatRepair } = await import('./chat-repair.ts');
+    const command = async (value: string) => {
+      const environment = { ...process.env };
+      delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
+      // Keep every stage in the detached repair session so stopping its former host protects the whole worker tree.
+      const result = await execute(process.execPath, [entry, value], { env: environment, timeout: 180_000, detached: false });
+      if (result.code !== 0) throw Object.assign(new Error('Managed repair stage failed.'), { code:
+        value === 'repair-services-stop' ? 'chat_repair_stop_failed' : 'chat_repair_start_failed' });
+    };
+    await runChatRepair(filename, id, { dshHome: config.dshHome, ensureDsh: () => command('repair-services-prepare'),
+      stop: () => command('repair-services-stop'), start: () => command('repair-services-start') });
+    return;
+  }
+  if (['repair-services-prepare', 'repair-services-stop', 'repair-services-start'].includes(action)) {
+    if (argumentsList.length !== 1) fail('聊天修复参数无效。');
+    const config = await load();
+    for (const id of ['dsh', 'framework-admin']) {
+      const service = component(config, id, true);
+      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管 DSH 与框架管理服务。');
+    }
+    if (process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') { await lockAndRun(config, argumentsList); return; }
+    // Protocol clients never belong to chat repair, even if a legacy manifest marks them managed.
+    const targets = ordered(config).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
+      && !['napcat', 'snowluma'].includes(config.services[id]!.group));
+    if (action === 'repair-services-prepare') {
+      // Starting an already ready DSH does not interrupt a working chat. Live capability discovery needs its API.
+      await startOne(config, 'dsh', Date.now() + 60_000);
+    } else if (action === 'repair-services-stop') {
+      const deadline = Date.now() + 60_000;
+      for (const id of targets.toReversed()) await stopOne(config, id, deadline);
+      // Recheck every target: only this proof permits editing abandoned configuration controllers.
+      for (const id of targets) if ((await sessions(config.services[id]!)).length > 0 || await listening(config.services[id]!)) fail('受管服务尚未全部停止。');
+    } else {
+      let failed = false;
+      const deadline = Date.now() + 140_000;
+      // Bring back the UI even when a dependency cannot start. Saved running intent is suppressed by the worker.
+      for (const id of ['framework-admin', ...targets.filter(id => id !== 'framework-admin' && config.services[id]!.enabled !== false)]) {
+        try { await startOne(config, id, Math.min(deadline, Date.now() + 60_000)); }
+        catch { failed = true; console.error(`${id} 恢复启动尚未就绪。`); }
+      }
+      if (failed) fail('部分受管服务尚未恢复，管理页面可查看恢复状态。');
+    }
+    return;
+  }
   const rawRest = argumentsList.slice(1);
   const json = ['status', 'doctor'].includes(action) && rawRest.includes('--json');
   if (json && rawRest.filter(value => value === '--json').length !== 1) fail('JSON 参数不能重复。');

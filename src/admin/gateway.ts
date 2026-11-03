@@ -30,6 +30,8 @@ import { createNativeRuntimeRoutes, createNativeRuntimeApplicationPorts, withNat
 import { nativeApplicationService } from './native-application.ts';
 import { nativeApplicationRequiresReconciliation } from '../contracts/native-application.ts';
 import { createNativeDshRestartRoutes } from './native-dsh-restart.ts';
+import { createChatRepairRoutes } from './chat-repair.ts';
+import { createChatRepairStorage, projectChatRepair } from '../storage/chat-repair.ts';
 import { createNativeDshRestartService } from '../host/native-dsh-restart.ts';
 import { createLocalDshMaintenance } from '../host/local-dsh-maintenance.ts';
 import { nativeRuntimeIsQuiescent } from '../contracts/native-runtime-quiescence.ts';
@@ -693,7 +695,15 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     });
     signal.throwIfAborted();
   }
+  const repairStorage = createChatRepairStorage(directory);
   const maintenanceGuard = (route: AdminRoute): AdminRoute => ({ ...route, async handle(request) {
+    if (route.method === 'POST') {
+      for (const repair of (await repairStorage.read()).value.records) {
+        if ((await projectChatRepair(repair)).state !== 'running') continue;
+        if (route.pathname === '/api/chat/application' && repair.applicationId && request.body?.operationId === repair.applicationId) continue;
+        throw new AdminRequestError(409, 'chat_repair_busy');
+      }
+    }
     if (route.method === 'POST' && !route.pathname.startsWith('/api/chat/dsh/restart') && await dshRestart.unresolved()
       && !(route.pathname === '/api/chat/runtime/stop' && !dshRestart.busy())) {
       throw new AdminRequestError(409, dshRestart.busy() ? 'dsh_restart_busy' : 'dsh_restart_reconciliation_required');
@@ -739,7 +749,13 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
       ...(operations === undefined ? {} : { apply: operations.apply }),
     }).map(maintenanceGuard));
   }
+  routes.push(...createChatRepairRoutes({ directory, configurationFilename: options.configurationFilename, serviceManager: configuration.serviceManager,
+    async assertRepairScope() {
+      const registered = await accounts.read();
+      if (registered.accounts.length > 0 || registered.legacy.adoptedBy !== null) throw new AdminRequestError(409, 'chat_repair_accounts_require_individual_recovery');
+    } }));
   const server = createAdminServer({ token: () => bootstrap.token(), snapshot: snapshotHandler, routes, handlerTimeoutMs: 70_000,
+    accessSessionFilename: join(directory, 'admin-access-sessions.json'),
     ...(configuration.accessSessionTtlMs === undefined ? {} : { accessSessionTtlMs: configuration.accessSessionTtlMs }),
     ...(configuration.publicOrigin === undefined ? {} : { publicOrigin: configuration.publicOrigin }),
     ...(configuration.trustedLoopbackProxy === undefined ? {} : { trustedLoopbackProxy: configuration.trustedLoopbackProxy }),
