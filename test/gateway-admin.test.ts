@@ -196,7 +196,7 @@ test('loads only private explicit configuration and formats reachable addresses'
     port: 3210,
     tokenFile: './admin.token',
     gatewayConfiguration: './gateway.json',
-    legacyRoot: '/root/qq-bridge'
+    legacyRoot: '/example/legacy-bridge'
   }));
   assert.throws(() => loadGatewayAdminConfiguration(files.adminConfiguration), { code: 'GATEWAY_ADMIN_INVALID_CONFIG' });
 

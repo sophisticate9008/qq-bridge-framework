@@ -136,4 +136,4 @@ npm run build
 
 文件日志由进程管理器轮转。仓库提供 `ops/logrotate.conf` 模板：将 `@LOG_DIRECTORY@` 替换为私有日志目录，通过 cron 每分钟调用 logrotate；采用每日或超过 10MiB 轮转，当前文件加最多四份历史、历史最多 7 天。持续写入日志通过 copytruncate 轮转，检查间隔内可能短暂超过大小阈值，截断交接有标准 copytruncate 的短暂丢行窗口。框架数据库的执行结果不依赖文本日志。
 
-本机使用独立的 `/etc/cron.d/qq-bridge-framework-logrotate` 和 `/etc/logrotate.d/qq-bridge-framework` 管理本框架及沿用的服务日志；进程无需重启即可启用轮转。部署到其他机器时由其进程管理器安装同等规则，模板见 `ops/logrotate.conf`。
+部署时由进程管理器安装日志轮转规则，日志目录取实际配置；模板见 `ops/logrotate.conf`。
