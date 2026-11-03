@@ -264,7 +264,26 @@ export function createNativeApplicationCoordinator(options: {
           inMemoryUnknown = undefined;
           return snapshot(settled);
         }
-        if (!sameRevisions) return current;
+        if (!sameRevisions) {
+          // A failed older application cannot be resumed against a newer plan.
+          // Once the newer configuration is independently proved loaded, retire
+          // the old intent without replaying it or blocking future UI actions.
+          const ready = (status: NativeApplicationRuntimeStatus) => status.configurationCompatibility.state === 'compatible'
+            && (status.state === 'stopped' && status.quiescent === true || status.state === 'running' && status.chatReady);
+          if (awaitingDeployment && ready(observed) && isNativeConfigurationRevisions(observed.revisions)
+            && await verifyDeployment(observed.revisions, options.signal)) {
+            const latest = await withDeadline({ signal: options.signal, timeoutMs: 10_000,
+              code: 'APPLICATION_STATUS_UNAVAILABLE', run: () => options.ports.status() });
+            if (!ready(latest) || !same(latest.revisions, observed.revisions)) return current;
+            const settled: NativeApplicationSnapshot = { ...current, state: 'blocked', updatedAt: now(),
+              reasons: ['application_configuration_superseded'] };
+            await options.storage.write(prior.revision, { ...prior.value, records: prior.value.records.map(item => item.snapshot.id === id
+              ? { ...item, instanceId, snapshot: settled } : item) });
+            inMemoryUnknown = undefined;
+            return snapshot(settled);
+          }
+          return current;
+        }
         if (awaitingDeployment && observed.state === 'stopped' && await verifyDeployment(current.revisions, options.signal)) {
           const checked = await withDeadline({ signal: options.signal, timeoutMs: 10_000,
             code: 'APPLICATION_STATUS_UNAVAILABLE', run: () => options.ports.status() });

@@ -123,6 +123,7 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
   pending_reload: { text: '配置已写入，等待 DSH 加载；加载前不能启动聊天。', page: 'adapters' },
   session_configuration_reload_required: { text: '当前聊天设置尚未加载到原会话。请应用聊天设置；已写入的配置可重启 DSH 后继续。', page: 'model' },
   session_configuration_reload_unknown: { text: 'DSH 加载新聊天设置的结果尚未确认，请查看应用详情并恢复原操作。', page: 'model' },
+  application_configuration_superseded: { text: '旧应用已结束，更新后的聊天设置已确认加载。当前聊天状态以运行状态为准。', page: 'model' },
   preserved_preset_baseline_required: { text: '未找到原会话使用的预设记录，暂时无法更新其提示词。', page: 'sessions' },
   preserved_preset_baseline_unavailable: { text: '原会话的预设记录暂不可读，请检查本机存储。', page: 'sessions' },
   preserved_preset_target_conflict: { text: '原会话的预设在 DSH 中缺失或重复，请检查该预设。', page: 'adapters' },

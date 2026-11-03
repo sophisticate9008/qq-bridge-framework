@@ -174,6 +174,24 @@ test('session reload recovery continues the original application without writing
   }
 });
 
+test('a superseded failed application retires only after the newer saved configuration is proved loaded', async t => {
+  const storage = createNativeApplicationStorage(await directory(t)); const f = fixture();
+  f.ports.apply = async () => { f.calls.push('apply'); return { state: 'unknown', missingReasons: ['dsh_yaml_complexity_unsupported'] }; };
+  const proof = f.ports.reconcileDeployment;
+  f.ports.reconcileDeployment = async () => ({ missingReasons: ['pending_reload'], presetBindings: [] });
+  const coordinator = createNativeApplicationCoordinator({ storage, ports: f.ports, signal: new AbortController().signal });
+  const request = { operationId: randomUUID(), revisions, deploy: true };
+  await coordinator.create(request); await coordinator.drain();
+  f.setStatus({ state: 'running', chatReady: true, revisions: { ...revisions, deployment: 'a'.repeat(64), plans: 'c'.repeat(64) } });
+  assert.equal((await coordinator.reconcile(request.operationId)).state, 'unknown');
+  f.ports.reconcileDeployment = proof;
+  const settled = await coordinator.reconcile(request.operationId);
+  assert.equal(settled.state, 'blocked');
+  assert.deepEqual(settled.reasons, ['application_configuration_superseded']);
+  assert.equal(f.calls.filter(call => call === 'apply').length, 1);
+  assert.equal(f.calls.filter(call => call === 'start').length, 0);
+});
+
 test('reload observation expires as pending, blocks replacement intents and resumes only after explicit proof on the same id', async t => {
   const storage = createNativeApplicationStorage(await directory(t)); const f = fixture();
   f.ports.apply = async () => { f.calls.push('apply'); return { state: 'pending_reload', backupId: 'backup', missingReasons: ['pending_reload'] }; };
