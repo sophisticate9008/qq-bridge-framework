@@ -1,0 +1,46 @@
+name: 发行附件上传
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已验证并已创建草稿的版本标签
+        required: true
+        type: string
+      source_commit:
+        description: 标签指向的完整提交 SHA
+        required: true
+        type: string
+      artifact_run:
+        description: 同提交标签发行安装验收成功的运行 ID
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: release-upload-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  upload:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-packages
+          run-id: ${{ inputs.artifact_run }}
+          github-token: ${{ github.token }}
+          path: runtime/cloud-release
+      - name: 核验同提交 CI、标签、归档来源和校验后上传草稿
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run }}
+        run: node scripts/upload-release-assets.ts "$RELEASE_TAG" "$SOURCE_COMMIT" "$ARTIFACT_RUN" "runtime/cloud-release/$RELEASE_TAG"

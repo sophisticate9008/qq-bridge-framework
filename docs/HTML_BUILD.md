@@ -80,3 +80,9 @@ npm run build
 `release.yml` 和 `windows.yml` 调用同一可复用组件工作流；新框架提交可以复用旧提交产出的同指纹组件。完整包打包器再次核对三个平台组件指纹及校验值，拒绝缺失或错配。发行附件包含完整框架 TAR、Windows ZIP、SDK、DSH 插件、三个独立原生组件和统一 SHA-256。
 
 每次发布仍需等待该完整框架提交的全部 CI 和三平台安装验收成功。组件复用只节省 Rust 编译，不能跳过新框架的验证；发布顺序见 [版本规则](VERSIONING.md)。
+
+附件上传速度受本机网络限制时，可调用 `upload-release.yml`，直接把已通过标签验收的 `release-packages` 上传到同版本的现有草稿。输入 `tag`、完整 `source_commit` 和标签验收的 `artifact_run`；工作流再次核验该提交全部必要 CI、标签、归档来源及 SHA-256。它复用现成附件，不构建、不修改标签、不创建或公开 Release。已发布版本不接受覆盖。
+
+```sh
+gh workflow run upload-release.yml --ref main -f tag=v1.10.0 -f source_commit=完整提交SHA -f artifact_run=标签验收运行ID
+```
