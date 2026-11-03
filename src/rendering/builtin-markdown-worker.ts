@@ -51,7 +51,7 @@ function mathRules(parser: InstanceType<typeof MarkdownIt>) {
     if (opening === '$' && /\s/.test(state.src[start + 1] ?? '')) return false
     let end = state.src.indexOf(closing, start + opening.length)
     while (end >= 0 && state.src[end - 1] === '\\') end = state.src.indexOf(closing, end + closing.length)
-    if (end < 0 || end === start + opening.length || end - start > 2000 || state.src.slice(start, end).includes('\n')
+    if (end < 0 || end === start + opening.length || state.src.slice(start, end).includes('\n')
       || opening === '$' && (/\s/.test(state.src[end - 1]) || /[0-9]/.test(state.src[end + 1] ?? ''))) return false
     if (!silent) { const token = state.push('qbf_math_inline', '', 0); token.content = state.src.slice(start + opening.length, end) }
     state.pos = end + closing.length
@@ -65,15 +65,15 @@ function mathRules(parser: InstanceType<typeof MarkdownIt>) {
     let last = start
     let expression = first.slice(opening.length)
     if (!expression.endsWith(closing) || expression.length < closing.length) {
-      for (last = start + 1; last < Math.min(end, start + 80); last++) {
+      for (last = start + 1; last < end; last++) {
         const line = state.src.slice(state.bMarks[last] + state.tShift[last], state.eMarks[last]).trim()
         expression += '\n' + line
         if (line.endsWith(closing)) break
       }
-      if (last >= Math.min(end, start + 80)) return false
+      if (last >= end) return false
     }
     expression = expression.slice(0, -closing.length).trim()
-    if (expression.length > 2000 || !expression) return false
+    if (!expression) return false
     if (silent) return true
     const token = state.push('qbf_math_block', '', 0); token.block = true; token.content = expression; token.map = [start, last + 1]
     state.line = last + 1
@@ -124,19 +124,23 @@ async function run(): Promise<readonly MarkdownPngPage[]> {
   }
   parser.renderer.rules.qbf_task = (tokens, index) => taskHtml.get(tokens[index]) ?? ''
   const mathTokens = flattened.filter(token => token.type === 'qbf_math_inline' || token.type === 'qbf_math_block')
-  assert(mathTokens.length <= 32 && mathTokens.reduce((length, token) => length + token.content.length, 0) <= 8000,
-    'MARKDOWN_MATH_LIMIT', 'The document contains too many or overly large formulas.')
   const images: ImageSource[] = []
   const mathHtml = new Map<Token, string>()
   if (mathTokens.length) {
     const math = await (await import('./builtin-markdown-math.ts')).loadBuiltinMath()
+    const renderedMath = new Map<string, string>()
     for (const token of mathTokens) {
+      const identity = `${token.type}:${token.content}`
+      const cached = renderedMath.get(identity)
+      if (cached !== undefined) { mathHtml.set(token, cached); continue }
       const result = math(token.content, token.type === 'qbf_math_block')
       const scale = Math.min(1, (width - 96) / result.width)
       const imageWidth = Math.max(1, Math.ceil(result.width * scale)); const imageHeight = Math.max(1, Math.ceil(result.height * scale))
       const key = `qbf-formula-${images.length}`
       images.push({ src: key, data: result.svg })
-      mathHtml.set(token, `<img class="${token.type === 'qbf_math_block' ? 'qbf-math-block' : 'qbf-math-inline'}" src="${key}" width="${imageWidth}" height="${imageHeight}">`)
+      const markup = `<img class="${token.type === 'qbf_math_block' ? 'qbf-math-block' : 'qbf-math-inline'}" src="${key}" width="${imageWidth}" height="${imageHeight}">`
+      renderedMath.set(identity, markup)
+      mathHtml.set(token, markup)
     }
   }
   parser.renderer.rules.qbf_math_inline = parser.renderer.rules.qbf_math_block = (tokens, index) => mathHtml.get(tokens[index]) ?? ''

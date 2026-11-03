@@ -11,7 +11,7 @@ export async function loadBuiltinMath() {
   assert(isRecord(module) && typeof module.init === 'function', 'MARKDOWN_MATH_UNAVAILABLE', 'The local formula engine is unavailable.')
   const initialized: unknown = await module.init({
     loader: { load: ['input/tex-base', '[tex]/ams', 'output/svg'] },
-    tex: { packages: ['base', 'ams'], maxMacros: 200, maxBuffer: 4000 },
+    tex: { packages: ['base', 'ams'], maxMacros: 200, maxBuffer: 64 * 1024 },
     svg: { fontCache: 'none' },
   })
   assert(isRecord(initialized) && typeof initialized.tex2svg === 'function'
@@ -19,9 +19,9 @@ export async function loadBuiltinMath() {
     && typeof initialized.startup.adaptor.outerHTML === 'function', 'MARKDOWN_MATH_UNAVAILABLE', 'The local formula engine returned an invalid interface.')
   const engine = initialized as unknown as MathEngine
   return (source: string, display: boolean) => {
-    assert(source.length > 0 && source.length <= 2000
+    assert(source.length > 0
       && !/\\(?:require|autoload|includegraphics|href|url|class|cssId|style|html|input|include|read|write|openin|openout)\b/i.test(source),
-    'MARKDOWN_MATH_INVALID', 'The formula contains an unavailable command or exceeds its size limit.')
+    'MARKDOWN_MATH_INVALID', 'The formula is empty or contains an unavailable command.')
     const markup = engine.startup.adaptor.outerHTML(engine.tex2svg(source, { display }))
     const svg = markup.match(/<svg\b[\s\S]*<\/svg>/)?.[0]
     assert(svg && !/data-mjx-error|<merror\b|<image\b/i.test(svg) && Buffer.byteLength(svg) <= 512 * 1024,

@@ -45,7 +45,9 @@ export function createBuiltinMarkdownRenderer(options: BuiltinMarkdownOptions = 
         const aborted = () => fail('MARKDOWN_ABORTED')
         request.signal?.addEventListener('abort', aborted, { once: true })
         const cleanup = () => { clearTimeout(timer); request.signal?.removeEventListener('abort', aborted) }
-        worker.once('error', () => { cleanup(); fail('MARKDOWN_RENDER_FAILED') })
+        worker.once('error', (error: Error & { code?: string }) => {
+          cleanup(); fail(error.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'MARKDOWN_MEMORY_LIMIT' : 'MARKDOWN_RENDER_FAILED')
+        })
         worker.once('exit', () => { cleanup(); fail('MARKDOWN_RENDER_FAILED') })
         worker.once('message', (value: unknown) => {
           cleanup()

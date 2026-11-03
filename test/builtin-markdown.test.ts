@@ -41,6 +41,17 @@ test('plain mathematical letters and superscript parentheses render distinct gly
   assert.equal(images.size, symbols.length, 'different math symbols must not collapse to the same missing-glyph image')
 })
 
+test('formula-rich documents share document resource budgets without formula count or source quotas', async () => {
+  const renderer = createBuiltinMarkdownRenderer()
+  const formulas = Array.from({ length: 60 }, (_, index) => `$x_{${index}}^2$`)
+  const markdown = '# 公式排版\n\n' + Array.from({ length: 10 }, (_, index) => formulas.slice(index * 6, index * 6 + 6).join('，')).join('\n\n')
+    + '\n\n$x%' + 'source comment '.repeat(650) + '$'
+    + '\n\n$$\nx\n' + '% comment\n'.repeat(90) + '$$'
+  const pages = await renderer.render({ markdown })
+  assert(pages.length >= 1 && pages.length <= 6)
+  for (const page of pages) assert.equal((await sharp(page.png).metadata()).format, 'png')
+})
+
 test('Markdown links/images and raw HTML never fetch external content; prices remain ordinary text', async context => {
   let requests = 0
   const server = createServer((_, response) => { requests++; response.end('must not be read') })
