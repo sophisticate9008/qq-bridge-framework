@@ -71,7 +71,7 @@ function replyConcludesTurn(result: unknown): boolean {
   if (result.status === 'unknown') return true
   if (result.status !== 'confirmed' || !('value' in result) || !result.value || typeof result.value !== 'object' || Array.isArray(result.value)) return false
   const value = result.value
-  return 'status' in value && (value.status === 'sent' || value.status === 'confirmed' || value.status === 'unknown'
+  return 'status' in value && (value.status === 'sent' || value.status === 'queued' || value.status === 'confirmed' || value.status === 'unknown'
     || value.status === 'rejected' && 'errorCode' in value && value.errorCode === 'AGENT_MESSAGE_SUPPRESSED')
 }
 

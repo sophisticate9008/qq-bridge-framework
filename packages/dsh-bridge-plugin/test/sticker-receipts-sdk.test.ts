@@ -121,6 +121,16 @@ test('actual SDK sending stays quiet and explicit collection continues to one fa
       assert.equal(adapter.requests - before, 1, `${name}:${invalid ? 'invalid-input' : 'timeout'}`)
     }
   }
+  {
+    const before = adapter.requests
+    adapter.next = { name: 'qbf_reply', input: { content: '# Background document' } }
+    agent.followup(createUserMessage({ source: { kind: 'user', rpcId: `markdown-${before}` }, content }))
+    const pending = await queuedCall('qbf_reply')
+    await invoke('completeFrameworkTool', { request: { issuerEpoch, ticket: pending.ticket,
+      result: { status: 'confirmed', value: { status: 'queued', deliveryId: 'synthetic-background-job', receipts: [] } } } })
+    await agent.whenIdle()
+    assert.equal(adapter.requests - before, 1, 'durably queued Markdown must conclude without another model request')
+  }
   for (const action of ['annotate', 'delete', 'describe']) {
     const before = adapter.requests
     adapter.next = { name: 'qbf_sticker_manage', input: { action, assetId: 'registered' } }

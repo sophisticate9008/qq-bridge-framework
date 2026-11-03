@@ -294,6 +294,10 @@ DSH 未报告缓存读取时保持未知，不能凭输入、输出与总量恒�
 
 ## Markdown 图片回复
 
+原生聊天通过 `qbf_reply` 提交显式或自动识别的 Markdown 图片时，先按原来源和当前授权持久受理，再返回 `{ status: "queued", deliveryId, receipts: [] }` 并结束本轮工具步骤；不等待渲染或发送完成。后台任务不继承原模型执行、工具租约或新消息覆盖期限，未结清任务不设置 TTL。渲染在会话 engine 队列之外执行，发送仍通过 `framework-tools` feature 的 policy 与原 outbox，保留账号、会话、session 和 generation 边界；每页发送前重查白名单与实际绑定。不会因普通新消息重新延后已受理文档。
+
+队列状态为 `queued/rendering/ready/sending/sent/failed/unknown`，最多 32 项未结清任务；满额不受理新项，不淘汰旧项。停机保留任务，启动恢复纯渲染中断；发送中断按 unknown 留证，不自动重发。状态、正文及回执只保存在账号私有运行存储，终态记录保留七天。`AgentMessageDelivery.status` 增加 `queued`、可选 `deliveryId`；逐轮摘要允许 `reply.outcome: "queued"` 并以 `delivery.pending` 计数，后续后台回执更新原尝试，不将受理当作送达。原轮超时、取消及模型终态与后台发送结果分别记录。
+
 框架内置回复呈现支持通过 `qbf_reply` 的 content 提交请求 `{"schema":"qbf.output/1","format":"markdown-image","body":"Markdown 正文","title":"可选标题"}`。正文限制 32000 字符、64 KiB，标题最多 120 字符；该对象不与 `content` 混用。明显的 Markdown 标题、表格和围栏代码也可自动转图；长纯文本继续按长文合并转发设置处理。每轮输出事实只提供格式支持和上限，不增加用户开关。
 
 渲染在本机执行，最多六页 PNG；PNG 块 CRC、尺寸和实际字节通过后才登记为当前账号、QQ 会话、原 session 与 generation 的资源，仍由原 outbox 和即时发送权限发送。模型不能指定 URL、文件位置或自造图片编号。资源有效期 24 小时，启动后及每小时清理过期字节；停止时取消维护计时器并等待发布队列。七天内保留的元数据用于阻止同一旧资源标识恢复有效。渲染、登记和协议送达分别保留真实结果，不因生成了图片就宣称已经发送。

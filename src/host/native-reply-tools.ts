@@ -28,7 +28,7 @@ export const NATIVE_REPLY_TOOLS: readonly NativeToolContribution[] = Object.free
   { definition: { name: tool.tool, capability: tool.capability, description: tool.description, featureId: 'framework-tools', timeoutMs: 120000,
     registrationSource: { origin: 'framework-builtin', ownerId: 'qq-bridge-framework', ownerName: '框架内置工具', transport: 'native' },
     parameters: { type: 'object', additionalProperties: false, required: ['content'], properties: {
-      content: { description: '发送的文字、结构化消息数组，或包含schema:qbf.output/1的对象。资源仅使用当前会话已登记assetId。',
+      content: { description: '发送的文字、结构化消息数组，或qbf.output/1对象。Markdown图片使用{"schema":"qbf.output/1","format":"markdown-image","body":"Markdown正文"}；正文放body。已受理的Markdown由后台渲染发送，queued表示排队而非已送达，结束本轮并继续后续聊天。资源仅使用当前会话已登记assetId。',
         oneOf: [ { type: 'string', minLength: 1, maxLength: 64000 }, { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object' } },
           { type: 'object', required: ['schema'], properties: { schema: { const: 'qbf.output/1' } } } ] }
     } } }, validate: replyInput, deliveryCapabilities: ['messaging.send', 'messaging.forward'],

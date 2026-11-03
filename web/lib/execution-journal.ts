@@ -60,7 +60,7 @@ function parseSummary(input: unknown): NativeExecutionSummary | null {
   if (summary.schema !== 1 || typeof summary.partial !== 'boolean'
     || !text(source.messageId, 160) || !text(source.senderId, 160) || !text(source.displayName, 160) || !text(source.text, 400)
     || !text(reply.text, 400) || !text(reply.reason, 160)
-    || reply.outcome != null && !member(['sent', 'rejected', 'unknown'] as const, reply.outcome)
+    || reply.outcome != null && !member(['sent', 'queued', 'rejected', 'unknown'] as const, reply.outcome)
     || !['confirmed', 'rejected', 'unknown', 'pending'].every(key => count(delivery[key]))
     || !count(summary.mergedMessages) || !count(summary.durationMs)
     || tools !== null && (!integer(tools.count) || !Array.isArray(tools.names) || tools.names.length > 64
@@ -69,7 +69,7 @@ function parseSummary(input: unknown): NativeExecutionSummary | null {
     schema: 1, partial: summary.partial,
     input: { messageId: source.messageId as string | null, senderId: source.senderId as string | null,
       displayName: source.displayName as string | null, text: source.text as string | null },
-    reply: { text: reply.text as string | null, reason: reply.reason as string | null, outcome: reply.outcome == null ? null : reply.outcome as 'sent' | 'rejected' | 'unknown' },
+    reply: { text: reply.text as string | null, reason: reply.reason as string | null, outcome: reply.outcome == null ? null : reply.outcome as 'sent' | 'queued' | 'rejected' | 'unknown' },
     delivery: { confirmed: delivery.confirmed as number | null, rejected: delivery.rejected as number | null,
       unknown: delivery.unknown as number | null, pending: delivery.pending as number | null },
     mergedMessages: summary.mergedMessages as number | null, durationMs: summary.durationMs as number | null,
@@ -206,6 +206,7 @@ export function executionContinuationLabel(record: ExecutionJournalEntry): strin
 export function executionJournalPresentation(record: ExecutionJournalEntry): ExecutionPresentation {
   const base = executionPresentation(record);
   const summary = record.summary;
+  if (summary?.reply.outcome === 'queued') return { label: '后台排版发送中', tone: 'neutral', explanation: 'Markdown 图片任务已持久排队，完成后发送；原轮处理超时不撤销已受理任务。' };
   if (base.tone !== 'success' || !summary) return base;
   const { confirmed, rejected, unknown, pending } = summary.delivery;
   if (summary.reply.outcome === 'unknown') return { label: '发送待确认', tone: 'warning', explanation: '本轮有发送尝试结果未确认；已确认的部分单独计数。' };

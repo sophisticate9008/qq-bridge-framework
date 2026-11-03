@@ -13,7 +13,7 @@ export interface NativeExecutionSummary {
   readonly schema: 1
   readonly input: { readonly messageId: string | null; readonly senderId: string | null; readonly displayName: string | null; readonly text: string | null }
   /** Only content with a confirmed QQ delivery receipt; never a model final draft. */
-  readonly reply: { readonly text: string | null; readonly reason: string | null; readonly outcome: 'sent' | 'rejected' | 'unknown' | null }
+  readonly reply: { readonly text: string | null; readonly reason: string | null; readonly outcome: 'sent' | 'queued' | 'rejected' | 'unknown' | null }
   readonly delivery: { readonly confirmed: number | null; readonly rejected: number | null; readonly unknown: number | null; readonly pending: number | null }
   readonly mergedMessages: number | null
   /** Admission through the first durable terminal observation, including queueing. */
@@ -24,7 +24,7 @@ export interface NativeExecutionSummary {
 }
 
 type Input = NativeExecutionSummary['input']
-interface Attempt { key: string; outcome: 'sent' | 'rejected' | 'unknown'; confirmed: number; rejected: number; unknown: number; text: string | null; reason: string | null }
+interface Attempt { key: string; outcome: 'sent' | 'queued' | 'rejected' | 'unknown'; confirmed: number; rejected: number; unknown: number; text: string | null; reason: string | null }
 interface Evidence {
   schema: 1; executionId: string; binding: SessionBinding; requestId: string
   input: Input | null; mergedMessages: number | null; attempts: Attempt[]
@@ -80,7 +80,7 @@ function readEvidence(store: Pick<DurableStore, 'read'>, execution: NativeExecut
     || !(input.text === null || typeof input.text === 'string' && input.text.length <= 400)
     || digest([execution.binding.conversationId, input.messageId, 'prompt']) !== execution.requestId)) return null
   if (!value.attempts.every(attempt => isRecord(attempt) && typeof attempt.key === 'string'
-    && ['sent', 'rejected', 'unknown'].includes(String(attempt.outcome))
+    && ['sent', 'queued', 'rejected', 'unknown'].includes(String(attempt.outcome))
     && count(attempt.confirmed) && count(attempt.rejected) && count(attempt.unknown)
     && (attempt.text === null || typeof attempt.text === 'string' && attempt.text.length <= 400)
     && (attempt.reason === null || safeCode(attempt.reason) !== null))
@@ -234,7 +234,8 @@ export function readNativeExecutionSummaries(store: Pick<DurableStore, 'read' | 
     const attempts = saved?.attempts ?? []
     const uncertain = attempts.find(attempt => attempt.outcome === 'unknown')
     const failed = attempts.find(attempt => attempt.outcome === 'rejected' && attempt.reason !== 'AGENT_MESSAGE_SUPPRESSED')
-    const attemptOutcome = uncertain ? 'unknown' : failed ? 'rejected' : attempts.some(attempt => attempt.outcome === 'sent') ? 'sent' : attempts.length ? 'rejected' : null
+    const queued = attempts.filter(attempt => attempt.outcome === 'queued').length
+    const attemptOutcome = uncertain ? 'unknown' : failed ? 'rejected' : queued ? 'queued' : attempts.some(attempt => attempt.outcome === 'sent') ? 'sent' : attempts.length ? 'rejected' : null
     const hasDelivery = attempts.length > 0
     const confirmed = hasDelivery ? attempts.reduce((sum, attempt) => sum + attempt.confirmed, 0) : null
     const rejected = hasDelivery ? attempts.reduce((sum, attempt) => sum + attempt.rejected, 0) : null
@@ -254,7 +255,7 @@ export function readNativeExecutionSummaries(store: Pick<DurableStore, 'read' | 
       reply: { text: text(attempts.flatMap(attempt => attempt.text ? [attempt.text] : []).join('\n')),
         reason: uncertain ? uncertain.reason ?? 'DELIVERY_UNKNOWN' : failed ? failed.reason ?? 'DELIVERY_REJECTED' : attempts.at(-1)?.reason ?? decision,
         outcome: attemptOutcome },
-      delivery: { confirmed, rejected, unknown, pending: null }, mergedMessages, durationMs,
+      delivery: { confirmed, rejected, unknown, pending: queued || null }, mergedMessages, durationMs,
       tools: saved?.tools.length ? { count: saved.tools.length, names: [...new Set(saved.tools.map(tool => tool.name))].slice(0, 16) } : null,
       partial: saved?.truncated === true || input.messageId === null || !hasDelivery || mergedMessages === null
         || new Set(saved?.tools.map(tool => tool.name) ?? []).size > 16 }))

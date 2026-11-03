@@ -50,6 +50,8 @@ const descriptions = {
   received: ['info', 'received', '收到一条消息。'],
   queued: ['info', 'processed', '消息已排队，当前轮完成后合并处理连续补充。'],
   reply_suppressed: ['info', 'processed', '本轮处理结束，未发送聊天回复。'],
+  markdown_queued: ['info', 'processed', 'Markdown 图片已交给后台排版发送，主会话可继续聊天。'],
+  markdown_failed: ['warning', 'error', '后台 Markdown 图片未能发送，任务与原因已保留。'],
   reply_deferred: ['info', 'processed', '会话有新消息，旧回复暂未发送，将结合最新内容判断是否接话。'],
   reply_decision_invalid: ['warning', 'processed', '模型的不参与决定格式无效，未发送内部控制内容。'],
   unsupported: ['warning', 'processed', '未处理此消息：未发现可处理的消息内容。'],
@@ -134,6 +136,7 @@ export function createNativeActivity({ now = Date.now }: { readonly now?: () => 
 }
 
 const activityMapping: Record<keyof typeof descriptions, readonly [string,string]> = {
+    markdown_queued:['message','queued'],markdown_failed:['message','rejected'],
     tool_projection_failed:['execution','failed'],
     reply_deferred:['message','suppressed'],
     submit_timeout:['execution','unknown'],

@@ -15,6 +15,7 @@ import type { createNativePackages } from './native-packages.ts'
 
 /** Preparation may fail at any point; one captured ownership set is drained in explicit phases. */
 export interface NativePreparedRunResources {
+  readonly markdownDeliveries?: { stop(): Promise<void> }
   readonly conversationTasks?: { stop(): Promise<void> }
   readonly scheduler?: { stop(): Promise<void> }
   readonly lifetime: AbortController | undefined
@@ -63,7 +64,7 @@ export async function drainNativeRun(resources: NativePreparedRunResources) {
   resources.lifetime?.abort()
   if (resources.claimTimer) clearInterval(resources.claimTimer)
   // Stop producing work before draining consumers. Failure of one producer must not skip the rest.
-  await phase([() => resources.conversationTasks?.stop(), () => resources.scheduler?.stop(), () => resources.reminders.stop(), () => resources.releaseInteractions?.(),
+  await phase([() => resources.markdownDeliveries?.stop(), () => resources.conversationTasks?.stop(), () => resources.scheduler?.stop(), () => resources.reminders.stop(), () => resources.releaseInteractions?.(),
     () => resources.memory.stop(), () => resources.quotedContext?.clear(), () => resources.inbox?.stop(), resources.clearIngress])
   await phase([() => resources.work?.close(new AbortController().signal), () => resources.workFeedback?.drain(), () => resources.claims?.drain(),
     () => resources.executions?.stop(), () => {

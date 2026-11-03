@@ -69,12 +69,15 @@ export interface BridgeHostOptions {
   onAgentDelivery?(requestId: string, receipt: DeliveryReceipt): void;
   /** Optional local diagnostics; faults never affect delivery. Content has confirmed receipts only. */
   onAgentMessageDelivery?(event: FrameworkEvent, result: AgentMessageDelivery, confirmedContent: readonly MessageContent[]): void;
+  /** Optional durable handoff; accepted background delivery is independent of this execution's lifetime. */
+  deferAgentMessage?(event: FrameworkEvent, signal: AbortSignal): Promise<AgentMessageDelivery | null>;
   shouldSendAgentMessage?(event: FrameworkEvent): boolean | Promise<boolean>;
   /** Called after freshness and output validation, once before splitting is sent. */
   onAgentSpeakDecision?(event: FrameworkEvent): void;
 }
 export interface AgentMessageDelivery {
-  readonly status: 'sent' | 'rejected' | 'unknown';
+  readonly status: 'sent' | 'queued' | 'rejected' | 'unknown';
+  readonly deliveryId?: string;
   readonly receipts: readonly DeliveryReceipt[];
   readonly errorCode?: string;
   readonly cached?: boolean;
@@ -107,7 +110,7 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
   taskTickMs = 250, maxConcurrentSends = 1, eventTimeoutMs = 30000, timeouts: timeoutInput,
   replyTimeoutMs = 30000, replyTimeoutNotice = '请求已提交，但尚未收到回复。结果尚未确认，未自动重复提交。',
   selectAgentMessage, splitAgentMessage, onFault = () => {}, model, observer, eventValidators = {}, effectAdapters = {}, routeIncoming,
-  agentInputPreparation, agentMessagePreparation, followPool, onAgentDelivery, onAgentMessageDelivery, shouldSendAgentMessage, onAgentSpeakDecision, accountScope: accountInput, replyRecovery = 'notify' }: BridgeHostOptions) {
+  agentInputPreparation, agentMessagePreparation, followPool, onAgentDelivery, onAgentMessageDelivery, deferAgentMessage, shouldSendAgentMessage, onAgentSpeakDecision, accountScope: accountInput, replyRecovery = 'notify' }: BridgeHostOptions) {
   const accountScope = accountInput === undefined ? undefined : normalizeAccountScope(accountInput);
   bindAccountStore(store, accountScope);
   assert(typeof authorizeIncoming === 'function' && Number.isSafeInteger(taskTickMs) && taskTickMs >= 10 && taskTickMs <= 60000,
@@ -234,6 +237,7 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
   function explicitResult(result: AgentMessageDelivery, cached: boolean): AgentMessageDelivery {
     const explanation = result.errorCode === 'AGENT_MESSAGE_SUPPRESSED'
       ? '本轮已被新消息替代，内容未发送。请结束本轮，等待新的会话快照；不要改写后重发旧回复。'
+      : result.status === 'queued' ? 'Markdown 图片任务已持久排队，后台完成渲染并发送；尚未确认送达。请结束本轮，不重复提交或追加等待说明；原轮超时不撤销此任务。'
       : result.status === 'sent' ? '已送达，本轮发言结束；不要重复发送或追加收尾确认。'
         : result.status === 'unknown' ? '发送结果未确认，可能已经送达。不要重复或改写后重发这份内容；请结束本轮等待后续消息。'
           : '未发送。请根据错误原因停止本次发送，不重复提交同一内容。';
@@ -255,7 +259,16 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
     if (explicitDeliveries.size >= 4096) return explicitResult({ status: 'rejected', receipts: [], errorCode: 'AGENT_MESSAGE_BACKPRESSURE' }, false);
     const keys = explicitRequestKeys.get(requestId) ?? new Set<string>();
     keys.add(key); explicitRequestKeys.set(requestId, keys);
-    const operation = performAgentMessageDelivery(execution, event, false);
+    const operation = (async () => {
+      let deferred: AgentMessageDelivery | null | undefined;
+      try { deferred = await deferAgentMessage?.(snapshot(event), execution.signal); }
+      catch (error) { deferred = { status: 'rejected', receipts: [], errorCode: errorCode(error, 'AGENT_MESSAGE_PREPARATION_FAILED') }; }
+      if (!deferred) return performAgentMessageDelivery(execution, event, false);
+      if (agentDeliveries.size >= 4096 && !agentDeliveries.has(requestId)) agentDeliveries.delete(agentDeliveries.keys().next().value!);
+      agentDeliveries.set(requestId, snapshot(deferred));
+      try { onAgentMessageDelivery?.(snapshot(event), deferred, []); } catch {}
+      return deferred;
+    })();
     explicitDeliveries.set(key, operation);
     const result = await operation;
     if (result.errorCode === 'AGENT_MESSAGE_SUPPRESSED' && explicitRequestKeys.has(requestId)) supersededRequests.set(requestId, result);
@@ -320,7 +333,8 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
         let receipt: DeliveryReceipt = { status: 'unknown' };
         try {
           const result = await deliverAgentMessage(execution, event, true);
-          receipt = result.status === 'sent' ? result.receipts.at(-1) ?? { status: 'unknown' } : { status: result.status };
+          receipt = result.status === 'sent' ? result.receipts.at(-1) ?? { status: 'unknown' }
+            : { status: result.status === 'queued' ? 'unknown' : result.status };
           if (result.errorCode === 'AGENT_MESSAGE_SUPPRESSED') return;
           assert(result.status === 'sent', result.errorCode ?? 'DELIVERY_UNKNOWN', 'The transport did not confirm delivery.');
         } finally {

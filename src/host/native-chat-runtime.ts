@@ -51,6 +51,7 @@ import { createFfmpegVideoObserver } from '../adapters/ffmpeg-video.ts'
 import { validateNativeMediaConfiguration } from '../contracts/native-media-configuration.ts'
 import { createNativeOutputService, createNativeOutputPackage } from './native-output.ts'
 import { createNativeMarkdownService } from './native-markdown.ts'
+import { createNativeMarkdownDeliveries, NATIVE_MARKDOWN_DELIVERY_EVENT, validateNativeMarkdownDeliveryEvent } from './native-markdown-deliveries.ts'
 import { createBuiltinMarkdownRenderer } from '../rendering/builtin-markdown.ts'
 import { createNativeInboundController } from './native-inbound.ts'
 import { deriveDshMigrationTargetSelection } from '../adapters/dsh-migration-selection.ts'
@@ -243,6 +244,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   const packageConfigurationRegistry = options.packageConfigurationRegistry ?? createNativePackageConfigurationRegistry({ directory: options.directory,
     contributions: options.bootstrap?.packageConfigurations })
   let markdown: ReturnType<typeof createNativeMarkdownService> | undefined
+  let markdownDeliveries: ReturnType<typeof createNativeMarkdownDeliveries> | undefined
   const output = createNativeOutputService(packageConfigurationRegistry, { renderMarkdown(request) {
     if (!markdown) failure('NATIVE_MARKDOWN_UNAVAILABLE')
     return markdown.render(request)
@@ -785,7 +787,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   async function cleanup() {
     frozenRecoveryConversations.clear()
     const resources = { lifetime, host, dsh, work, workFeedback, claims, executions, bootstrap: bootstrapMount,
-      tools: frameworkTools, packages, inbox, quotedContext, reminders, memory, scheduler: pluginScheduler, conversationTasks,
+      tools: frameworkTools, packages, inbox, quotedContext, reminders, memory, scheduler: pluginScheduler, conversationTasks, markdownDeliveries,
       releaseInteractions, closeInteractions: stopInteractions, claimTimer,
       clearIngress: inbound.clear, drainConfiguration: configurationGuard.drain, drainPolicy: toolPolicy.drain }
     releaseInteractions = undefined
@@ -820,6 +822,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     work = undefined
     workAssets = undefined
     markdown = undefined
+    markdownDeliveries = undefined
     dsh = undefined
     claims = undefined
     pluginEpoch = null
@@ -1175,7 +1178,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         if (['native.media.inspect', 'native.media.read', 'native.stickers.list', 'native.stickers.manage', 'native.stickers.send', ...Object.keys(conversationEffects), ...Object.keys(capabilityDirectory.effects), ...Object.keys(qzoneEffects), ...Object.keys(replyEffects), ...Object.keys(reminderService.effects), ...Object.keys(taskEffects), ...Object.keys(memoryEffects), ...Object.keys(workEffects)].some(name => bootstrapMount?.bridgeOptions.effectAdapters?.[name])) {
           failure('NATIVE_CHAT_RESERVED_CAPABILITY')
         }
-        if ([...ONEBOT_PROTOCOL_EVENT_TYPES, NATIVE_TOOL_EVENT, ...Object.keys(reminderService.eventValidators)].some(type => bootstrapMount?.bridgeOptions.eventValidators?.[type])) {
+        if ([...ONEBOT_PROTOCOL_EVENT_TYPES, NATIVE_TOOL_EVENT, NATIVE_MARKDOWN_DELIVERY_EVENT, ...Object.keys(reminderService.eventValidators)].some(type => bootstrapMount?.bridgeOptions.eventValidators?.[type])) {
           failure('NATIVE_CHAT_RESERVED_PROTOCOL_EVENT')
         }
         const protocolValidators = Object.fromEntries(ONEBOT_PROTOCOL_EVENT_TYPES.map(type => [type, (data: JsonObject) => {
@@ -1187,12 +1190,14 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           ...bootstrapMount?.bridgeOptions,
           onAgentDelivery: (requestId, receipt) => workFeedback?.delivered(requestId, receipt),
           onAgentMessageDelivery: (event, result, confirmedContent) => recordNativeExecutionDelivery(store!, event, result, confirmedContent),
+          deferAgentMessage: (event, signal) => markdownDeliveries?.defer(event, signal) ?? Promise.resolve(null),
           onAgentSpeakDecision(event) {
             const data = event.data.agentData
             if (isRecord(data) && typeof data.nativeRequestId === 'string') inbound.speakDecision(event.conversationId, data.nativeRequestId)
           },
           shouldSendAgentMessage: async event => !await replyFreshness?.hold(event),
-          eventValidators: { ...bootstrapMount?.bridgeOptions.eventValidators, ...protocolValidators, ...reminderService.eventValidators, [NATIVE_TOOL_EVENT]: validateNativeToolEvent },
+          eventValidators: { ...bootstrapMount?.bridgeOptions.eventValidators, ...protocolValidators, ...reminderService.eventValidators,
+            [NATIVE_TOOL_EVENT]: validateNativeToolEvent, [NATIVE_MARKDOWN_DELIVERY_EVENT]: validateNativeMarkdownDeliveryEvent },
           effectAdapters: { ...bootstrapMount?.bridgeOptions.effectAdapters, ...reminderService.effects, ...taskEffects, ...memoryEffects, ...workEffects, ...conversationEffects, ...capabilityDirectory.effects, ...qzoneEffects, ...replyEffects,
             'native.stickers.send': stickerSend,
             'native.stickers.manage': { execute(request) { if (!stickers) failure('NATIVE_STICKERS_UNAVAILABLE'); return stickers.manage.execute(request) } },
@@ -1328,6 +1333,26 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             activity.record(code === 'AGENT_SUBMIT_TIMEOUT_UNKNOWN' ? 'submit_timeout' : code.includes('TIMEOUT') ? 'deadline' : 'error',
               null, undefined, {}, code)
           } })
+        const markdownHost = host, markdownService = markdown
+        markdownDeliveries = createNativeMarkdownDeliveries({ store, accountId: selfId, signal: controller.signal,
+          binding: conversationId => markdownHost.sessions.get(conversationId),
+          authorize: (conversationId, signal) => guard(conversationId, signal, true, 'delivery'),
+          render: request => markdownService.render(request),
+          dispatch: (event, signal) => markdownHost.engine.emit(event, { signal }),
+          delivered(event, result, confirmedContent) {
+            recordNativeExecutionDelivery(store!, event, result, confirmedContent)
+            let index = 0
+            for (const receipt of result.receipts) if (receipt.status === 'confirmed' && receipt.kind !== 'file-upload') {
+              const page = confirmedContent[index++]
+              if (page) markdownHost.history.append(event.conversationId, { id: receipt.messageId, actor: 'assistant', content: [page], receivedAt: Date.now() })
+            }
+            if (result.status === 'sent') activity.record('send_confirmed', event.conversationId, nativeActivityContent(confirmedContent))
+          },
+          observe(phase, event, code) {
+            if (phase === 'queued') activity.record('markdown_queued', event.conversationId)
+            else if (phase === 'failed') activity.record('markdown_failed', event.conversationId, undefined, {}, code)
+            else if (phase === 'unknown') activity.record('send_unknown', event.conversationId, undefined, {}, code)
+          }, onFault: code => activity.record('markdown_failed', null, undefined, {}, code) })
         const authorizationIdentity = readMigrationAuthorizationIdentity(store, identity)
         applyAuthorization(configuration, authorizationIdentity)
         activeIdentity = authorizationIdentity
@@ -1566,7 +1591,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               await messageSources.alias(scope, eventId, signal)
               return { ...scope, eventId }
             } })
-          host.engine.install(frameworkTools.feature)
+          host.engine.install(markdownDeliveries.feature(frameworkTools.feature))
           await toolPolicy.sync(controller.signal)
         }
         conversationTasks = createConversationTaskRuntime({ store,
@@ -1710,6 +1735,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           closeInteractions: stopInteractions, claimTimer, clearIngress: inbound.clear, drainConfiguration: configurationGuard.drain, drainPolicy: toolPolicy.drain }
         runningResources.lifetime.signal.throwIfAborted()
         state = 'running'
+        markdownDeliveries.start()
         pluginScheduler.start()
         await reminderService.start()
         conversationTasks?.start()
