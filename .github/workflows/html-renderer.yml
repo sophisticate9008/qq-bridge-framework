@@ -1,0 +1,58 @@
+name: HTML 原生渲染组件
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches: ['experiment/blitz-renderer-build']
+    paths: ['.github/workflows/html-renderer.yml', 'tools/html-renderer/**']
+permissions:
+  contents: read
+jobs:
+  build:
+    name: HTML 组件 ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, platform: linux, arch: x64}
+          - {runner: ubuntu-24.04-arm, platform: linux, arch: arm64}
+          - {runner: windows-2022, platform: win32, arch: x64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      BLITZ_REV: 16ebc29363826d43917d2e3cb91d37f7d2156fdd
+      CARGO_BUILD_JOBS: '2'
+      RUSTFLAGS: ${{ matrix.platform == 'win32' && '-C target-feature=+crt-static' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: DioxusLabs/blitz
+          ref: ${{ env.BLITZ_REV }}
+          path: .cache/blitz-source
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - name: Rust 工具链
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Linux 编译工具
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config python3 libclang-dev
+      - run: node tools/html-renderer/prepare.ts
+      - run: cargo build --manifest-path .cache/blitz-source/Cargo.toml --profile production --example qbf-html-probe
+      - name: 原生运行中文彩色图与长图
+        run: node tools/blitz-probe/measure.ts
+      - name: 包装平台组件与依赖许可
+        run: node tools/html-renderer/package.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: html-renderer-${{ matrix.platform }}-${{ matrix.arch }}
+          path: runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}/
+          if-no-files-found: error
+          retention-days: 7
