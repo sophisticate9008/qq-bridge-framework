@@ -5,6 +5,7 @@ import type { MarkdownRenderer, MarkdownPngPage, MarkdownRenderRequest } from '.
 
 export interface BuiltinMarkdownOptions {
   readonly width?: number
+  /** Explicitly opt into pagination. Normal chat replies use one content-height image. */
   readonly pageHeight?: number
   readonly maxPages?: number
   readonly timeoutMs?: number
@@ -13,8 +14,9 @@ export interface BuiltinMarkdownOptions {
 }
 export function createBuiltinMarkdownRenderer(options: BuiltinMarkdownOptions = {}): MarkdownRenderer {
   const width = options.width ?? 1080
+  const paginate = options.pageHeight !== undefined || options.maxPages !== undefined
   const pageHeight = options.pageHeight ?? 1800
-  const maxPages = options.maxPages ?? 6
+  const maxPages = paginate ? options.maxPages ?? 6 : 1
   const timeoutMs = options.timeoutMs ?? 12000
   const fontPath = options.fontPath ?? fileURLToPath(new URL('../../assets/fonts/wqy-microhei.ttc', import.meta.url))
   const fontPaths = [fontPath, ...['NotoSansMath-Regular.ttf', 'NotoSansSymbols2-Regular.ttf', 'NotoSans-Regular.ttf']
@@ -38,7 +40,7 @@ export function createBuiltinMarkdownRenderer(options: BuiltinMarkdownOptions = 
         const fail = (code: string) => reject(new FrameworkError(code, 'The Markdown image could not be rendered.'))
         worker = new Worker(new URL(import.meta.url.endsWith('.ts') ? './builtin-markdown-worker.ts' : './builtin-markdown-worker.js', import.meta.url), {
           execArgv: [],
-          workerData: { markdown: request.markdown, title: request.title, width, pageHeight, maxPages, fontPaths },
+          workerData: { markdown: request.markdown, title: request.title, width, pageHeight, maxPages, paginate, fontPaths },
           resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 },
         })
         const timer = setTimeout(() => fail('MARKDOWN_TIMEOUT'), timeoutMs)
@@ -57,7 +59,8 @@ export function createBuiltinMarkdownRenderer(options: BuiltinMarkdownOptions = 
           if (!isRecord(value) || !Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > maxPages
             || !value.pages.every(page => isRecord(page) && page.png instanceof Uint8Array
               && Number.isSafeInteger(page.width) && page.width === width && Number.isSafeInteger(page.height)
-              && Number(page.height) > 0 && Number(page.height) <= pageHeight)) { fail('MARKDOWN_RENDER_FAILED'); return }
+              && Number(page.height) > 0 && width * Number(page.height) <= 16777216
+              && (!paginate || Number(page.height) <= pageHeight))) { fail('MARKDOWN_RENDER_FAILED'); return }
           resolve(value.pages as unknown as readonly MarkdownPngPage[])
         })
         if (request.signal?.aborted) aborted()

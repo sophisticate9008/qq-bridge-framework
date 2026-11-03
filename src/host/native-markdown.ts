@@ -19,7 +19,7 @@ const maxBytes = 8 * 1024 * 1024
 const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 function validatePage(page: MarkdownPngPage): Buffer {
   assert(Number.isSafeInteger(page.width) && page.width > 0 && page.width <= 8192
-    && Number.isSafeInteger(page.height) && page.height > 0 && page.height <= 8192 && page.width * page.height <= 16777216
+    && Number.isSafeInteger(page.height) && page.height > 0 && page.width * page.height <= 16777216
     && page.png instanceof Uint8Array && !(page.png.buffer instanceof SharedArrayBuffer)
     && page.png.byteLength >= 57 && page.png.byteLength <= maxBytes, 'NATIVE_MARKDOWN_INVALID_PNG', 'A bounded PNG page is required.')
   const png = Buffer.from(page.png)

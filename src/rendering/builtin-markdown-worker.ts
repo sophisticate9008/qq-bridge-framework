@@ -86,9 +86,10 @@ async function run(): Promise<readonly MarkdownPngPage[]> {
   const input: unknown = workerData
   assert(isRecord(input) && typeof input.markdown === 'string' && Array.isArray(input.fontPaths) && input.fontPaths.length === 4
     && input.fontPaths.every((value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 4096)
-    && typeof input.width === 'number' && typeof input.pageHeight === 'number' && typeof input.maxPages === 'number',
+    && typeof input.width === 'number' && typeof input.pageHeight === 'number' && typeof input.maxPages === 'number'
+    && typeof input.paginate === 'boolean',
   'MARKDOWN_INVALID_INPUT', 'Invalid trusted render request.')
-  const { width, pageHeight, maxPages } = input
+  const { width, pageHeight, maxPages, paginate } = input
   const renderer = new Renderer({ cacheMaxBytes: 16 * 1024 * 1024, fontCacheMaxBytes: 16 * 1024 * 1024 })
   const fontFamilies: string[] = []
   for (const filename of input.fontPaths as string[]) {
@@ -158,8 +159,13 @@ async function run(): Promise<readonly MarkdownPngPage[]> {
   const renderOptions = { width, css, images, fontFamilies, lang: 'zh-CN' }
   const measured = await renderer.measure(node, renderOptions)
   const totalHeight = Math.ceil(measured.height)
-  assert(Number.isSafeInteger(totalHeight) && totalHeight > 0 && totalHeight <= pageHeight * maxPages,
+  assert(Number.isSafeInteger(totalHeight) && totalHeight > 0 && width * totalHeight <= 16777216,
+    'MARKDOWN_PIXEL_LIMIT', 'The rendered document exceeds its pixel budget.')
+  assert(!paginate || totalHeight <= pageHeight * maxPages,
     'MARKDOWN_PAGE_LIMIT', 'The document exceeds the bounded image page capacity.')
+  const png = await renderer.render(node, { ...renderOptions, height: totalHeight, format: 'png' })
+  assert(png.byteLength <= (paginate ? 16 : 8) * 1024 * 1024, 'MARKDOWN_OUTPUT_TOO_LARGE', 'The rendered document exceeds the output byte limit.')
+  if (!paginate) return [{ png, width, height: totalHeight }]
   // Measured text-line and image boxes supply cut points. Never cut through a glyph or table-row text.
   const forbidden: { top: number; bottom: number }[] = []
   const visit = (box: MeasuredNode, source?: Node) => {
@@ -178,8 +184,6 @@ async function run(): Promise<readonly MarkdownPngPage[]> {
     box.children.forEach((child, index) => visit(child, children?.[index]))
   }
   visit(measured, node)
-  const png = await renderer.render(node, { ...renderOptions, height: totalHeight, format: 'png' })
-  assert(png.byteLength <= 16 * 1024 * 1024, 'MARKDOWN_OUTPUT_TOO_LARGE', 'The rendered document exceeds the output byte limit.')
   // Confirm each proposed cut against actual pixels. Pale document/code backgrounds and
   // table borders are ignored; a three-row gap must contain no text-colored pixels.
   async function pixelGap(end: number, top: number): Promise<number> {

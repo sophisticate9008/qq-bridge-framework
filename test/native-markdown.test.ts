@@ -10,12 +10,12 @@ import { createNativeMarkdownService } from '../src/host/native-markdown.ts'
 const event = { id: 'markdown-event', type: 'agent.message', conversationId: 'private:123', sessionId: 'original-session', data: { generation: 1 } }
 const signal = new AbortController().signal
 
-test('real PNG pages survive service reconstruction and require exact account, conversation, session, generation and TTL', async context => {
+test('long PNG images above the former fixed height survive reconstruction and require exact scope and TTL', async context => {
   const directory = await mkdtemp(join(tmpdir(), 'native-markdown-'))
   let now = Date.now(); let generation = 1
   const store = createSqliteStore({ filename: ':memory:', clock: () => now })
-  const png = await sharp({ create: { width: 24, height: 16, channels: 3, background: '#abc' } }).png().toBuffer()
-  const page = { png, width: 24, height: 16 }
+  const png = await sharp({ create: { width: 24, height: 9000, channels: 3, background: '#abc' } }).png().toBuffer()
+  const page = { png, width: 24, height: 9000 }
   let calls = 0
   const options = { directory, store, accountId: '9001', clock: () => now,
     binding: () => ({ sessionId: 'original-session', generation }), authorize: async () => {},

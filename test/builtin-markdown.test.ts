@@ -28,6 +28,15 @@ test('built-in Takumi renderer produces actual Chinese table/code/math PNG pages
   }
 })
 
+test('default chat rendering keeps long documents in one image at their natural content height', async () => {
+  const pages = await createBuiltinMarkdownRenderer().render({ markdown: document.repeat(5) })
+  assert.equal(pages.length, 1)
+  const metadata = await sharp(pages[0].png).metadata()
+  assert.equal(metadata.height, pages[0].height)
+  assert(pages[0].height > 1800)
+  assert(pages[0].width * pages[0].height <= 16777216)
+})
+
 test('plain mathematical letters and superscript parentheses render distinct glyphs instead of identical missing-glyph boxes', async () => {
   const renderer = createBuiltinMarkdownRenderer({ width: 480, pageHeight: 600 })
   const symbols = ['𝑥', '𝑦', 'ℝ', 'ℂ', '⁽', '⁾']
@@ -48,7 +57,7 @@ test('formula-rich documents share document resource budgets without formula cou
     + '\n\n$x%' + 'source comment '.repeat(650) + '$'
     + '\n\n$$\nx\n' + '% comment\n'.repeat(90) + '$$'
   const pages = await renderer.render({ markdown })
-  assert(pages.length >= 1 && pages.length <= 6)
+  assert.equal(pages.length, 1)
   for (const page of pages) assert.equal((await sharp(page.png).metadata()).format, 'png')
 })
 
@@ -68,7 +77,7 @@ test('math dynamic package commands, overflow and cancellation fail clearly with
   const renderer = createBuiltinMarkdownRenderer()
   await assert.rejects(renderer.render({ markdown: '$\\require{https://example.invalid/x}$' }), { code: 'MARKDOWN_MATH_INVALID' })
   await assert.rejects(renderer.render({ markdown: 'x'.repeat(65537) }), { code: 'MARKDOWN_INVALID_INPUT' })
-  await assert.rejects(renderer.render({ markdown: ('第行\n\n').repeat(2500) }), { code: 'MARKDOWN_PAGE_LIMIT' })
+  await assert.rejects(renderer.render({ markdown: ('第行\n\n').repeat(2500) }), { code: 'MARKDOWN_PIXEL_LIMIT' })
   const controller = new AbortController()
   const aborted = renderer.render({ markdown: document, signal: controller.signal })
   controller.abort()
