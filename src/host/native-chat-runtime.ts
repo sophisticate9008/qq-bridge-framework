@@ -1224,8 +1224,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               const addressedMessages = [...(groupWake ?? []).filter(item => ['direct', 'nickname', 'reply'].includes(item.reason)),
                 ...(['direct', 'nickname', 'reply'].includes(participation ?? '') && event.userId
                   ? [{ messageId: event.id, actor: event.userId }] : [])]
-              const replyContext = binding && event.userId
-                ? replyFreshness?.prepare(binding, event.userId, event.id, { addressedMessages,
+              const replyContext = event.userId
+                ? replyFreshness?.prepare(event.conversationId, binding, event.userId, event.id, { addressedMessages,
                   contextMessageIds: unread.messages.filter(item => item.sequence <= through
                     && item.actor !== 'assistant' && item.actor !== 'system').map(item => item.id),
                   contextMessages: unread.messages.filter(item => item.sequence <= through

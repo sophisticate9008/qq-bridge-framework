@@ -35,13 +35,13 @@ function fixture(context: TestContext) {
 test('a withheld contact signal retains its original unread request and explicit wake in the successor', async context => {
   const f = fixture(context)
   f.append('original-question'); f.append('contact'); f.append('picture')
-  f.freshness.prepare(f.binding, '123', 'contact', { addressedMessages: [{ messageId: 'contact', actor: '123' }],
+  f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'contact', { addressedMessages: [{ messageId: 'contact', actor: '123' }],
     contextMessageIds: ['original-question', 'contact'] })
   f.waiting('123')
   assert.equal(await f.freshness.hold(f.event('contact')), true)
   assert.equal(await f.freshness.hold(f.event('contact')), true)
   assert.equal(f.deferred(), 1)
-  const next = f.freshness.prepare(f.binding, '123', 'picture', { addressedMessages: [], contextMessageIds: ['picture'] })
+  const next = f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'picture', { addressedMessages: [], contextMessageIds: ['picture'] })
   assert.deepEqual(next.unsentReplyMessageIds, ['original-question', 'contact'])
   assert.deepEqual(next.addressedMessageIds, ['contact'])
   // Acceptance consumes the durable notice, while this prepared execution remains protected.
@@ -53,14 +53,14 @@ test('a withheld contact signal retains its original unread request and explicit
 test('coalesced explicit calls follow their actual authors rather than the last ordinary speaker', async context => {
   const f = fixture(context)
   f.append('call'); f.append('last-ordinary', '789')
-  f.freshness.prepare(f.binding, '789', 'last-ordinary', {
+  f.freshness.prepare(f.binding.conversationId, f.binding, '789', 'last-ordinary', {
     addressedMessages: [{ messageId: 'call', actor: '123' }], contextMessageIds: ['call', 'last-ordinary'] })
   f.waiting('789')
   assert.equal(await f.freshness.hold(f.event('last-ordinary')), false)
   assert.deepEqual(f.checks, ['123:same-speaker'])
   f.waiting('123')
   assert.equal(await f.freshness.hold(f.event('last-ordinary')), true)
-  const next = f.freshness.prepare(f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
+  const next = f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
   assert(next.unsentReplyMessageIds?.includes('call'))
   assert.deepEqual(next.addressedMessageIds, ['call'])
 })
@@ -68,30 +68,30 @@ test('coalesced explicit calls follow their actual authors rather than the last 
 test('ordinary observation can reconsider once, then same-speaker chatter cannot postpone it again', async context => {
   const f = fixture(context)
   f.append('observation'); f.append('successor')
-  f.freshness.prepare(f.binding, '123', 'observation', { addressedMessages: [], contextMessageIds: ['observation'] })
+  f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'observation', { addressedMessages: [], contextMessageIds: ['observation'] })
   f.waiting('123')
   assert.equal(await f.freshness.hold(f.event('observation')), true)
   assert.deepEqual(f.checks, ['123:group-observation'])
-  f.freshness.prepare(f.binding, '123', 'successor', { addressedMessages: [], contextMessageIds: ['successor'] })
+  f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'successor', { addressedMessages: [], contextMessageIds: ['successor'] })
   assert.equal(await f.freshness.hold(f.event('successor')), false)
 })
 
 test('retained request sources stay fenced to the original session generation', async context => {
   const f = fixture(context)
   f.append('call')
-  f.freshness.prepare(f.binding, '123', 'call', {
+  f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'call', {
     addressedMessages: [{ messageId: 'call', actor: '123' }], contextMessageIds: ['call'] })
   f.waiting('123')
   assert.equal(await f.freshness.hold(f.event('call')), true)
   const replacement = { ...f.binding, sessionId: 'replacement-session', generation: f.binding.generation + 1 }
-  assert.deepEqual(f.freshness.prepare(replacement, '123', 'next', { addressedMessages: [], contextMessageIds: [] }),
+  assert.deepEqual(f.freshness.prepare(replacement.conversationId, replacement, '123', 'next', { addressedMessages: [], contextMessageIds: [] }),
     { addressedMessageIds: [] })
 })
 
 test('withheld input survives ordinary chatter rolling the original messages out of host history', async context => {
   const f = fixture(context)
   f.append('original'); f.append('contact')
-  f.freshness.prepare(f.binding, '123', 'contact', {
+  f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'contact', {
     addressedMessages: [{ messageId: 'contact', actor: '123' }], contextMessageIds: ['original', 'contact'],
     contextMessages: [{ id: 'original', actor: '123', receivedAt: 100,
       content: [{ type: 'text', text: '原始明确问题' }] },
@@ -99,7 +99,7 @@ test('withheld input survives ordinary chatter rolling the original messages out
   for (let index = 0; index < 105; index++) f.append(`chatter-${index}`, '789')
   f.waiting('123')
   assert.equal(await f.freshness.hold(f.event('contact')), true)
-  const next = f.freshness.prepare(f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
+  const next = f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
   assert.deepEqual(next.unsentReplyMessageIds, ['original', 'contact'])
   assert.equal(next.unsentReplyRequests?.[0]?.text, '原始明确问题')
   assert.equal(next.unsentReplyRequests?.[0]?.actor, '123')
@@ -112,14 +112,32 @@ test('a queued explicit source is retained in the snapshot ahead of newer ordina
   ...Array.from({ length: 45 }, (_, index) => ({ id: `ordinary-${index}`, actor: '789', receivedAt: 101 + index,
     content: [{ type: 'text' as const, text: '普通闲聊' }] }))]
   for (const item of messages) f.append(item.id, item.actor)
-  f.freshness.prepare(f.binding, '789', 'ordinary-44', {
+  f.freshness.prepare(f.binding.conversationId, f.binding, '789', 'ordinary-44', {
     addressedMessages: [{ messageId: 'explicit', actor: '123' }],
     contextMessageIds: messages.map(item => item.id), contextMessages: messages })
   f.waiting('123')
   assert.equal(await f.freshness.hold(f.event('ordinary-44')), true)
-  const next = f.freshness.prepare(f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
+  const next = f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'next', { addressedMessages: [], contextMessageIds: [] })
   assert.equal(next.unsentReplyMessageIds?.length, 32)
   assert(next.unsentReplyMessageIds?.includes('explicit'))
   assert.equal(next.unsentReplyRequests?.find(item => item.id === 'explicit')?.text, '需要保留的原题')
   assert(next.unsentReplyMessageIds?.includes('ordinary-44'))
+})
+
+test('the first unbound input retains its unread question before agent submission creates the session', async context => {
+  const f = fixture(context)
+  f.append('question'); f.append('first-contact'); f.append('followup')
+  f.freshness.prepare(f.binding.conversationId, null, '123', 'first-contact', {
+    addressedMessages: [{ messageId: 'first-contact', actor: '123' }], contextMessageIds: ['question', 'first-contact'],
+    contextMessages: [{ id: 'question', actor: '123', receivedAt: 100,
+      content: [{ type: 'text', text: '首次会话的原问题' }] },
+    { id: 'first-contact', actor: '123', receivedAt: 101, content: [{ type: 'mention', userId: '999' }] }] })
+  f.waiting('123')
+  assert.equal(await f.freshness.hold(f.event('first-contact')), true)
+  const next = f.freshness.prepare(f.binding.conversationId, f.binding, '123', 'followup', {
+    addressedMessages: [], contextMessageIds: ['followup'] })
+  assert.deepEqual(next.unsentReplyMessageIds, ['question', 'first-contact'])
+  assert.deepEqual(next.addressedMessageIds, ['first-contact'])
+  assert.equal(next.unsentReplyRequests?.[0]?.text, '首次会话的原问题')
+  assert.equal(await f.freshness.hold(f.event('followup')), false)
 })

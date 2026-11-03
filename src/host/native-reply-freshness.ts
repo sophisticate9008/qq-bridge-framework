@@ -2,7 +2,7 @@ import type { FrameworkEvent } from '../core/types.ts'
 import type { DurableStore, SessionBinding, StoredRecord } from './types.ts'
 import type { createBridgeHost } from './bridge.ts'
 import { digest, object } from './data.ts'
-import { isRecord } from '../core/values.ts'
+import { assert, isRecord } from '../core/values.ts'
 import type { HistoryMessage } from './history.ts'
 import { nativeUnsentReplyRequest, selectNativeChatMessages, type NativeUnsentReplyRequest } from './native-chat-input.ts'
 
@@ -65,14 +65,17 @@ export function createNativeReplyFreshness(options: {
         options.host.replies.suppress(binding, source.id)
       return true
     },
-    prepare(binding: SessionBinding, userId: string, messageId: string, input: {
+    prepare(conversationId: string, binding: SessionBinding | null, userId: string, messageId: string, input: {
       readonly addressedMessages: readonly { readonly messageId: string; readonly actor: string }[]
       readonly contextMessageIds: readonly string[]
       readonly contextMessages?: readonly HistoryMessage[]
     }): { readonly unsentReplyMessageIds?: readonly string[]; readonly unsentReplyRequests?: readonly NativeUnsentReplyRequest[];
       readonly addressedMessageIds: readonly string[] } {
-      const record = options.store.read(namespace, key(binding, userId))
-      const requestId = digest([binding.conversationId, messageId, 'prompt'])
+      assert(!binding || binding.conversationId === conversationId, 'NATIVE_REPLY_SOURCE_MISMATCH', 'Reply context must belong to its session.')
+      // The first input is prepared before agent.submit resolves its session.
+      // Keep its request facts now; hold will use the actual admitted binding.
+      const record = binding ? options.store.read(namespace, key(binding, userId)) : null
+      const requestId = digest([conversationId, messageId, 'prompt'])
       const value = record ? object(record.value) : {}
       const ids = Array.isArray(value.messageIds) ? value.messageIds.filter((id): id is string => typeof id === 'string').slice(-32) : []
       const retained = Array.isArray(value.addressedMessageIds)
@@ -82,7 +85,7 @@ export function createNativeReplyFreshness(options: {
       // A successor carrying a withheld reply may finish despite further chatter,
       // including the same speaker. Queued input still forms the next single batch.
       modes.set(requestId, { mode: record ? 'preserved'
-        : binding.conversationId.startsWith('group:') && !addressedMessageIds.length ? 'group-observation' : 'same-speaker',
+        : conversationId.startsWith('group:') && !addressedMessageIds.length ? 'group-observation' : 'same-speaker',
         actors: [...new Set(input.addressedMessages.map(item => item.actor))],
         contextMessageIds: selectNativeChatMessages(input.contextMessageIds.map(id => ({ id })), addressedMessageIds).map(item => item.id),
         contextRequests: selectNativeChatMessages(input.contextMessages ?? [], addressedMessageIds).map(nativeUnsentReplyRequest),
