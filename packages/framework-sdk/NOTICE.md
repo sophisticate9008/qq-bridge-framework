@@ -66,9 +66,9 @@ QQ 收藏接口依据 NapCat 的 [CustomFace 动作实现](https://github.com/Na
 
 选型时参考过 [mdshot](https://github.com/pi0/mdshot) 的 Markdown 截图方案，实现未嵌入其源码。中文字体的再分发许可见下文。
 
-### HTML 排版编译调研
+### HTML 图片排版与编译调研
 
-`tools/blitz-probe` 使用 [Blitz](https://github.com/DioxusLabs/blitz) 与其 AnyRender CPU 后端进行独立编译调研，解析、绘制和 PNG 输出流程参考上游 `examples/screenshot.rs`。Blitz 使用 MIT OR Apache-2.0 许可，探针压缩包保留其两份许可原文及所用中文字体许可。源码仓库保存封装及构建脚本，不保存上游源码、编译产物或依赖目录；正式集成前仍需整理传递依赖许可。当前探针不属于已启用的聊天排版能力，构建方式与实测记录见 [探针说明](tools/blitz-probe/README.md)。
+`tools/blitz-probe` 使用 [Blitz](https://github.com/DioxusLabs/blitz) 与其 AnyRender CPU 后端进行独立编译调研，解析、绘制和 PNG 输出流程参考上游 `examples/screenshot.rs`。Blitz 使用 MIT OR Apache-2.0 许可，探针压缩包保留其两份许可原文及所用中文字体许可。源码仓库保存封装及构建脚本，不保存上游源码、编译产物或依赖目录；打包时整理传递依赖的许可文件和清单。框架通过独立原生进程提供 HTML 排版，完整发行包随附平台组件、Cargo.lock 与依赖许可。编译调研探针与实际运行服务分别组织，构建方式与实测记录见 [探针说明](tools/blitz-probe/README.md)。
 
 ### 视频观察
 
@@ -108,3 +108,7 @@ Markdown 正文的数学与通用符号使用未经修改的 Noto Sans Math、No
 DSH 与官方 SDK 来自 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。桥接插件当前核对的是 SDK `0.2.1-rc.2` 与 Cordis `4.0.5`，实际接入条件见 [DSH 文档](https://github.com/sophisticate9008/qq-bridge-framework/blob/v1.0/docs/DSH.md)。
 
 本框架源码按 [LICENSE](https://github.com/sophisticate9008/qq-bridge-framework/blob/v1.0/LICENSE) 中的 MIT 许可分发。依赖及独立取得的协议网关、智能体运行时、模型和服务继续适用各自的许可与使用条款。本文不授予第三方软件的额外权利，也不表示与腾讯、QQ、DeepSeek、SnowLuma 或 qq-bridge 作者存在隶属或背书关系。
+
+### HTML 文档解析
+
+HTML 文档使用 [parse5](https://github.com/inikulin/parse5)（MIT）解析与序列化，保留文档结构和文本转义。其传递依赖继续适用各自许可，安装包内 npm 依赖保留原许可文件。

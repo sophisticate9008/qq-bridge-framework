@@ -68,7 +68,7 @@ QQ 收藏接口依据 NapCat 的 [CustomFace 动作实现](https://github.com/Na
 
 ### HTML 图片排版与编译调研
 
-`tools/blitz-probe` 使用 [Blitz](https://github.com/DioxusLabs/blitz) 与其 AnyRender CPU 后端进行独立编译调研，解析、绘制和 PNG 输出流程参考上游 `examples/screenshot.rs`。Blitz 使用 MIT OR Apache-2.0 许可，探针压缩包保留其两份许可原文及所用中文字体许可。源码仓库保存封装及构建脚本，不保存上游源码、编译产物或依赖目录；正式集成前仍需整理传递依赖许可。框架通过独立原生进程提供 HTML 排版，完整发行包随附平台组件、Cargo.lock 与依赖许可。编译调研探针与实际运行服务分别组织，构建方式与实测记录见 [探针说明](tools/blitz-probe/README.md)。
+`tools/blitz-probe` 使用 [Blitz](https://github.com/DioxusLabs/blitz) 与其 AnyRender CPU 后端进行独立编译调研，解析、绘制和 PNG 输出流程参考上游 `examples/screenshot.rs`。Blitz 使用 MIT OR Apache-2.0 许可，探针压缩包保留其两份许可原文及所用中文字体许可。源码仓库保存封装及构建脚本，不保存上游源码、编译产物或依赖目录；打包时整理传递依赖的许可文件和清单。框架通过独立原生进程提供 HTML 排版，完整发行包随附平台组件、Cargo.lock 与依赖许可。编译调研探针与实际运行服务分别组织，构建方式与实测记录见 [探针说明](tools/blitz-probe/README.md)。
 
 ### 视频观察
 
