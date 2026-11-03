@@ -12,12 +12,15 @@ export function createDshInteractionChannel(options: { readonly base: URL; reado
   readonly rpc: (method: '$events/result', input: JsonObject, signal: AbortSignal, direct: true) => Promise<DshPortResult<JsonValue>> }) {
   const { base, timeoutMs, maxPendingEvents, maxFollows, maxBytes, lifetime, callbacks, authenticate, rpc } = options
   const interactionSessions = new Map<string, symbol>()
+  let state: 'idle' | 'connecting' | 'connected' | 'closed' | 'error' = 'idle'
+  let lastError: string | null = null
   let interactionConnection: { readonly stop: () => Promise<void>; readonly closeSession: (sessionId: string) => void;
     readonly respond: (request: DshInteractionResponseRequest) => Promise<DshPortResult<JsonValue>> } | undefined
   const rejected = (code: string): DshPortResult<never> => ({ ok: false, error: { code } })
   const connectInteractions = async (request: DshInteractionConnectionRequest): Promise<() => Promise<void>> => {
     if (interactionConnection !== undefined) throw failure('DSH_INTERACTIONS_ALREADY_CONNECTED')
     request.signal.throwIfAborted()
+    state = 'connecting'; lastError = null
     const controller = new AbortController()
     const signal = AbortSignal.any([request.signal, lifetime.signal, controller.signal])
     const streamId = randomUUID()
@@ -38,6 +41,8 @@ export function createDshInteractionChannel(options: { readonly base: URL; reado
     const stop = (reason = 'DSH_INTERACTIONS_CLOSED'): Promise<void> => {
       if (closing !== undefined) return closing
       stopped = true
+      state = request.signal.aborted || lifetime.signal.aborted ? 'closed' : 'error'
+      lastError = reason
       clearTimeout(openingTimer)
       signal.removeEventListener('abort', abort)
       controller.abort()
@@ -140,6 +145,7 @@ export function createDshInteractionChannel(options: { readonly base: URL; reado
           if (value.type === 'ready') {
             if (clientId !== undefined || !identifier(value.clientId)) throw failure('DSH_INTERACTION_INVALID_FRAME')
             clientId = value.clientId
+            state = 'connected'; lastError = null
             clearTimeout(openingTimer)
             readyResolve()
             return
@@ -194,6 +200,7 @@ export function createDshInteractionChannel(options: { readonly base: URL; reado
   }
 
   return Object.freeze({
+    status() { return { state, lastError } },
     registerSession(sessionId: string) {
       if (!identifier(sessionId) || lifetime.signal.aborted) throw failure('DSH_INVALID_SESSION')
       if (interactionSessions.has(sessionId)) throw failure('DSH_INTERACTION_SESSION_REGISTERED')

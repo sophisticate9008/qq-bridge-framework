@@ -60,7 +60,9 @@ export function readResource(api: ApiClient, key: string, signal?: AbortSignal, 
   if (!pending) {
     pending = { controller: new AbortController(), waiters: new Set() };
     entry.pending = pending;
-    publish(entry, { ...entry.snapshot, loading: true, error: null });
+    // A retry has not proved recovery. Preserve the last failure until a new
+    // response succeeds so an old ready snapshot cannot flash green mid-outage.
+    publish(entry, { ...entry.snapshot, loading: true });
   }
   const operation = pending;
   const promise = new Promise<unknown>((resolve, reject) => {

@@ -127,7 +127,7 @@ export function createNativeFrameworkTools(options: {
         observe(mapNativeToolObservation(call,{status:'unknown',code:'TOOL_EXECUTION_UNKNOWN'}));
         throw error;
       }
-    }, onFault(code) { channelError = code; } });
+    }, onFault(code) { channelError = code; }, onRecovered() { channelError = null; } });
 
   async function permitted(conversationId: string, signal: AbortSignal, describe = false): Promise<readonly FrameworkToolDefinition[]> {
     const unavailable = await options.unavailableCapabilities?.(signal) ?? [];

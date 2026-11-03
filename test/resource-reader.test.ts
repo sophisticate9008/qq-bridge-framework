@@ -38,6 +38,18 @@ test('failure retains the previous read snapshot; API identities and resource ke
   assert.equal(readResourceSnapshot(right.api, '/providers').hasValue, false); assert.equal(readResourceSnapshot(left.api, '/status').hasValue, false);
 });
 
+test('retrying a failed health read does not restore a stale healthy indicator before a response', async () => {
+  const { api, requests } = client();
+  const first = readResource(api, '/health'); await dispatched(); requests[0]!.response.resolve({ healthy: true }); await first;
+  const failed = readResource(api, '/health'); await dispatched(); const offline = new Error('offline'); requests[1]!.response.reject(offline);
+  await assert.rejects(failed, /offline/);
+  const retry = readResource(api, '/health'); await dispatched();
+  assert.equal(readResourceSnapshot(api, '/health').loading, true);
+  assert.equal(readResourceSnapshot(api, '/health').error, offline);
+  requests[2]!.response.resolve({ healthy: true }); await retry;
+  assert.equal(readResourceSnapshot(api, '/health').error, null);
+});
+
 test('writes invalidate read snapshots, and clearing a session cancels requests and removes cached values', async () => {
   const { api, requests } = client(); const first = readResource(api, '/providers'); await dispatched(); requests[0]?.response.resolve('before'); await first;
   await writeResource(api, '/providers', {}); assert.equal(readResourceSnapshot(api, '/providers').updatedAt, 0);

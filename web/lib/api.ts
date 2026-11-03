@@ -25,7 +25,8 @@ async function request(
       },
       ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
       credentials: 'same-origin',
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(75_000)]) : AbortSignal.timeout(75_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(method === 'GET' ? 12_000 : 75_000)])
+        : AbortSignal.timeout(method === 'GET' ? 12_000 : 75_000),
     });
     const result: unknown = await response.json();
     if (!response.ok) throw new ApiError(isRecord(result) && typeof result.error === 'string' ? result.error : 'request_failed', response.status);

@@ -67,6 +67,7 @@ import { createNativeSessionMigrationRoutes } from './native-session-migration.t
 import { createNativeSessionManagementRoutes } from './native-session-management.ts'
 import { nativeSessionBindingRevision, readNativeSessionManagement } from '../host/native-session-management.ts'
 import { createNativeChatLifecycle } from './native-chat-lifecycle.ts'
+import { createNativeChatHealthRoutes } from './native-chat-health.ts'
 
 import { revision, ensurePrivateDirectory, withDirectoryWriteLock, acquireDirectoryLock, type Document } from './private-json-storage.ts'
 import { validateStoredAccess, validateStoredDeployment, validateStoredExecution,
@@ -1035,6 +1036,7 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
     routes.push(...createPluginScheduleRoutes({ runtime: chatRuntime }))
     routes.push(...createStickerLibraryRoutes(chatRuntime))
     routes.push(...nativeChatControlRoutes(directory, chatRuntime, options.deploymentRuntime === undefined ? undefined : checkedNativeDeploymentRuntime(options.deploymentRuntime)))
+    routes.push(...createNativeChatHealthRoutes(directory, chatRuntime))
     routes.push(...createNativeSessionManagementRoutes({ directory, state: () => chatRuntime.activity().state,
       unbind: target => chatRuntime.unbindSession(target), bind: (target, sessionId, signal) => chatRuntime.bindSession(target, sessionId, signal) })
       .map(route => ({ ...route, handle: (request: Parameters<AdminRoute['handle']>[0]) =>
@@ -1270,6 +1272,18 @@ function nativeChatControlRoutes(directory: string, runtime: NativeChatRuntime,
     { method: 'GET', pathname: '/api/chat/runtime/baseline', maxResponseBytes: 1_048_576, handle({ query }) {
       requireEmptyQuery(query)
       return runtime.configurationBaseline()
+    } },
+    { method: 'POST', pathname: '/api/chat/runtime/reconnect', async handle({ query, body, signal }) {
+      requireEmptyQuery(query)
+      const revisions = startRevisions(body)
+      return withNativeChatControl(directory, async () => {
+        try { return await runtime.reconnect(revisions, signal) }
+        catch (error) {
+          if (error instanceof FrameworkError && error.code === 'NATIVE_CHAT_REVISION_CONFLICT') requestError(409, 'chat_revision_conflict')
+          if (error instanceof FrameworkError && error.code === 'NATIVE_CHAT_RESTART_REQUIRED') requestError(409, 'native_chat_restart_required')
+          requestError(503, 'native_chat_reconnect_failed')
+        }
+      })
     } },
     { method: 'POST', pathname: '/api/chat/runtime/start', async handle({ query, body, signal }) {
       requireEmptyQuery(query)

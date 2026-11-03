@@ -1,3 +1,5 @@
+import { parseChatHealth } from '../../src/contracts/chat-health.ts';
+import { chatHealthBadge } from '../lib/chat-health.ts';
 import { ConversationWakeSettings } from '../components/conversation-wake-settings.tsx';
 import { useState, type ReactNode } from 'react';
 import { Bot, Cpu, RefreshCw, Waves } from 'lucide-react';
@@ -49,6 +51,8 @@ export function OverviewPage(props: PageProps) {
   const sessions = useReadResource(api, sessionPagePath(), connected, parseSessionSnapshot, { intervalMs: 15_000 });
   const inbox = useReadResource(api, '/api/chat/inbox', connected, parseNativeInboxSummary, { intervalMs: 5_000 });
   const dshHealth = useDshHealth(api, connected);
+  const chain = useReadResource(api, '/api/chat/health', connected, parseChatHealth, { intervalMs: 5_000 });
+  const health = chain.error ? null : chain.snapshot;
   const status = runtime.error ? null : runtime.snapshot;
   const planCatalog = plans.error ? null : plans.snapshot;
   const selectedPlan = planCatalog?.plans.find(plan => plan.id === planCatalog.activePlanId);
@@ -58,7 +62,7 @@ export function OverviewPage(props: PageProps) {
   const inboxValue = inbox.error ? null : inbox.snapshot;
   const reasons = status ? chatRuntimeVisibleReasons(status).map(chatRuntimeReason) : [];
   const runtimeDetails = <div className="stack">
-    <div className="row"><StatusPill tone={status?.chatReady ? 'success' : runtime.error || status?.state === 'error' ? 'warning' : 'neutral'}>{runtime.error ? '读取失败' : chatRuntimeBadge(status)}</StatusPill><span className="small muted">{status ? status.configurationChanged ? '有设置等待应用' : '配置未报告变更' : '运行状态待读取'}</span></div>
+    <div className="row"><StatusPill tone={health?.healthy ? 'success' : runtime.error || status?.state === 'error' ? 'warning' : 'neutral'}>{runtime.error ? '读取失败' : chatHealthBadge(health, status)}</StatusPill><span className="small muted">{status ? status.configurationChanged ? '有设置等待应用' : '配置未报告变更' : '运行状态待读取'}</span></div>
     <TechnicalDetails fields={[
       { label: '聊天方案', value: selectedPlan?.name ?? (plans.error ? '读取失败' : '尚未确认') },
       { label: 'QQ 连接', value: status ? status.protocolConnected ? '已连接' : '未连接' : '尚未确认' },
@@ -79,13 +83,13 @@ export function OverviewPage(props: PageProps) {
     </> : <p className="small muted">{inbox.error ? '收件状态读取失败。' : '正在读取收件状态…'}</p>}
   </section>;
 
-  const reload = () => { runtime.refresh(); dshHealth.refresh(); plans.refresh(); assistant.refresh(); access.refresh(); sessions.refresh(); inbox.refresh(); void refresh(); };
+  const reload = () => { runtime.refresh(); chain.refresh(); dshHealth.refresh(); plans.refresh(); assistant.refresh(); access.refresh(); sessions.refresh(); inbox.refresh(); void refresh(); };
   return <div className="page-stack" data-page="overview">
     <PageHeading title="连接与概览" description="查看连接、调整当前聊天、处理运行问题" actions={<><HelpTip label="启动检查">启动只检查连接和配置，不调用模型；聊天就绪即可使用。</HelpTip><Button variant="ghost" size="sm" disabled={!connected || runtime.loading} onClick={reload}><RefreshCw className="size-3.5" />刷新</Button></>} />
     {!connected ? <ConnectPrompt connect={connect} /> : <>
       <div className="grid3">
         <section className="entity" id="native-runtime">
-          <div className="row"><span className="avatar"><Waves className="size-5" /></span><div><h2 className="font-semibold">日常聊天</h2><p className="small muted">QQ · OneBot</p></div><span className="push"><StatusPill tone={status?.chatReady ? 'success' : runtime.error || status?.state === 'error' ? 'warning' : 'neutral'}>{runtime.error ? '读取失败' : chatRuntimeBadge(status)}</StatusPill></span></div>
+          <div className="row"><span className="avatar"><Waves className="size-5" /></span><div><h2 className="font-semibold">日常聊天</h2><p className="small muted">QQ · OneBot</p></div><span className="push"><StatusPill tone={health?.healthy ? 'success' : runtime.error || status?.state === 'error' ? 'warning' : 'neutral'}>{runtime.error ? '读取失败' : chatHealthBadge(health, status)}</StatusPill></span></div>
           <div className="meta"><span>{bound ? `${bound.next ? '至少 ' : ''}${bound.sessions.length} 个已绑定会话` : '会话待读取'}</span><span>{status ? status.protocolConnected ? '机器人已连接' : '机器人未连接' : '连接状态待读取'}</span></div>
           <div className="strip">{selectedPlan ? `已选方案：${selectedPlan.name}` : '选择聊天方案并关联人设。'}</div>
           <div className="actions"><Button variant="outline" size="sm" onClick={() => navigate('adapters', { kind: 'section', sectionId: 'adapter-onebotHttp', title: 'QQ 连接' })}>查看连接</Button><ReadOnlyDetails title="聊天运行详情" description="当前方案、连接与会话状态。"><div className="stack">{runtimeDetails}{rawRuntime}</div></ReadOnlyDetails><OverviewSettings title="QQ 连接设置" label="设置">{active => <AdapterManager {...props} compact="onebot" active={active} />}</OverviewSettings><span className="push"><OverviewSettings title="聊天运行" label="运行控制">{() => <ChatRuntimeControls compact api={api} connected={connected} dirty={localDirty} navigate={navigate} />}</OverviewSettings></span></div>

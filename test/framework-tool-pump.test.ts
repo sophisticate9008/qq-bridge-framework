@@ -4,6 +4,7 @@ import { createFrameworkToolPump } from '../src/host/framework-tool-pump.ts'
 import type { FrameworkToolPendingCall, FrameworkToolResult } from '../src/contracts/framework-tools.ts'
 import type { DshFrameworkToolPort } from '../src/adapters/dsh-framework-tools.ts'
 import { awaitCondition } from './fixtures/await-condition.ts'
+import { FrameworkError } from '../src/core/values.ts'
 
 const item: FrameworkToolPendingCall = { ticket: 'ticket-1', leaseId: 'projection-1', call: {
   id: 'call-1', sessionId: 'session-1', generation: 1, requestId: 'request-1', userMessageId: 'message-1',
@@ -12,6 +13,25 @@ const signal = new AbortController().signal
 function port(poll: DshFrameworkToolPort['poll'], complete: DshFrameworkToolPort['complete']): DshFrameworkToolPort {
   return { poll, complete, async inspect() { throw new Error('unused') }, async install() { throw new Error('unused') }, async withdraw() { throw new Error('unused') } }
 }
+
+test('transient read-only polling reconnects without dispatching a retained ticket twice', async () => {
+  let polls = 0
+  let executions = 0
+  let completed = 0
+  let recovered = 0
+  const pump = createFrameworkToolPump({ issuerEpoch: 'epoch-1', pollIntervalMs: 10,
+    port: port(async () => { if (++polls === 2) throw new FrameworkError('DSH_TRANSPORT_UNKNOWN', 'transport unavailable'); return [item] },
+      async () => { completed++; return true }), accepts: () => true,
+    async execute() { executions++; return { status: 'confirmed', value: 'once' } }, onRecovered() { recovered++ } })
+  pump.start()
+  try {
+    await awaitCondition(() => recovered === 1, { message: 'read-only tool polling recovers', timeoutMs: 3500 })
+    assert.equal(pump.status().state, 'running')
+    assert.equal(pump.status().lastError, null)
+    assert.equal(executions, 1)
+    assert.equal(completed, 1)
+  } finally { await pump.close(signal) }
+})
 
 test('owner pump verifies projection, returns one result and never replays a retained ticket', async () => {
   const completed: FrameworkToolResult[] = []

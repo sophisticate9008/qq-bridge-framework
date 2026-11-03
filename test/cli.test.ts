@@ -658,7 +658,7 @@ test('status performs read-only health requests and does not print administrator
   assert.equal(await runCli(['status', '--config', adminConfiguration], output.io), 0);
   assert.deepEqual(requests.map(request => [request.method, request.url]).sort(), [
     ['GET', '/health'],
-    ['GET', '/api/gateway/health'], ['GET', '/api/chat/dsh/health'], ['GET', '/api/chat/runtime'], ['GET', '/api/chat/application']
+    ['GET', '/api/gateway/health'], ['GET', '/api/chat/dsh/health'], ['GET', '/api/chat/runtime'], ['GET', '/api/chat/application'], ['GET', '/api/chat/health']
   ].sort());
   assert.equal(requests.find(request => request.url === '/health')?.authorization, undefined);
   assert(requests.filter(request => request.url !== '/health').every(request => request.authorization === `Bearer ${ADMIN_SECRET}`));

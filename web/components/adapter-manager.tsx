@@ -17,6 +17,9 @@ import { ChatRuntimeControls } from './chat-runtime-controls.tsx';
 import { DshHealthStatus } from './dsh-health-status.tsx';
 import { ReadOnlyDetails, TechnicalDetails } from './read-only-details.tsx';
 import { SettingsWindow } from './settings-window.tsx';
+import { parseChatHealth } from '../../src/contracts/chat-health.ts';
+import { chatHealthLayerLabel } from '../lib/chat-health.ts';
+import { useReadResource } from '../lib/use-read-resource.ts';
 
 type OutboundId = 'onebotHttp' | 'dshAgent';
 type AdapterId = OutboundId | 'onebotWebhook' | 'onebotWs';
@@ -258,6 +261,8 @@ export function AdapterManager({ api, connected, connect, setDirty, navigate, co
   const retained = useMemo(() => retainedDraft(api, draftKey), [api, draftKey]);
   const draftApi = useRef(api);
   const [snapshot, setSnapshot] = useState<AdapterSnapshot | null>(retained?.snapshot ?? null);
+  const liveHealth = useReadResource(api, '/api/chat/health', connected, parseChatHealth, { intervalMs: 5_000 });
+  const sendHealth = liveHealth.error ? null : liveHealth.snapshot?.layers.find(layer => layer.id === 'send');
   const [draft, setDraft] = useState<AdapterDraft | null>(retained?.draft ?? null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -570,7 +575,7 @@ export function AdapterManager({ api, connected, connect, setDirty, navigate, co
     <div className="grid3">
       <section id={nativeFormMetadata.onebot.id} className="panel entity">
         <div className="row"><span className="avatar" aria-hidden="true">↔</span><div className="grow"><h2 className="panel-title">QQ 消息连接</h2><p className="muted small">OneBot · HTTP 发送 / WebSocket 接收</p></div><span data-protocol-connection-state={snapshot.connection?.state}><StatusPill tone={protocol?.statusTone ?? 'neutral'}>{protocol?.statusLabel ?? '连接状态未知'}</StatusPill></span></div>
-        <div className="meta"><span>HTTP 发送{snapshot.outbound.onebotHttp.enabled ? '已启用' : '未启用'}</span><span>消息接收：{snapshot.websocket.enabled ? 'WebSocket' : snapshot.webhook.enabled ? 'Webhook' : '未启用'}</span><span>账号：{snapshot.connection?.selfId ?? '尚未识别'}</span></div>
+        <div className="meta"><span>HTTP 发送：{!snapshot.outbound.onebotHttp.enabled ? '未启用' : sendHealth ? chatHealthLayerLabel(sendHealth) : '待检查'}</span><span>消息接收：{snapshot.websocket.enabled ? 'WebSocket' : snapshot.webhook.enabled ? 'Webhook' : '未启用'}</span><span>账号：{snapshot.connection?.selfId ?? '尚未识别'}</span></div>
         <div className={`strip ${protocol?.diagnostic?.tone === 'error' ? 'bad' : protocol?.diagnostic?.tone === 'warning' ? 'warn' : ''}`} role="status" data-protocol-diagnostic={protocol?.diagnostic?.category}>{protocol?.diagnostic && protocol.diagnostic.tone !== 'neutral' ? protocol.diagnostic.message : `接收 ${snapshot.connection?.received ?? '未知'} 条 · 丢弃 ${snapshot.connection?.dropped ?? '未知'} 条。协议连接与聊天启停分别管理。`}</div>
         <div className="actions">
           <SettingsWindow title="QQ 消息收发" label="编辑连接" description="HTTP 发送与 WebSocket 接收分别配置；关闭保留常规草稿。" onOpenChange={open => { if (!open) setDraft(current => current ? clearCredentials(current) : current); }}>{qqEditor}</SettingsWindow>

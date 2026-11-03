@@ -397,3 +397,9 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 统一入口为 `qbf-cli`，发行包 `bin` 指向编译后的同一 CLI。`status` 与不带会话的 `doctor` 并行读取管理、网关、DSH、QQ、聊天和应用证据，一项失败保留其他项；读取失败显示 unknown，不能据此宣称服务离线。`--json` 输出有界投影，异常、未知及未完成条件返回非零。逐会话 doctor 同样按实际诊断是否 ready 设置退出码。后台服务命令使用 `service` 命名空间，与前台 start 分开；进程、端口、专用健康检查分别呈现，没有专用检查时保持未核验。
 
 后台进程的管理权限独立于连接配置与健康。私有服务清单默认仅托管 `framework-admin` 和 `framework-gateway`；其他本机条目必须显式 `managed: true` 才参与整套或指定组件启停、内部监督与协议切换，`managed: false` 排除默认框架组件。`group`、`enabled`、安装发现与通信鉴权不授予进程管理权限；远程连接不授予远程生命周期管理权限。未托管条目可显式读取状态与日志，默认服务列表只展示受管条目。
+
+`GET /api/chat/health` 独立核对框架处理、QQ 接收、实际 HTTP 发送地址、DSH 鉴权、会话回复监听、工具通道和模型提问通道，返回 `{schema:1,checkedAt,healthy,modelExecutionVerified:false,layers}`。`layers` 按 `framework/receive/send/dsh/replies/tools/interactions` 排序，状态为 `ready/idle/recovering/unavailable/unknown/stopped`；原因限定为公开诊断码，不包含凭据、路径和响应正文。HTTP 只调用 `get_status/get_login_info` 并核对接收账号，DSH 只核对鉴权接口；没有模型或 QQ 消息发送。同账号并发检查合并，检查期间配置变化显示 unknown。运行状态中的已装配 host 不代替实时链路检查。
+
+`POST /api/chat/runtime/reconnect` 只接受当前八份 `{revisions}`，核验已运行的宿主、配置、权限与 DSH 插件代次，重建已有会话监听、模型提问连接并核对原工具投影；最多探查一个已有授权绑定，不创建会话、不提交模型输入、不回放历史或工具。插件代次变化及不明确的工具通道要求重启聊天或框架。连接中断后，回复监听按有界退避重连，空闲旧监听在池满时可退役；工具通道仅重试只读轮询，原票据去重状态保留。工具执行或完成回执未知不重试，继续显示诊断与恢复入口。
+
+网页“重启框架”复用现有 `/api/settings/apply` 的 `target: "admin"` 与当前配置 revision，只重启框架宿主。协议端、DSH 及其登录与会话由各自管理，框架诊断和重连不启停这些进程。框架无法响应时，运行机器上的 `qbf-cli restart framework-admin` 为独立恢复入口。

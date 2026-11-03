@@ -3,7 +3,7 @@ import type { FrameworkToolCall, FrameworkToolPendingCall, FrameworkToolResult }
 import { assert, errorCode } from '../core/values.ts'
 import { withDeadline } from './deadlines.ts'
 
-/** One explicitly started owner connection; connection failure stops it without replay. */
+/** Read-only polling reconnects; uncertain tool execution/completion is never retried. */
 export function createFrameworkToolPump(options: {
   readonly port: DshFrameworkToolPort
   readonly issuerEpoch: string
@@ -11,6 +11,7 @@ export function createFrameworkToolPump(options: {
   readonly execute: (call: Readonly<FrameworkToolCall>, signal: AbortSignal) => Promise<FrameworkToolResult>
   readonly pollIntervalMs?: number
   readonly onFault?: (code: string) => void
+  readonly onRecovered?: () => void
 }) {
   const interval = options.pollIntervalMs ?? 100
   assert(Number.isSafeInteger(interval) && interval >= 10 && interval <= 5000,
@@ -20,9 +21,10 @@ export function createFrameworkToolPump(options: {
   const seen = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | undefined
   let started = false
-  let state: 'idle' | 'running' | 'unknown' | 'closed' = 'idle'
+  let state: 'idle' | 'running' | 'recovering' | 'unknown' | 'closed' = 'idle'
   let lastError: string | null = null
   let poll: Promise<void> | undefined
+  let retryDelay = interval
   function fault(error: unknown): void { try { options.onFault?.(errorCode(error, 'TOOL_CHANNEL_UNKNOWN')) } catch {} }
   function stop(): void { lifetime.abort(); clearTimeout(timer); for (const entry of active.values()) entry.controller.abort() }
   function fail(error: unknown): void {
@@ -37,6 +39,8 @@ export function createFrameworkToolPump(options: {
       const pending = await options.port.poll({ issuerEpoch: options.issuerEpoch,
         waitMs: active.size === 0 ? 1000 : 0 }, lifetime.signal)
       if (lifetime.signal.aborted) return
+      if (state === 'recovering') options.onRecovered?.()
+      state = 'running'; lastError = null; retryDelay = interval
       const tickets = new Set(pending.map(entry => entry.ticket))
       for (const [ticket, entry] of active) if (!tickets.has(ticket)) entry.controller.abort()
       // Settled tickets absent from the authoritative pending page no longer need
@@ -60,9 +64,17 @@ export function createFrameworkToolPump(options: {
         active.set(item.ticket, { controller, operation })
       }
     } catch (error) {
-      fail(error)
+      const code = errorCode(error, 'TOOL_CHANNEL_UNKNOWN')
+      if (!lifetime.signal.aborted && ['DSH_TIMEOUT', 'DSH_TRANSPORT_UNKNOWN', 'DSH_ABORTED'].includes(code)) {
+        if (state !== 'recovering' || lastError !== code) fault(error)
+        state = 'recovering'; lastError = code
+        // Retain seen tickets, including uncertain completions. A resumed poll
+        // may observe them but must never dispatch their side effects again.
+        for (const entry of active.values()) entry.controller.abort()
+        retryDelay = Math.min(30_000, Math.max(1000, retryDelay * 2))
+      } else fail(error)
     }
-    finally { if (!lifetime.signal.aborted) timer = setTimeout(run, interval) }
+    finally { if (!lifetime.signal.aborted) timer = setTimeout(run, retryDelay) }
   }
   function run(): void { poll = tick() }
   return Object.freeze({

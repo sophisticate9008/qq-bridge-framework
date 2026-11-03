@@ -22,6 +22,7 @@ export interface ChatRuntimeStatus {
   readonly lastError: string | null;
   readonly readinessScope: string | null;
   readonly modelExecutionVerified: boolean | null;
+  readonly restoring?: boolean;
   readonly sessionMigrationEligible?: boolean;
 }
 
@@ -54,6 +55,7 @@ export function parseChatRuntimeStatus(value: unknown): ChatRuntimeStatus | null
     lastError: root.lastError as string | null,
     readinessScope: typeof root.readinessScope === 'string' ? root.readinessScope : null,
     modelExecutionVerified: typeof root.modelExecutionVerified === 'boolean' ? root.modelExecutionVerified : null,
+    restoring: asRecord(asRecord(root.lifecycle).restoration).state === 'checking',
     ...(root.sessionMigration === undefined ? {} : { sessionMigrationEligible: migration.eligible as boolean }),
   };
 }
@@ -136,7 +138,10 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
   native_runtime_lease_unknown: { text: '无法读取聊天运行锁，尚未确认能安全启动；请检查存储与权限。', page: 'adapters' },
   configuration_changed: { text: '已保存设置有变更，请停止聊天后重新启动以应用。', page: 'adapters' },
   authorization_budget_unavailable: { text: '消息授权已用完或过期，请到访问范围检查。', page: 'access' },
-  agent_follow_unavailable: { text: '有会话的 DSH 回复监听中断；该会话后续新请求会先尝试重新连接。旧请求不会自动重发，未确认的结果请到会话详情核对。', page: 'adapters' },
+  agent_follow_unavailable: { text: '有会话的 DSH 回复监听中断，框架正在按退避间隔重连；持续失败可重新连接聊天或重启框架。旧请求不自动重发，未确认结果请到会话详情核对。', page: 'adapters' },
+  framework_tool_channel_unavailable: { text: '框架工具通道中断。只读轮询会尝试重连；若结果仍未确认，请查看执行记录并重启聊天或框架，旧工具不自动重做。', page: 'adapters' },
+  execution_correlation_unavailable: { text: 'DSH 桥接插件的请求关联已失效。DSH 接口恢复后重启聊天或框架，以重新核验插件；未确认请求不重发。', page: 'adapters' },
+  interaction_channel_unavailable: { text: 'DSH 模型提问通道中断，请重新连接聊天或重启框架。旧提问按原记录核对，不重复答复。', page: 'adapters' },
   host_not_ready: { text: '聊天处理链路尚未就绪，请检查服务状态。', page: 'adapters' },
   host_fault: { text: '聊天处理出现故障，请检查服务状态；不要重复发送未确认的请求。', page: 'adapters' },
   execution_controller_unavailable: { text: '请求状态记录暂不可用，聊天已暂停保护；请检查服务和存储，不要重复提交未确认的请求。', page: 'adapters' },
@@ -144,12 +149,16 @@ const reasons: Readonly<Record<string, { readonly text: string; readonly page: P
 };
 
 export function chatRuntimeLastError(code: string, status: ChatRuntimeStatus | null = null): string {
-  if (code === 'AGENT_FOLLOW_TERMINATED') {
+  if (['AGENT_FOLLOW_TERMINATED', 'AGENT_FOLLOW_UNAVAILABLE', 'DSH_FOLLOW_ENDED', 'DSH_FOLLOW_TRANSPORT_UNKNOWN',
+    'DSH_FOLLOW_OPEN_TIMEOUT', 'DSH_FOLLOW_PONG_TIMEOUT', 'DSH_FOLLOW_INVALID_FRAME', 'DSH_FOLLOW_SEQUENCE_GAP',
+    'DSH_FOLLOW_BACKPRESSURE', 'DSH_FOLLOW_CALLBACK_FAILED'].includes(code)) {
     if (status?.missingReasons.includes('agent_follow_unavailable')) return reasons.agent_follow_unavailable!.text;
-    if (status?.chatReady) return '会话回复监听曾中断，当前聊天链路已就绪。';
+    if (status?.chatReady) return '会话回复监听曾中断，当前未报告监听故障。';
     return '最近记录过会话回复监听中断；当前是否恢复请查看聊天运行状态。';
   }
   const messages: Readonly<Record<string, string>> = {
+    DSH_TIMEOUT: '最近有 DSH 通信请求超时；请按当前链路诊断核对连接，原请求不会自动重发。',
+    DSH_TRANSPORT_UNKNOWN: '最近有 DSH 网络请求未能确认结果；请按当前链路诊断核对连接和原执行。',
     TOOL_CHANNEL_UNKNOWN: '框架工具通道结果尚未确认；请查看对应执行记录，DSH 服务状态单独显示。',
     NATIVE_CHAT_LEASE_HELD: '聊天运行锁尚未释放，启动被阻止。请核对原实例和排空记录；DSH 服务状态单独显示。',
     NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE: 'DSH 的请求关联插件尚未安装、加载或通过认证。请在 DSH 中安装并启用请求关联插件后重新检查；不会自动安装或重启引擎。',
@@ -164,6 +173,7 @@ export function chatRuntimeLastError(code: string, status: ChatRuntimeStatus | n
 
 export function chatRuntimeBadge(status: ChatRuntimeStatus | null): string {
   if (!status) return '状态待检查';
+  if (status.restoring) return '正在恢复聊天';
   if (status.state === 'starting' || status.state === 'stopping') return '正在处理';
   if (status.chatReady) return '聊天已启用';
   if (status.state === 'error') return '启动或运行失败';
@@ -173,6 +183,9 @@ export function chatRuntimeBadge(status: ChatRuntimeStatus | null): string {
     || status.missingReasons.includes('explicit_authorization_missing')) return '授权需要处理';
   if (status.configurationChanged) return '设置等待应用';
   if (status.missingReasons.includes('agent_follow_unavailable')) return '会话回复监听中断';
+  if (status.missingReasons.includes('framework_tool_channel_unavailable')) return '工具通道需要恢复';
+  if (status.missingReasons.includes('execution_correlation_unavailable')) return '请求关联需要恢复';
+  if (status.missingReasons.includes('interaction_channel_unavailable')) return '模型提问通道需要恢复';
   return '聊天暂不可用';
 }
 

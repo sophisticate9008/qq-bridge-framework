@@ -253,6 +253,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
       active.adapters.onebotHttp.secret, active.adapters.onebotWs.secret, active.adapters.dshAgent.auth,
       active.adapters.onebotWebhook.hmac].filter((value): value is string => typeof value === 'string' && value.length > 0) : [] })
   let stopInteractions: (() => Promise<void>) | undefined
+  let reconnectInteractions: (() => Promise<void>) | undefined
   let releaseInteractions: (() => void) | undefined
   let interactionMessages: ReturnType<typeof createNativeInteractionMessages> | undefined
   let media: ReturnType<typeof createNativeMediaRegistry> | undefined
@@ -596,6 +597,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     const metrics = host?.metrics() ?? null
     if (state === 'running' && metrics?.startupState !== 'ready') missingReasons.push('host_not_ready')
     if (state === 'running' && metrics && metrics.unhealthyFollows > 0) missingReasons.push('agent_follow_unavailable')
+    if (state === 'running' && frameworkTools?.describe().available === false) missingReasons.push('framework_tool_channel_unavailable')
+    const interactionChannel = dsh?.interactionStatus?.() ?? null
+    if (state === 'running' && interactionChannel && interactionChannel.state !== 'connected') missingReasons.push('interaction_channel_unavailable')
     if (executions?.metrics().faulted) missingReasons.push('execution_controller_unavailable')
     if (packageUnknown) missingReasons.push('package_cleanup_unknown')
     if (state === 'running' && pluginEpoch === null) missingReasons.push('execution_correlation_unavailable')
@@ -617,7 +621,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         && (state === 'stopped' || state === 'error') && configurationIssues.length === 0,
       canApplyDeployment: !closed && !starting && !stopping && !adapterOperation && runtimeLease.state === 'available'
         && (state === 'stopped' || state === 'error'),
-      missingReasons: [...new Set(missingReasons)], revisions: current.configuration.revisions,
+      missingReasons: [...new Set(missingReasons)], interactionChannel, revisions: current.configuration.revisions,
       activeRevisions: active?.revisions ?? null, lastError,
       connection: { ...protocol, chatReady }, host: metrics,
       ingress: { ...inbound.status(), queue: inbox?.summary() ?? null },
@@ -786,6 +790,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
       clearIngress: inbound.clear, drainConfiguration: configurationGuard.drain, drainPolicy: toolPolicy.drain }
     releaseInteractions = undefined
     stopInteractions = undefined
+    reconnectInteractions = undefined
     interactionMessages = undefined
     clearInterval(taskEventsTimer); taskEventsTimer = undefined
     await conversationTasks?.stop(); conversationTasks = undefined; taskAgent = undefined
@@ -1557,7 +1562,20 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           } })
         interactionMessages = interactionAssembly.messages
         releaseInteractions = interactionAssembly.release
-        stopInteractions = await interactionAssembly.connect()
+        const interactionDisposers = new Set<() => Promise<void>>()
+        const closeInteractions = async () => {
+          const disposers = [...interactionDisposers]; interactionDisposers.clear()
+          await Promise.all(disposers.map(dispose => dispose()))
+        }
+        stopInteractions = closeInteractions
+        reconnectInteractions = async () => {
+          if (controller.signal.aborted || lifetime !== controller) failure('NATIVE_CHAT_STOPPED')
+          await closeInteractions()
+          const dispose = await interactionAssembly.connect()
+          if (controller.signal.aborted || lifetime !== controller) { await dispose(); failure('NATIVE_CHAT_STOPPED') }
+          interactionDisposers.add(dispose)
+        }
+        await reconnectInteractions()
         await bootstrapMount?.start(host, controller.signal)
         controller.signal.throwIfAborted()
         if (host.metrics().startupState !== 'ready' || host.metrics().faults > 0) failure('NATIVE_CHAT_HOST_NOT_READY')
@@ -1890,6 +1908,30 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   }
 
   const runtime = Object.freeze({ status, start, stop, adapterRuntime,
+    async reconnect(expected: Readonly<Record<string, string>>, signal: AbortSignal) {
+      const current = await status()
+      if (digest(current.revisions) !== digest(expected) || current.missingReasons.includes('configuration_changed')) failure('NATIVE_CHAT_REVISION_CONFLICT')
+      if (state !== 'running' || !host || !dsh?.bridgePlugin || !active || !lifetime || lifetime.signal.aborted) failure('NATIVE_CHAT_RESTART_REQUIRED')
+      const controller = lifetime
+      const connectionSignal = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(20_000)])
+      const described = await dsh.bridgePlugin.describe(connectionSignal)
+      if (described.issuerEpoch !== pluginEpoch) failure('NATIVE_CHAT_RESTART_REQUIRED')
+      if (frameworkTools?.describe().available === false) failure('NATIVE_CHAT_RESTART_REQUIRED')
+      if (dsh.interactionStatus?.().state !== 'connected') await reconnectInteractions?.()
+      const selectedHost = host
+      const selectedTools = frameworkTools
+      const candidates = selectedHost.sessions.list({ limit: 1000 }).filter(row => row.state === 'ready' && allowed(active!, row.conversationId))
+      let connected = 0
+      for (const row of candidates.slice(0, 1)) {
+        const binding = selectedHost.sessions.get(row.conversationId)
+        if (!binding) continue
+        await guard(binding.conversationId, connectionSignal, true, 'operation')
+        await selectedHost.connectAgentListener(binding, connectionSignal)
+        await selectedTools?.project(binding, connectionSignal)
+        connected++
+      }
+      return { schema: 1, connected, modelRequested: false, replayed: false }
+    },
     stickerLibrary: () => state === 'running' && !closed ? stickerLibrary : undefined,
     pluginModelService: () => state === 'running' && !closed ? pluginModels : undefined,
     pluginCapabilityService: () => state === 'running' && !closed ? pluginCapabilities : undefined, applyAccessChange, reconcileExecution, recoverExecution, diagnostics, mediaDiagnostics,

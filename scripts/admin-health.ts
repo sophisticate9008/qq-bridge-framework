@@ -3,6 +3,7 @@ import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gatewayAdminAddress, type GatewayAdminConfiguration } from '../src/admin/gateway.ts';
 import { parseDshHealth } from '../src/contracts/dsh-health.ts';
+import { parseChatHealth } from '../src/contracts/chat-health.ts';
 import { parseNativeApplicationSnapshot } from '../src/contracts/native-application.ts';
 import { isRecord } from '../src/core/values.ts';
 import { privatePermissions } from '../src/storage/file-security.ts';
@@ -66,9 +67,9 @@ export async function readAdminHealth(configuration: Readonly<GatewayAdminConfig
       return { value: await responseValue(response) };
     } catch { return { reason: signal.aborted ? 'read_timeout' : 'read_failed' }; }
   };
-  const [admin, gateway, dsh, runtime, application] = await Promise.all([
+  const [admin, gateway, dsh, runtime, application, chain] = await Promise.all([
     read('/health'), read('/api/gateway/health'), read('/api/chat/dsh/health', true),
-    read('/api/chat/runtime', true), read('/api/chat/application', true),
+    read('/api/chat/runtime', true), read('/api/chat/application', true), read('/api/chat/health', true),
   ]);
   const unknown = (id: HealthCheck['id'], reason = 'invalid_response'): HealthCheck => ({ id, state: 'unknown', reasons: [reason] });
   const checks: HealthCheck[] = [];
@@ -81,15 +82,19 @@ export async function readAdminHealth(configuration: Readonly<GatewayAdminConfig
   const dshHealth = parseDshHealth(dsh.value);
   checks.push(dshHealth ? { id: 'dsh', state: dshHealth.state, reasons: dshHealth.reason ? [dshHealth.reason] : [] } : unknown('dsh', dsh.reason));
   const r = runtime.value;
+  const chatHealth = parseChatHealth(chain.value);
   if (isRecord(r) && ['stopped', 'starting', 'running', 'stopping', 'error'].includes(String(r.state))
     && typeof r.chatReady === 'boolean' && (!r.chatReady || r.state === 'running') && typeof r.protocolConnected === 'boolean'
     && Array.isArray(r.missingReasons) && r.missingReasons.every(reason => typeof reason === 'string')) {
     checks.push({ id: 'protocol', state: r.protocolConnected ? 'ready' : 'unavailable', reasons: r.protocolConnected ? [] : ['protocol_not_connected'] });
     const notRestored = r.state === 'stopped' && isRecord(r.lifecycle) && r.lifecycle.desiredRunning === true;
+    const restoring = isRecord(r.lifecycle) && isRecord(r.lifecycle.restoration) && r.lifecycle.restoration.state === 'checking';
     const blocked = r.state === 'stopped' && (notRestored || r.missingReasons.some(reason => reason !== 'runtime_not_started'));
-    checks.push({ id: 'chat', state: r.state === 'stopped' ? blocked ? 'blocked' : 'stopped'
-      : r.state === 'starting' || r.state === 'stopping' ? 'pending' : r.chatReady ? 'ready' : 'unavailable',
-      reasons: [...new Set([...codes(r.missingReasons), ...codes([r.lastError]), ...(notRestored ? ['running_intent_not_restored'] : [])])] });
+    checks.push({ id: 'chat', state: restoring ? 'pending' : r.state === 'stopped' ? blocked ? 'blocked' : 'stopped'
+      : r.state === 'starting' || r.state === 'stopping' ? 'pending' : !chatHealth ? 'unknown' : r.chatReady && chatHealth.healthy ? 'ready' : 'unavailable',
+      reasons: [...new Set([...codes(r.missingReasons), ...(!r.chatReady ? codes([r.lastError]) : []),
+        ...(r.state === 'running' ? chatHealth ? codes(chatHealth.layers.filter(layer => !['ready', 'idle'].includes(layer.state)).map(layer => layer.reason))
+          : ['chat_health_unavailable'] : []), ...(notRestored ? [restoring ? 'startup_restoring_chat' : 'running_intent_not_restored'] : [])])] });
   } else checks.push(unknown('protocol', runtime.reason), unknown('chat', runtime.reason));
   const a = application.value;
   if (isRecord(a) && a.schema === 1 && a.operation === null) checks.push({ id: 'application', state: 'ready', reasons: [] });

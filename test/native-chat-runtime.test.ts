@@ -1072,6 +1072,15 @@ test('real local WS text passes through native host/DSH/policy/durable outbox to
   assert.equal(Object.hasOwn((journal.items as Record<string, unknown>[])[0]!, 'policy'), false)
   const metrics = await invoke(fake.routes(), 'GET', '/api/host/metrics')
   assert.equal(metrics.started, true)
+  const promptCount = fake.rpc.filter(request => request.method === 'session/prompt').length
+  const sessionCount = fake.rpc.filter(request => request.method === 'session/create').length
+  const recovery = await invoke(fake.routes(), 'POST', '/api/chat/runtime/reconnect', { revisions: (await fake.runtime().status()).revisions })
+  assert.equal(recovery.modelRequested, false)
+  assert.equal(recovery.replayed, false)
+  assert.equal(fake.rpc.filter(request => request.method === 'session/prompt').length, promptCount)
+  assert.equal(fake.rpc.filter(request => request.method === 'session/create').length, sessionCount)
+  await assert.rejects(invoke(fake.routes(), 'POST', '/api/chat/runtime/reconnect', { revisions: { ...(await fake.runtime().status()).revisions, plans: '0'.repeat(64) } }),
+    { statusCode: 409, code: 'chat_revision_conflict' })
   fake.message(1)
   await delay(50)
   assert.equal(fake.rpc.filter(request => request.method === 'session/prompt').length, 1)

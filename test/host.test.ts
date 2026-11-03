@@ -10,6 +10,7 @@ import type { DeliveryReceipt, SendRequest, TransportAdapter } from '../src/core
 import { createBridgeHost } from '../src/host/bridge.ts';
 import type { AgentAdapter, AgentEvent, InboundMessage } from '../src/host/types.ts';
 import { createSqliteStore } from '../src/storage/sqlite.ts';
+import { awaitCondition } from './fixtures/await-condition.ts';
 
 type CreateSessionRequest = Parameters<AgentAdapter['createSession']>[0];
 type SubmitRequest = Parameters<AgentAdapter['submit']>[0];
@@ -21,6 +22,23 @@ interface Deferred<Value> {
   resolve(value: Value): void;
   reject(error: Error): void;
 }
+
+test('an interrupted listener reconnects without a later user prompt or replaying old work', async context => {
+  const store = createSqliteStore({ filename: ':memory:' });
+  const agent = new FakeAgent(['automatic-follow-recovery']);
+  const host = createBridgeHost({ store, agent, transport: new FakeTransport(), ...applicationContext(), authorizeIncoming: () => true });
+  context.after(async () => { await host.stop(); store.close(); });
+  grantRelay(host);
+  await host.start();
+  assert.equal((await host.receive(inbound('automatic-follow-input'))).status, 'accepted');
+  await agent.emit('automatic-follow-recovery', { id: 'interrupted', type: 'failed', data: { terminal: true, code: 'DSH_FOLLOW_ENDED' } });
+  assert.equal(host.metrics().unhealthyFollows, 1);
+  assert.equal(host.metrics().followRecovery.lastError, 'DSH_FOLLOW_ENDED');
+  await awaitCondition(() => host.metrics().unhealthyFollows === 0, { message: 'existing listener recovers without a model prompt', timeoutMs: 4000 });
+  assert.equal(agent.followRequests.length, 2);
+  assert.equal(agent.submitRequests.length, 1);
+  assert.equal(agent.createRequests.length, 1);
+});
 
 interface FakeAgentOptions {
   submit?(request: SubmitRequest): Promise<SubmitResult> | SubmitResult;

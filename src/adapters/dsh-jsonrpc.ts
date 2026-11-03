@@ -35,6 +35,7 @@ export interface DshJsonRpcOptions {
 }
 
 export interface DshJsonRpcPort extends DshClientPort, DshInteractionPort {
+  interactionStatus?(): { readonly state: 'idle' | 'connecting' | 'connected' | 'closed' | 'error'; readonly lastError: string | null }
   readonly pluginModels: PluginModelBackend
   configureSession?(request: { readonly sessionId: string; readonly conversationId: string; readonly signal: AbortSignal }): Promise<void>
   inspectSessionStorage?(sessionId: string, signal: AbortSignal): Promise<{ sessionId: string; exists: boolean; root?: string; filename?: string }>
@@ -243,6 +244,7 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
     },
     registerInteractionSession: interactions.registerSession,
     connectInteractions: interactions.connect,
+    interactionStatus: interactions.status,
     respondInteraction: interactions.respond,
     async close() {
       await interactions.close()

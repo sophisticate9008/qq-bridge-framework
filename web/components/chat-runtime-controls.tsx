@@ -14,6 +14,9 @@ import { SessionMigrationControl } from './session-migration-control.tsx';
 import { ReadOnlyDetails, TechnicalDetails } from './read-only-details.tsx';
 import { SettingsWindow } from './settings-window.tsx';
 import { useDshRestart } from '../lib/use-dsh-restart.ts';
+import { parseChatHealth } from '../../src/contracts/chat-health.ts';
+import { chatHealthBadge, chatHealthGuidance, chatHealthLayerLabel, chatHealthNames } from '../lib/chat-health.ts';
+import { FrameworkRestartControl } from './framework-restart-control.tsx';
 
 export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunningChange, connectionPanel, compact = false }: {
   readonly api: ApiClient; readonly connected: boolean; readonly dirty: boolean; readonly navigate: PageProps['navigate'];
@@ -22,11 +25,13 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   const { application, state: applicationState, observationError, refresh: refreshApplication } = useChatApplication(api, connected);
   const restart = useDshRestart(api, connected);
   const dshHealth = useDshHealth(api, connected);
+  const chain = useReadResource(api, '/api/chat/health', connected, parseChatHealth, { intervalMs: 5_000 });
+  const health = chain.error ? null : chain.snapshot;
   const [status, setStatus] = useState<ChatRuntimeStatus | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
-  const [action, setAction] = useState<'start' | 'stop' | 'restore' | null>(null);
+  const [action, setAction] = useState<'start' | 'stop' | 'restore' | 'reconnect' | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const request = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -34,7 +39,7 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   connection.current = { api, connected, dirty };
   const resource = useReadResource(api, '/api/chat/runtime', connected, parseChatRuntimeStatus, { intervalMs: 5_000,
     pollWhen: () => request.current === null && !application.getSnapshot().busy });
-  const active = action !== null || status?.state === 'starting' || status?.state === 'stopping';
+  const active = action !== null || status?.restoring === true || status?.state === 'starting' || status?.state === 'stopping';
   const running = status?.state === 'running';
   const visibleReasons = status ? chatRuntimeVisibleReasons(status) : [];
   const applyBeforeStart = status ? chatRuntimeCanApplyAndStart(status) : false;
@@ -125,10 +130,33 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
     }
   }
 
+  async function reconnectChat(): Promise<void> {
+    if (!status || !running || active || dirty || request.current || applicationState.busy || applicationState.blocked) return;
+    const controller = new AbortController();
+    const generation = epoch.current;
+    request.current = controller; setAction('reconnect'); setError(''); setNotice('');
+    const current = () => epoch.current === generation && connection.current.api === api && !controller.signal.aborted;
+    try {
+      await writeResource(api, '/api/chat/runtime/reconnect', { revisions: status.revisions }, controller.signal);
+      if (current()) { setNotice('已核验聊天连接；已有会话和历史保留，没有发送模型请求或重放旧操作。'); resource.refresh(); chain.refresh(); }
+    } catch {
+      if (current()) setError('聊天连接未能恢复。请查看下方诊断；外部连接正常后，可停止并启动聊天，或使用“重启框架”。原请求不会重发。');
+    } finally {
+      if (request.current === controller) request.current = null;
+      if (current()) setAction(null);
+    }
+  }
+
   if (!connected) return null;
-  const refreshControl = <Button variant="ghost" size="sm" disabled={active} onClick={() => { resource.refresh(); dshHealth.refresh(); refreshApplication(); }}><RefreshCw className="size-3.5" />刷新状态</Button>;
-  const statusTone = status?.chatReady && !resource.error ? 'success' : uncertain || resource.error || applicationState.blocked ? 'warning' : 'neutral';
-  const statusLabel = active ? '正在处理' : resource.error ? '运行状态待确认' : chatRuntimeBadge(status);
+  const refreshControl = <Button variant="ghost" size="sm" disabled={active} onClick={() => { resource.refresh(); chain.refresh(); dshHealth.refresh(); refreshApplication(); }}><RefreshCw className="size-3.5" />刷新状态</Button>;
+  const statusTone = health?.healthy && !resource.error ? 'success' : running || uncertain || resource.error || applicationState.blocked ? 'warning' : 'neutral';
+  const statusLabel = active ? '正在处理' : resource.error ? '运行状态待确认' : chatHealthBadge(health, status);
+  const interrupted = health?.layers.filter(layer => !['ready', 'idle', 'stopped'].includes(layer.state)) ?? [];
+  const chainChecks = <div className="stack" data-chat-health>
+    {health ? <dl className="info">{health.layers.map(layer => <div key={layer.id} className="contents"><dt>{chatHealthNames[layer.id]}</dt><dd><StatusPill tone={['ready', 'idle'].includes(layer.state) ? 'success' : layer.state === 'stopped' ? 'neutral' : 'warning'}>{chatHealthLayerLabel(layer)}</StatusPill></dd></div>)}</dl>
+      : <p className="small muted">{chain.error ? '聊天链路诊断暂不可用。请刷新；若框架持续无响应，使用重启框架入口或运行机器上的命令。' : '正在分别检查收发接口与框架聊天链路。'}</p>}
+    {interrupted.map(layer => <p key={layer.id} className="small" data-chat-health-guidance={layer.id}><strong>{chatHealthNames[layer.id]}：</strong>{chatHealthGuidance(layer)}</p>)}
+  </div>;
   const controlButton = running || status?.state === 'error'
     ? <Button variant="outline" disabled={active || uncertain || restart.pending || loading || applicationState.busy || applicationState.blocked} onClick={() => void control('stop')}><Square className="size-3.5" />停止聊天</Button>
     : <span role="group" aria-label="启动聊天" data-page-field><Button id="chat-runtime-start" disabled={!status?.canStart && !applyBeforeStart || active || uncertain || restart.pending || dirty || loading || applicationState.busy || applicationState.blocked} onClick={() => void control('start')}><Play className="size-3.5" />{applyBeforeStart ? '应用并启动' : '启动聊天'}</Button></span>;
@@ -137,7 +165,8 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
     {applicationState.blocked && <p role="status" className="small muted">先前应用或启动结果尚未确认，后续操作暂时锁定；刷新只读取状态。</p>}
   </>;
   const checks = <>
-    <dl className="info"><dt>QQ 消息</dt><dd>{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '尚未确认'}</dd><dt>DSH 服务</dt><dd><StatusPill tone={dshHealth.tone}>{dshHealth.label}</StatusPill></dd><dt>聊天处理</dt><dd>{resource.error ? '读取失败' : !status ? '尚未确认' : status.chatReady ? '已启用' : running ? '暂不可用' : status.state === 'stopped' ? '已停止' : status.state === 'error' ? '启动或运行失败' : '正在处理'}</dd></dl>
+    {chainChecks}
+    <dl className="info"><dt>QQ 消息</dt><dd>{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '尚未确认'}</dd><dt>DSH 服务</dt><dd><StatusPill tone={dshHealth.tone}>{dshHealth.label}</StatusPill></dd><dt>聊天处理</dt><dd>{resource.error ? '读取失败' : !status ? '尚未确认' : health?.healthy ? '已就绪' : running ? '等待链路恢复' : status.state === 'stopped' ? '已停止' : status.state === 'error' ? '启动或运行失败' : '正在处理'}</dd></dl>
     <p className="small muted">{dshHealth.description}</p>
     {visibleReasons.length > 0 && <ul className="stack">{visibleReasons.map(reason => {
       const item = chatRuntimeReason(reason);
@@ -159,10 +188,13 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   return <section id="chat-runtime" className="panel entity">
     <div className="row"><span className="avatar" aria-hidden="true">▷</span><div className="grow"><h2 className="panel-title">聊天运行</h2><p className="muted small">已授权的 QQ 会话</p></div><StatusPill tone={statusTone}>{statusLabel}</StatusPill></div>
     <div className="meta"><span>QQ 消息：{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '待确认'}</span><span>DSH 服务：{dshHealth.label}</span></div>
-    <div className={`strip ${uncertain || applicationState.blocked || resource.error ? 'warn' : ''}`} role="status">{!status ? loading ? '正在读取聊天运行状态。' : '暂时无法确认聊天运行状态，请刷新读取。' : active ? '正在更新聊天运行状态，请等待原操作。' : dirty ? '连接草稿尚未保存；请保存后再启动聊天。' : uncertain || applicationState.blocked ? '启停结果未确认，先核对停止与排空状态。' : status?.configurationChanged ? '有已保存设置等待应用，请查看详情中的具体运行条件。' : running ? status.chatReady ? '正在处理白名单内消息；停止会保留聊天历史和发送记录。' : status.missingReasons.includes('agent_follow_unavailable') ? chatRuntimeReason('agent_follow_unavailable').text : '聊天进程正在运行，部分运行条件尚未满足。' : status.state === 'error' ? '聊天运行需要处理，请查看详情。' : '聊天已停止；可检查条件后明确启动。'}</div>
+    {chainChecks}
+    <div className={`strip ${uncertain || applicationState.blocked || resource.error ? 'warn' : ''}`} role="status">{!status ? loading ? '正在读取聊天运行状态。' : '暂时无法确认聊天运行状态，请刷新读取。' : active ? '正在更新聊天运行状态，请等待原操作。' : dirty ? '连接草稿尚未保存；请保存后再启动聊天。' : uncertain || applicationState.blocked ? '启停结果未确认，先核对停止与排空状态。' : status?.configurationChanged ? '有已保存设置等待应用，请查看详情中的具体运行条件。' : running ? health?.healthy ? '聊天链路检查通过；模型请求与实际送达以各会话的执行记录为准。' : interrupted.length > 0 ? '请按上方异常环节处理；恢复连接保留原会话，不重发旧请求。' : '框架进程正在运行，聊天链路仍待核对。' : status.state === 'error' ? '聊天运行需要处理，请查看详情。' : '聊天已停止；可检查条件后明确启动。'}</div>
     <div className="actions">
       <SettingsWindow title={running ? '停止聊天' : '启动与检查聊天'} label={running ? '停止聊天' : '启动聊天'} description="检查真实运行状态后执行；停止保留历史，启动沿当前配置继续。">{controlBody}</SettingsWindow>
       {refreshControl}
+      <Button variant="outline" disabled={!running || active || dirty || applicationState.busy || applicationState.blocked} onClick={() => void reconnectChat()}><RefreshCw className="size-3.5" />重新连接聊天</Button>
+      <FrameworkRestartControl api={api} />
       <ReadOnlyDetails title="聊天运行详情" description="运行条件、当前诊断与原操作证据。"><div className="stack">{checks}<TechnicalDetails fields={[{ label: '运行状态', value: statusLabel }, { label: '最近错误', value: status?.lastError ? chatRuntimeLastError(status.lastError, status) : '无' }, { label: '应用阶段', value: applicationState.phase ? chatApplicationPhaseLabels[applicationState.phase] : '无' }, { label: '操作编号', value: applicationState.operationId }, { label: '配置更新', value: status?.configurationChanged ?? '未知' }]} />{recovery}{connectionPanel}</div></ReadOnlyDetails>
     </div>
     {notice && <p role="status" className="small muted">{notice}</p>}

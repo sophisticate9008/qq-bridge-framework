@@ -21,6 +21,23 @@ const signal = (): AbortSignal => new AbortController().signal
 const createRequest = () => ({ conversationId: 'group:fake', requestId: 'create-1', signal: signal() })
 const promptRequest = () => ({ sessionId: 'session-1', requestId: 'prompt-1', mode: 'queue' as const, content: [{ type: 'text' as const, text: 'User message.' }], signal: signal() })
 
+test('DSH question channel exposes a broken wire and reconnects without issuing model requests', async context => {
+  const fake = await fixture(context, { snapshot: { type: 'ready', clientId: 'question-client' } })
+  const client = fake.port()
+  assert.deepEqual(client.interactionStatus?.(), { state: 'idle', lastError: null })
+  const first = await client.connectInteractions!({ signal: signal(), onEvent() {} })
+  assert.deepEqual(client.interactionStatus?.(), { state: 'connected', lastError: null })
+  fake.streams[0]!.socket.terminate()
+  await until(() => client.interactionStatus?.().state === 'error')
+  assert.equal(client.interactionStatus?.().lastError, 'DSH_INTERACTIONS_CLOSED')
+  await first()
+  const second = await client.connectInteractions!({ signal: signal(), onEvent() {} })
+  assert.deepEqual(client.interactionStatus?.(), { state: 'connected', lastError: null })
+  assert.equal(fake.streams.length, 2)
+  assert.deepEqual(fake.requests, [])
+  await second()
+})
+
 test('DSH preset declarations are bounded and cannot reuse an ambiguous preset identifier', () => {
   const options = { endpoint: 'http://127.0.0.1:3080', auth: 'fake-token' }
   const binding = { agentPreset: 'fixed-preset', definition: sessionDefinition }
