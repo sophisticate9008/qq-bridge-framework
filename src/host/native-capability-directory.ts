@@ -27,7 +27,8 @@ export const NATIVE_DIRECTORY_TOOLS: readonly NativeToolContribution[] = [
   { definition: { name: 'qbf_capability_catalog', capability: 'native.capabilities.catalog', featureId: 'framework-tools', registrationSource: source, timeoutMs: 10000,
     description: '按需查找能力，包括已安装扩展的任务与日程、空间说说、账号资料、好友和群管理、文件、协议运维、会话绑定管理。无参数返回分类；category或query只返回工具摘要；id返回该工具的完整参数和调用范围。找到后用qbf_capability_call调用。不需要先展开全部工具。',
     parameters: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', maxLength: 160 }, category: { type: 'string', maxLength: 160 }, query: { type: 'string', maxLength: 160 } } } }, validate: input => json(catalogInput(input)) },
-  { definition: { name: 'qbf_capability_call', capability: 'native.capabilities.call', featureId: 'framework-tools', registrationSource: source, timeoutMs: 120000,
+  // Leave time for preparation around space publishing's 180-second protocol request.
+  { definition: { name: 'qbf_capability_call', capability: 'native.capabilities.call', featureId: 'framework-tools', registrationSource: source, timeoutMs: 240000,
     description: '调用能力目录中的一个工具。先读取该id的参数说明，再提交id和input对象。返回结果区分confirmed、rejected、unknown；unknown不重复写操作。日常回复、贴表情和收藏使用直接提供的常用工具。',
     parameters: { type: 'object', additionalProperties: false, required: ['id', 'input'], properties: { id: { type: 'string', maxLength: 160 }, input: { type: 'object' } } } }, validate: input => json(callInput(input)) },
 ]

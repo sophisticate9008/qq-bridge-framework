@@ -33,7 +33,8 @@ export function createOneBotQzoneClient(options: OneBotQzoneConnectionOptions) {
   return async function request(action: string, params: JsonObject, callerSignal: AbortSignal,
     maxResponseBytes = 65536): Promise<QzoneResult<JsonValue>> {
     if (callerSignal.aborted) return { status: 'rejected', code: 'QZONE_ABORTED' };
-    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(timeoutMs)]);
+    const requestTimeoutMs = options.timeoutMs ?? (action === 'send_qzone_msg' ? 180_000 : timeoutMs);
+    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(requestTimeoutMs)]);
     try {
       const response = await waitFor((options.fetch ?? globalThis.fetch)(new URL(action, base), {
         method: 'POST', headers, redirect: 'error', body: JSON.stringify(params), signal,

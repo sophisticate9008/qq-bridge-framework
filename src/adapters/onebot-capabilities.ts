@@ -109,7 +109,8 @@ export function createOneBotCapabilitiesPort(options: OneBotCapabilitiesOptions)
   let inspection: QqCapabilitiesInspection | null = null;
   async function request(action: string, input: JsonObject, callerSignal: AbortSignal): Promise<OneBotReadResult<JsonValue>> {
     if (callerSignal.aborted) return { status: 'rejected', code: 'QQ_CAPABILITY_ABORTED' };
-    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(timeoutMs)]);
+    const requestTimeoutMs = options.timeoutMs ?? (action === 'send_qzone_msg' ? 180_000 : timeoutMs);
+    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(requestTimeoutMs)]);
     try {
       const response = await waitFor((options.fetch ?? globalThis.fetch)(new URL(action, base), {
         method: 'POST', headers, body: JSON.stringify(input), redirect: 'error', signal,

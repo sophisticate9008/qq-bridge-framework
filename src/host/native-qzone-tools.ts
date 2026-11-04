@@ -36,7 +36,8 @@ function deleteInput(input: JsonValue): { postId: string } {
 }
 const source = { origin: 'framework-builtin', ownerId: 'qq-bridge-framework', ownerName: '框架内置工具', transport: 'native' } as const;
 export const NATIVE_QZONE_TOOLS: readonly NativeToolContribution[] = Object.freeze<readonly NativeToolContribution[]>([
-  { definition: { name: 'qbf_qzone_publish', capability: 'native.qzone.publish', featureId: 'framework-tools', timeoutMs: 60000,
+  // Include image resolution and capability inspection before the 180-second protocol request.
+  { definition: { name: 'qbf_qzone_publish', capability: 'native.qzone.publish', featureId: 'framework-tools', timeoutMs: 240000,
     registrationSource: source, description: nativeToolCapabilityDefinition('native.qzone.publish').description,
     parameters: { type: 'object', additionalProperties: false, required: ['visibility'], properties: {
       content: { type: 'string', maxLength: 32768, description: '说说正文；有图片时可留空' },
