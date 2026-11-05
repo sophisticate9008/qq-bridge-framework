@@ -72,6 +72,42 @@ const records = [
     "模型已接收本轮请求，正在等待回复。",
   ],
   ["10:26:10", "收到", "received", "QQ · 私聊 B", "今天先到这里吧。"],
+  ["10:24:08", "发送", "sent", "QQ · 群聊 A", "可以，就按这个顺序来。"],
+  [
+    "10:24:05",
+    "处理",
+    "processing",
+    "QQ · 群聊 A",
+    "模型已接收本轮请求，正在等待回复。",
+  ],
+  ["10:24:04", "收到", "received", "QQ · 群聊 A", "先把这几件事情排一下顺序。"],
+  ["10:21:36", "发送", "sent", "QQ · 私聊 A", "我记得，我们刚才聊到这里。"],
+  [
+    "10:21:33",
+    "处理",
+    "processing",
+    "QQ · 私聊 A",
+    "模型已接收本轮请求，正在等待回复。",
+  ],
+  ["10:21:32", "收到", "received", "QQ · 私聊 A", "我们之前说到哪里了？"],
+  ["10:18:45", "发送", "sent", "QQ · 群聊 B", "看到了，照片里的光线很柔和。"],
+  [
+    "10:18:41",
+    "处理",
+    "processing",
+    "QQ · 群聊 B",
+    "模型已接收本轮请求，正在等待回复。",
+  ],
+  ["10:18:40", "收到", "received", "QQ · 群聊 B", "刚拍的照片。 [图片]"],
+  ["10:15:02", "发送", "sent", "QQ · 私聊 B", "早上好，今天有什么安排？"],
+  [
+    "10:14:59",
+    "处理",
+    "processing",
+    "QQ · 私聊 B",
+    "模型已接收本轮请求，正在等待回复。",
+  ],
+  ["10:14:58", "收到", "received", "QQ · 私聊 B", "早上好。"],
 ];
 const activity = document.querySelector("#activity-rows");
 function renderRecords(source = "all") {
@@ -141,6 +177,14 @@ document.querySelector("#check-update").addEventListener("click", () => {
 document.querySelector("#theme").addEventListener("change", (event) => {
   document.documentElement.dataset.theme = event.target.value;
 });
+document.querySelectorAll("[data-surface-choice]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.documentElement.dataset.surface = button.dataset.surfaceChoice;
+    document.querySelectorAll("[data-surface-choice]").forEach((item) => {
+      item.setAttribute("aria-pressed", String(item === button));
+    });
+  });
+});
 document.querySelectorAll("[data-source]").forEach((button) => {
   button.addEventListener("click", () => {
     document
@@ -199,6 +243,7 @@ document.addEventListener("click", (event) => {
     !button ||
     button.id ||
     button.hasAttribute("data-source") ||
+    button.hasAttribute("data-surface-choice") ||
     button === scrim
   )
     return;

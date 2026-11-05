@@ -1,0 +1,249 @@
+/* Paint only: no typography, dimensions, spacing, positioning, or transforms. */
+html[data-surface="material"] {
+  --bg: #eff0f5;
+  --surface: #fdfdff;
+  --sidebar: #f6f6fa;
+  --text: #2a2b36;
+  --secondary: #555766;
+  --muted: #6e7182;
+  --border: #dbdde780;
+  --input: #d6d7e180;
+  --soft: #f0f0f6;
+  --purple: #7551cf;
+  --purple-soft: #ece5fc;
+  --green: #238069;
+  --green-soft: #e6f4ee;
+  --blue: #5a75ad;
+  --raised: linear-gradient(165deg, #fff 0%, #fdfdff 60%, #f7f7fc 100%);
+  --rim: inset 0 1px 0 #fff, inset 0 0 0 1px #ffffff60;
+  --elevation: 0 1px 2px #27254106, 0 5px 14px #27254106;
+  --well: linear-gradient(180deg, #eeeff5 0%, #f5f5fa 100%);
+  --well-shadow: inset 0 1px 2px #24213c07, 0 1px 0 #ffffffd9;
+  --header-wash: linear-gradient(180deg, #ffffffb3, #fafaff73);
+}
+html[data-surface="material"][data-theme="dark"] {
+  --bg: #17181f;
+  --surface: #26272f;
+  --sidebar: #202128;
+  --text: #e7e6ef;
+  --secondary: #c3c1d0;
+  --muted: #9c9ba9;
+  --border: #9d97ba20;
+  --input: #ffffff0d;
+  --soft: #22232c;
+  --purple: #bca3ff;
+  --purple-soft: #443456;
+  --green: #82ceb3;
+  --green-soft: #253e36;
+  --blue: #99b4e5;
+  --raised: linear-gradient(160deg, #2b2b36 0%, #272730 55%, #24252e 100%);
+  --rim: inset 0 1px 0 #ffffff0a, inset 0 0 0 1px #ffffff03;
+  --elevation: 0 1px 3px #0000001f, 0 6px 16px #00000016;
+  --well: linear-gradient(180deg, #1d1e26, #23242d);
+  --well-shadow: inset 0 1px 3px #00000024, 0 1px 0 #ffffff06;
+  --header-wash: linear-gradient(180deg, #ffffff03, #ffffff00);
+}
+html[data-surface="material"] body {
+  background-image: radial-gradient(
+    ellipse at 100% 0%,
+    #9b86d00b,
+    transparent 48%
+  );
+}
+html[data-surface="material"] .sidebar {
+  background-image:
+    linear-gradient(160deg, #ffffff50, transparent 45%),
+    radial-gradient(ellipse at 0% 0%, #a28ade12, transparent 55%);
+  border-color: #8d87931c;
+  box-shadow: inset -1px 0 0 #ffffff40;
+}
+html[data-surface="material"] .topbar {
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  border-color: var(--border);
+  box-shadow: 0 1px 0 #ffffff40;
+  backdrop-filter: blur(16px);
+}
+html[data-surface="material"] :is(.brand-mark, .avatar, .version-logo) {
+  color: var(--purple);
+  background: linear-gradient(150deg, #f9f5ff, #e9defc);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 0 0 1px #8b6bc717,
+    0 2px 3px #714f9b0a;
+}
+html[data-surface="material"] .nav-item.active {
+  color: #7546c2;
+  background: linear-gradient(100deg, #e6dcf9, #f0eafa);
+  border-radius: 7px;
+  box-shadow:
+    inset 0 1px 0 #ffffffb8,
+    inset 0 0 0 1px #936ac419,
+    0 2px 3px #6b42900a;
+}
+html[data-surface="material"] .nav-item:not(.active):hover {
+  background: #9184ab0c;
+  box-shadow: inset 0 0 0 1px #9184ab09;
+}
+html[data-surface="material"] :is(.summary-card, .panel, dialog) {
+  background: var(--raised);
+  border-color: var(--border);
+  border-radius: 9px;
+  box-shadow: var(--rim), var(--elevation);
+}
+html[data-surface="material"] .panel-heading {
+  background: var(--header-wash);
+  border-color: var(--border);
+}
+html[data-surface="material"] .summary-note {
+  background: linear-gradient(105deg, #8e7bac0a, #8e7bac04);
+  box-shadow: inset 0 0 0 1px #89809f08;
+  border-radius: 5px;
+}
+html[data-surface="material"] .settings-group {
+  border-color: var(--border);
+}
+html[data-surface="material"] :is(select, .number-input, .search) {
+  background: var(--well);
+  border-color: var(--input);
+  border-radius: 5px;
+  box-shadow: var(--well-shadow);
+}
+html[data-surface="material"] .theme-control select {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-surface="material"] .button.outline {
+  color: var(--text);
+  background: var(--raised);
+  border-color: #91879f33;
+  border-radius: 5px;
+  box-shadow:
+    var(--rim),
+    0 1px 2px #2d204c0a;
+}
+html[data-surface="material"] .button.outline:not(:disabled):hover {
+  border-color: #987ecb80;
+  box-shadow:
+    var(--rim),
+    0 2px 5px #7856a31a;
+}
+html[data-surface="material"] :is(.button.primary, .button.save) {
+  color: #fff;
+  background: linear-gradient(180deg, #9368e5, #7e51d2);
+  border-color: #7a4ac8;
+  border-radius: 5px;
+  box-shadow:
+    inset 0 1px 0 #ffffff40,
+    0 1px 2px #68469f30;
+}
+html[data-surface="material"]
+  :is(.button.primary, .button.save):not(:disabled):hover {
+  background: linear-gradient(180deg, #a479ee, #895ad9);
+  box-shadow:
+    inset 0 1px 0 #ffffff50,
+    0 2px 6px #7852ae30;
+}
+html[data-surface="material"] .button.save:disabled {
+  color: var(--muted);
+  background: var(--soft);
+  border-color: var(--border);
+  box-shadow: inset 0 1px 0 #ffffff20;
+  opacity: 1;
+}
+html[data-surface="material"] .segments {
+  background: var(--well);
+  border-radius: 5px;
+  box-shadow: var(--well-shadow);
+}
+html[data-surface="material"] .segments button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow:
+    var(--rim),
+    0 1px 3px #30263d15;
+}
+html[data-surface="material"] .badge.success {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--green-soft) 70%, var(--surface)),
+    var(--green-soft)
+  );
+  box-shadow:
+    inset 0 0 0 1px #549d8517,
+    inset 0 1px 0 #ffffff20;
+  border-radius: 5px;
+}
+html[data-surface="material"] .connection .dot {
+  box-shadow: 0 0 0 3px #3199740b;
+}
+html[data-surface="material"] .activity-row {
+  background: transparent;
+}
+html[data-surface="material"] .activity-row:nth-child(even) {
+  background: #90829e06;
+}
+html[data-surface="material"] .activity-row:hover {
+  background: #9568d912;
+}
+html[data-surface="material"] .chip {
+  background: #90829e09;
+  box-shadow: inset 0 0 0 1px #90829e0b;
+}
+html[data-surface="material"] input[type="checkbox"] {
+  accent-color: #9065d9;
+}
+html[data-surface="material"] :is(.button.ghost, .icon-button):hover {
+  background: #8e7bac0e;
+}
+html[data-surface="material"] :is(button, input, select):focus-visible {
+  outline-color: #9268d58c;
+  box-shadow: 0 0 0 3px #a985db14;
+}
+html[data-surface="material"] dialog {
+  box-shadow:
+    var(--rim),
+    0 8px 24px #28233712,
+    0 28px 90px #28233730;
+}
+html[data-surface="material"] dialog::backdrop {
+  background: #24203142;
+  backdrop-filter: blur(8px);
+}
+html[data-surface="material"] .version-summary {
+  background: var(--well);
+  box-shadow: var(--well-shadow);
+}
+html[data-surface="material"] .dialog-footer {
+  background: var(--header-wash);
+}
+html[data-surface="material"][data-theme="dark"] .sidebar {
+  background-image: radial-gradient(
+    ellipse at 0% 0%,
+    #9a71d213,
+    transparent 60%
+  );
+  box-shadow: inset -1px 0 0 #ffffff03;
+}
+html[data-surface="material"][data-theme="dark"] .topbar {
+  box-shadow: 0 1px 0 #ffffff03;
+}
+html[data-surface="material"][data-theme="dark"]
+  :is(.brand-mark, .avatar, .version-logo) {
+  background: linear-gradient(150deg, #4b3b61, #372c48);
+  box-shadow:
+    inset 0 1px 0 #e3bfff1f,
+    inset 0 0 0 1px #b69bd20a,
+    0 2px 4px #0000001a;
+}
+html[data-surface="material"][data-theme="dark"] .nav-item.active {
+  color: #d1b3ff;
+  background: linear-gradient(100deg, #443354, #352c43);
+  box-shadow:
+    inset 0 1px 0 #ddacff14,
+    inset 0 0 0 1px #bf8df010,
+    0 2px 4px #00000012;
+}
+html[data-surface="material"][data-theme="dark"] .activity-row:nth-child(even) {
+  background: #ffffff02;
+}

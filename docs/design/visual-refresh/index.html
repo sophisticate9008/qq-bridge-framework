@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-surface="material">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -7,8 +7,9 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
     />
-    <title>配置工作台 · 视觉更新静态设计案</title>
+    <title>配置工作台 · 同尺寸质感设计案</title>
     <link rel="stylesheet" href="preview.css" />
+    <link rel="stylesheet" href="surface.css" />
   </head>
   <body>
     <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -302,10 +303,6 @@
                 </div>
               </div>
               <div class="activity-scroll">
-                <div class="activity-columns">
-                  <span>时间</span><span>状态</span><span>来源 / 会话</span
-                  ><span>活动内容</span><span></span>
-                </div>
                 <div id="activity-rows"></div>
               </div>
             </section>
@@ -541,6 +538,15 @@
       </div>
     </dialog>
     <div id="preview-notice" class="preview-notice" role="status" hidden></div>
+    <div class="preview-switch" role="group" aria-label="静态设计对比">
+      <span>同尺寸对比</span>
+      <button data-surface-choice="baseline" aria-pressed="false">
+        原有表面
+      </button>
+      <button data-surface-choice="material" aria-pressed="true">
+        质感方案
+      </button>
+    </div>
     <script src="preview.js"></script>
   </body>
 </html>
