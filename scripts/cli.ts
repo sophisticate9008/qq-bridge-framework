@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { acquireFrameworkProcessLease } from '../src/host/framework-process-lease.ts';
 import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
+import { MAX_DISTRIBUTION_BYTES } from '../src/contracts/framework-distribution.ts';
 import { privatePermissions, securePermissions } from '../src/storage/file-security.ts';
 
 import { parseNativeConversationDiagnostics } from '../src/contracts/native-diagnostics.ts';
@@ -736,7 +737,7 @@ async function prepareStartupAssets(): Promise<void> {
   const filename = resolve(PROJECT_ROOT, 'distribution.json');
   if (import.meta.url.endsWith('.js') && existsSync(filename)) {
     const metadata = lstatSync(filename);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 65536) {
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_DISTRIBUTION_BYTES) {
       throw new CliOperationError('发行包标识无效，请重新解压完整框架包。');
     }
     let distribution: unknown;

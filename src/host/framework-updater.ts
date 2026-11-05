@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, lstat, mkdir, readFile, realpath, rename, rm, writeFile, chmod } from 'node:fs/promises';
 import { dirname, join, relative, isAbsolute } from 'node:path';
-import { parseFrameworkDistribution, type FrameworkDistribution } from '../contracts/framework-distribution.ts';
+import { MAX_DISTRIBUTION_BYTES, parseFrameworkDistribution, type FrameworkDistribution } from '../contracts/framework-distribution.ts';
 import { compareReleaseVersions, releaseVersion } from '../contracts/framework-release.ts';
 import { isRecord } from '../contracts/values.ts';
 import { assertFrameworkProcessStopped } from './framework-process-lease.ts';
@@ -22,7 +22,7 @@ async function safePath(root: string, relative: string): Promise<string> {
 export async function verifyFrameworkDistribution(root: string): Promise<FrameworkDistribution> {
   const filename = await safePath(root, 'distribution.json');
   const metadata = await lstat(filename);
-  if (!metadata.isFile() || metadata.size > 8 * 1024 * 1024) throw new Error('update_distribution_invalid');
+  if (!metadata.isFile() || metadata.size > MAX_DISTRIBUTION_BYTES) throw new Error('update_distribution_invalid');
   const distribution = parseFrameworkDistribution(JSON.parse(await readFile(filename, 'utf8')));
   if (!distribution) throw new Error('update_distribution_invalid');
   for (const file of distribution.files) {

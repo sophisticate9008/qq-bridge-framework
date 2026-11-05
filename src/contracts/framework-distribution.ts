@@ -1,5 +1,6 @@
 import { isRecord } from './values.ts';
 import { releaseVersion } from './framework-release.ts';
+export const MAX_DISTRIBUTION_BYTES = 8 * 1024 * 1024;
 
 export interface DistributionFile { readonly path: string; readonly sha256: string; readonly size: number; readonly executable: boolean }
 export interface FrameworkDistribution {
