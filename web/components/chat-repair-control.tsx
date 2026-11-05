@@ -1,6 +1,6 @@
 import { LoaderCircle, Wrench } from 'lucide-react';
 import type { ChatRepairOperation } from '../../src/contracts/chat-repair.ts';
-import type { ApiClient } from '../lib/api.ts';
+import { asRecord, type ApiClient } from '../lib/api.ts';
 import { requestChatRepair, useChatRepair } from '../lib/chat-repair.ts';
 import { chatRuntimeReason, parseChatRuntimeStatus } from '../lib/chat-runtime.ts';
 import { useReadResource } from '../lib/use-read-resource.ts';
@@ -35,6 +35,10 @@ const reasons: Readonly<Record<string, string>> = {
 export function ChatRepairControl({ api, connected, compact = false }: { readonly api: ApiClient; readonly connected: boolean; readonly compact?: boolean }) {
   const repair = useChatRepair(api, connected);
   const runtime = useReadResource(api, '/api/chat/runtime', connected, parseChatRuntimeStatus, { intervalMs: 5_000 });
+  const automatic = useReadResource(api, '/api/chat/automatic-recovery', connected, value => {
+    const record = asRecord(value);
+    return record.schema === 1 && typeof record.enabled === 'boolean' ? record : null;
+  }, { intervalMs: 30_000 });
   const { operation, pending } = repair;
   const message = pending ? `${operation ? labels[operation.phase] : '等待修复受理结果'}…`
     : operation?.state === 'completed' ? runtime.snapshot?.state === 'running' && runtime.snapshot.chatReady && !runtime.error
@@ -44,6 +48,7 @@ export function ChatRepairControl({ api, connected, compact = false }: { readonl
     <div className="row"><Button size="sm" variant="outline" disabled={!connected || pending || repair.state.snapshot?.available !== true} onClick={() => void requestChatRepair(api)}>
       {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Wrench className="size-3.5" />}{pending ? '正在恢复聊天' : '一键恢复聊天'}
     </Button><span className="small" role="status">{message}</span></div>
+    {automatic.snapshot && <p className="small muted">{automatic.snapshot.enabled ? '自动恢复已启用：持续故障达到 90 秒后尝试，每小时最多三次；主动停止和待应用配置会暂停恢复。' : '此部署已关闭自动恢复。'}</p>}
     {!compact && <p className="small muted">会短暂重启框架、DSH 及受管依赖，应用已保存设置并保留会话历史；协议端保持独立。未保存草稿不参与修复。</p>}
     {pending && repair.error && <p className="small" role="status">受管服务正在恢复，页面会自动重新连接并读取同一修复记录。</p>}
     {!pending && operation?.state === 'failed' && <p className="small" role="alert">{operation.reasons.map(code => reasons[code] ?? chatRuntimeReason(code).text).join(' ')}</p>}
