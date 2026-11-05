@@ -87,6 +87,7 @@ import { digest, json, object } from './data.ts'
 import { createNativeExecutionController } from './native-execution.ts'
 import { recordNativeExecutionDelivery } from './native-execution-summary.ts'
 import { createNativeExecutionClaims } from './native-execution-claims.ts'
+import { createNativeCorrelationRecovery } from './native-correlation-recovery.ts'
 import { createNativeExecutionPolicyActions } from './native-execution-actions.ts'
 import { createNativeBootstrapMount, type LoadedNativeBootstrap, type NativeBootstrapMount } from './native-bootstrap.ts'
 import { createReloadableExtensionRegistry } from './reloadable-extensions.ts'
@@ -381,6 +382,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   let deployedProviders = new Map<string, string>()
   let executions: ReturnType<typeof createNativeExecutionController> | undefined
   let claims: ReturnType<typeof createNativeExecutionClaims> | undefined
+  let correlationRecovery: ReturnType<typeof createNativeCorrelationRecovery> | undefined
   let claimTimer: ReturnType<typeof setInterval> | undefined
   let claimOffset = 0
   let pluginEpoch: string | null = null
@@ -834,6 +836,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     markdownDeliveries = undefined
     dsh = undefined
     claims = undefined
+    correlationRecovery?.block()
+    correlationRecovery = undefined
     pluginEpoch = null
     packageUnknown ||= result.packageUnknown
     bootstrapUnknown ||= result.bootstrapUnknown
@@ -1481,10 +1485,18 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         if (!dsh.bridgePlugin) failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE')
         const plugin = await dsh.bridgePlugin.describe(controller.signal).catch(() => failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE'))
         pluginEpoch = plugin.issuerEpoch
+        correlationRecovery = createNativeCorrelationRecovery({ issuerEpoch: plugin.issuerEpoch, signal: controller.signal,
+          describe: signal => dsh!.bridgePlugin!.describe(signal), restored() {
+            if (controller.signal.aborted || lifetime !== controller || state !== 'running') return
+            pluginEpoch = plugin.issuerEpoch
+            if (['EXECUTION_CLAIM_BASELINE_UNAVAILABLE', 'EXECUTION_CLAIM_READ_UNKNOWN'].includes(lastError ?? '')) lastError = null
+            activity.record('correlation_restored')
+          } })
         claims = createNativeExecutionClaims({ store, port: dsh.bridgePlugin, issuerEpoch: pluginEpoch, executions,
-          signal: controller.signal, onFault: executionFault, onCorrelationFault(code) {
+          signal: controller.signal, onFault: executionFault, onCorrelationFault(code, transient) {
             if (controller.signal.aborted || lifetime !== controller) return
             pluginEpoch = null
+            correlationRecovery?.fault(transient === true)
             lastError = safeCode(new FrameworkError(code, 'Trusted turn correlation is unavailable.'))
             activity.record('error')
           } })
@@ -1785,6 +1797,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         const reportedTimeouts = new Set<string>()
         claimTimer = setInterval(() => {
           if (state !== 'running' || controller.signal.aborted || !executions || !claims) return
+          void correlationRecovery?.tick()
           void sessionIntents?.drain(controller.signal).catch(error => { lastError = safeCode(error) })
           try {
             const pending = executions.active()
@@ -1950,6 +1963,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         const reply = currentHost.replies.get(conversationId)
         if (reply && digest([conversationId, reply.requestId, 'prompt']) === execution.requestId) currentHost.replies.suppress(execution.binding, reply.requestId)
         pluginEpoch = null
+        correlationRecovery?.block()
         preserveFreeze = true
         activity.record('execution_recovered', conversationId)
       }

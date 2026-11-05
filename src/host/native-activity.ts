@@ -79,6 +79,7 @@ const descriptions = {
   agent_cancelled: ['info', 'processed', '本轮执行已确认停止。'],
   execution_timeout: ['warning', 'timeout', '本轮执行已超时；未确认的结果仍按原会话策略隔离。'],
   execution_recovered: ['info', 'processed', '已保留上下文迁移到新会话地址；重启聊天后恢复接收，原取消风险仍保留。'],
+  correlation_restored: ['info', 'processed', '已核验原 DSH 实例，执行关联通道恢复；原未知执行继续隔离。'],
   execution_reconciled: ['info', 'processed', '已核对持久执行证据并解除隔离，未重放原请求或回复。'],
   starting: ['info', 'runtime', '正在启动原生聊天。'],
   running: ['info', 'runtime', '原生聊天已启动。'],

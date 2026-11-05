@@ -4,6 +4,8 @@ import { BRIDGE_PLUGIN_PROTOCOL, RECEIPT_LIMITS, createClaimReceiptJournal } fro
 import { createDshBridgePluginPort } from '../src/adapters/dsh-tool-scope.ts'
 import { createNativeExecutionController } from '../src/host/native-execution.ts'
 import { createNativeExecutionClaims } from '../src/host/native-execution-claims.ts'
+import { createNativeCorrelationRecovery } from '../src/host/native-correlation-recovery.ts'
+import { FrameworkError } from '../src/core/values.ts'
 import { createSqliteStore } from '../src/storage/sqlite.ts'
 
 const binding = { conversationId: 'private:123', sessionId: 'session-1', generation: 1 }
@@ -98,4 +100,32 @@ test('persisted cursor survives controller restart and late exact claim remains 
     assert.equal(restored.get(execution.id)?.turn?.id, '9')
     assert.equal(restored.observe(execution.id, { eventId: 'late-after-restart', binding, turnId: '9', kind: 'completed' }).decision, 'record-only')
   } finally { await claims.drain(); await restored.stop() }
+})
+
+test('same-issuer transport recovery leaves the unknown original execution isolated and permits another conversation', async context => {
+  const fake = fixture(context)
+  const signal = new AbortController().signal
+  const description = await fake.port.describe(signal)
+  let offline = false, at = 1000, restored = false
+  const recovery = createNativeCorrelationRecovery({ issuerEpoch: description.issuerEpoch, signal, now: () => at,
+    describe: current => fake.port.describe(current), restored: () => { restored = true } })
+  const claims = createNativeExecutionClaims({ store: fake.store, executions: fake.executions, issuerEpoch: description.issuerEpoch, signal,
+    port: { ...fake.port, claimReceipts: (input, current) => {
+      if (offline) return Promise.reject(new FrameworkError('DSH_TIMEOUT', 'Read timed out'))
+      return fake.port.claimReceipts(input, current)
+    } }, onCorrelationFault: (_code, transient) => recovery.fault(transient === true) })
+  const baseline = await claims.baseline(binding.sessionId, signal)
+  const execution = fake.executions.admit({ binding, requestId: 'transport-recovery', policyRevision: revision })
+  claims.attach(execution, baseline)
+  await fake.executions.submit(execution.id, async () => ({ status: 'accepted' }))
+  offline = true
+  await claims.poll(execution.id)
+  assert.equal(fake.executions.get(execution.id)?.status, 'unknown')
+  offline = false; at += 30_000; await recovery.tick()
+  assert.equal(restored, true)
+  assert.equal(fake.executions.get(execution.id)?.status, 'unknown')
+  assert.throws(() => fake.executions.admit({ binding, requestId: 'no-replay', policyRevision: revision }), { code: 'EXECUTION_SESSION_ISOLATED' })
+  assert.doesNotThrow(() => fake.executions.admit({ binding: { ...binding, conversationId: 'private:456', sessionId: 'session-2' },
+    requestId: 'another-conversation', policyRevision: revision }))
+  await claims.drain()
 })

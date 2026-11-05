@@ -1,5 +1,5 @@
 import type { DshBridgePluginPort } from '../adapters/dsh-tool-scope.ts'
-import { assert, snapshot } from '../core/values.ts'
+import { assert, snapshot, isRecord } from '../core/values.ts'
 import { json, object } from './data.ts'
 import { withDeadline } from './deadlines.ts'
 import type { createNativeExecutionController, NativeExecutionRecord } from './native-execution.ts'
@@ -20,9 +20,11 @@ export function createNativeExecutionClaims(options: {
   readonly executions: ReturnType<typeof createNativeExecutionController>
   readonly signal: AbortSignal
   readonly onFault?: (code: string) => void
-  readonly onCorrelationFault?: (code: string) => void
+  readonly onCorrelationFault?: (code: string, transient?: boolean) => void
 }) {
   const pending = new Map<string, Promise<void>>()
+  const transient = (error: unknown) => isRecord(error) && typeof error.code === 'string'
+    && ['DSH_TIMEOUT', 'DSH_TRANSPORT_UNKNOWN', 'DSH_ABORTED', 'EXECUTION_CLAIM_POLL_UNKNOWN'].includes(error.code)
 
   async function baseline(sessionId: string, signal: AbortSignal): Promise<NativeExecutionClaimBaseline> {
     try {
@@ -30,7 +32,7 @@ export function createNativeExecutionClaims(options: {
       assert(page.state === 'page', 'EXECUTION_CLAIM_BASELINE_UNAVAILABLE', 'The trusted claim receipt baseline is unavailable.')
       return snapshot({ sessionId, issuerEpoch: page.issuerEpoch, after: page.head })
     } catch (error) {
-      if (!signal.aborted && !options.signal.aborted) options.onCorrelationFault?.('EXECUTION_CLAIM_BASELINE_UNAVAILABLE')
+      if (!signal.aborted && !options.signal.aborted) options.onCorrelationFault?.('EXECUTION_CLAIM_BASELINE_UNAVAILABLE', transient(error))
       throw error
     }
   }
@@ -67,9 +69,9 @@ export function createNativeExecutionClaims(options: {
           if (!page.hasMore) return
         }
         options.executions.lost(id)
-      } }).catch(() => {
+      } }).catch((error: unknown) => {
         if (!options.signal.aborted) {
-          options.onCorrelationFault?.('EXECUTION_CLAIM_READ_UNKNOWN')
+          options.onCorrelationFault?.('EXECUTION_CLAIM_READ_UNKNOWN', transient(error))
           try { options.executions.lost(id) }
           catch { try { options.onFault?.('EXECUTION_CLAIM_STORAGE_UNKNOWN') } catch {} }
         }
