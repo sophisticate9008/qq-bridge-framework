@@ -19,7 +19,7 @@ jobs:
     needs: html-renderer
     name: 完整框架包安装与启动
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -44,7 +44,7 @@ jobs:
       - name: 保存经过安装验证的发行包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: release-packages
+          name: framework-packages
           path: runtime/releases/
           if-no-files-found: error
           retention-days: 7
@@ -52,7 +52,7 @@ jobs:
     name: 发行包原生安装 ${{ matrix.platform }}-${{ matrix.arch }}
     needs: package
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +77,7 @@ jobs:
           node-version: '24.12.0'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-packages
+          name: framework-packages
           path: runtime/releases
       - name: 验证同批正式附件
         run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
@@ -91,3 +91,84 @@ jobs:
             platform-verification.log
           if-no-files-found: ignore
           retention-days: 3
+
+  docker:
+    name: Docker 原生验收 ${{ matrix.arch }}
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, arch: amd64}
+          - {runner: ubuntu-24.04-arm, arch: arm64}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.12.0'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: framework-packages
+          path: runtime/releases
+      - name: 实际启动、原生排版、停止与持久卷复用
+        run: node scripts/verify-docker.ts
+      - name: 导出已验证镜像
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+          mkdir -p runtime/docker-images
+          docker save "qq-bridge-framework:$version" | gzip > "runtime/docker-images/qq-bridge-framework-$version-docker-${{ matrix.arch }}.tar.gz"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: docker-image-${{ matrix.arch }}
+          path: runtime/docker-images/*.tar.gz
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: 保存容器验收报告
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: docker-report-${{ matrix.arch }}
+          path: |
+            docker-result.json
+            docker-runtime.log
+          retention-days: 3
+          if-no-files-found: ignore
+  bundle:
+    name: 汇总已验证发行附件
+    needs: [package, native, docker]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: framework-packages
+          path: runtime/releases
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: docker-image-*
+          path: runtime/docker-images
+          merge-multiple: true
+      - name: 添加镜像校验和
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+          cp runtime/docker-images/*.tar.gz "runtime/releases/v$version/"
+          cd "runtime/releases/v$version"
+          sha256sum *-docker-*.tar.gz >> SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-packages
+          path: runtime/releases
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error

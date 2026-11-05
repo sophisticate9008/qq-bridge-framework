@@ -38,21 +38,22 @@ const release = gh(['release', 'view', tag, '--json', 'tagName,isDraft']);
 assert(isRecord(release) && release.tagName === tag && release.isDraft === true, 'Upload only to an existing draft');
 const names = await readdir(directory);
 const expected = [`qq-bridge-framework-${version}.tar.gz`, `qq-bridge-framework-${version}-windows-x64.zip`,
+  `qq-bridge-framework-${version}-docker-amd64.tar.gz`, `qq-bridge-framework-${version}-docker-arm64.tar.gz`,
   `qq-bridge-framework-sdk-${version}.tgz`, `qq-bridge-framework-dsh-bridge-plugin-${version}.tgz`];
-assert.equal(names.length, 8);
+assert.equal(names.length, 10);
 assert(names.includes('SHA256SUMS') && expected.every(name => names.includes(name)));
 const native = names.filter(name => /^qbf-html-renderer-[a-f0-9]{64}-(?:linux-x64|linux-arm64|win32-x64)\.tgz$/.test(name));
 assert.equal(native.length, 3);
 assert.equal(new Set(native.map(name => name.slice('qbf-html-renderer-'.length, 'qbf-html-renderer-'.length + 64))).size, 1);
 for (const target of ['linux-x64', 'linux-arm64', 'win32-x64']) assert(native.some(name => name.endsWith(`-${target}.tgz`)));
 const checksums = (await readFile(join(directory, 'SHA256SUMS'), 'utf8')).trim().split(/\r?\n/);
-assert.equal(checksums.length, 7);
+assert.equal(checksums.length, 9);
 const verified = new Set<string>();
 for (const line of checksums) {
   const match = /^([a-f0-9]{64})  ([a-zA-Z0-9.-]+)$/.exec(line);
   assert(match && names.includes(match[2]!) && match[2] !== 'SHA256SUMS' && !verified.has(match[2]!));
   const file = join(directory, match[2]!), metadata = await lstat(file);
-  assert(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size <= 160 * 1024 * 1024);
+  assert(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size <= 1024 * 1024 * 1024);
   assert.equal(createHash('sha256').update(await readFile(file)).digest('hex'), match[1]);
   verified.add(match[2]!);
 }
