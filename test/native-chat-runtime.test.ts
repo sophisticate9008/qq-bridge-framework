@@ -3125,3 +3125,64 @@ test('stale assistant deployment rejects tool admission with its exact reason an
   assert.equal(fake.rpc.some(row => row.method === 'bridgePlugin/startWork'), false)
   fake.rawFinal()
 })
+
+for (const kind of ['private', 'group'] as const) test(`failed ${kind} assistant work notifies its owner once without another model turn or replay`, async context => {
+  const fake = await fixture(context, { workChannel: true })
+  await fake.configure()
+  const conversationId = kind === 'private' ? 'private:123' : 'group:456'
+  const path = '/api/chat/tool-permissions', initial = await invoke(fake.routes(), 'GET', path)
+  await invoke(fake.routes(), 'POST', path, { revision: initial.revision, action: 'grant', grant: {
+    id: randomUUID(), conversationId, capabilities: ['native.work.start'], maxUses: { 'native.work.start': 1 }, expiresAt: null } })
+  await fake.start(); fake.message(1400, kind === 'group' ? { message_type: 'group', group_id: 456,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: '请交给助手检查文件' } }] } : {})
+  await until(() => fake.rpc.some(row => row.method === 'session/prompt'))
+  const prompt = fake.rpc.find(row => row.method === 'session/prompt')!.request
+  const sessionId = String(prompt.sessionId), requestId = String(prompt.requestId), lease = fake.toolLeases.get(sessionId)!
+  fake.toolCalls.push({ ticket: 'failing-work', leaseId: lease.leaseId, call: { id: 'failing-work', name: 'qbf_work_start',
+    input: { task: 'Inspect the file', context: '' }, sessionId, requestId, generation: 1,
+    userMessageId: `user-${requestId}`, turn: 1, expiresAt: Date.now() + 10000 } })
+  await until(() => fake.works.size === 1 && fake.toolResults.has('failing-work'))
+  fake.rawFinal()
+  await until(() => fake.runtime().executions()!.forConversation(conversationId) === null)
+  const [id, work] = [...fake.works][0]!
+  fake.works.set(id, { ...work, state: 'unknown', result: null, error: 'WORK_RESULT_UNKNOWN' })
+  await until(() => fake.sends.some(value => JSON.stringify(value).includes('未收到可核验的最终结果')))
+  assert.equal(fake.runtime().readWork(id)?.status, 'unknown')
+  const notice = fake.sends.filter(value => JSON.stringify(value).includes('未收到可核验的最终结果'))
+  assert.equal(notice.length, 1)
+  assert.equal(String(notice[0]![kind === 'group' ? 'group_id' : 'user_id']), kind === 'group' ? '456' : '123')
+  if (kind === 'group') assert.match(JSON.stringify(notice[0]), /"type":"at","data":\{"qq":"123"/)
+  assert.equal(fake.rpc.filter(row => row.method === 'session/prompt').length, 1)
+  assert.equal(fake.rpc.filter(row => row.method === 'bridgePlugin/startWork').length, 1)
+  await fake.restart()
+  assert.equal(fake.sends.filter(value => JSON.stringify(value).includes('未收到可核验的最终结果')).length, 1)
+})
+
+test('changing the configured owner blocks a pending failure notice to the former owner', async context => {
+  const fake = await fixture(context, { workChannel: true })
+  await fake.configure()
+  const path = '/api/chat/tool-permissions', initial = await invoke(fake.routes(), 'GET', path)
+  await invoke(fake.routes(), 'POST', path, { revision: initial.revision, action: 'grant', grant: {
+    id: randomUUID(), conversationId: 'private:123', capabilities: ['native.work.start'], maxUses: { 'native.work.start': 1 }, expiresAt: null } })
+  await fake.start(); fake.message(1500)
+  await until(() => fake.rpc.some(row => row.method === 'session/prompt'))
+  const prompt = fake.rpc.find(row => row.method === 'session/prompt')!.request
+  const sessionId = String(prompt.sessionId), requestId = String(prompt.requestId), lease = fake.toolLeases.get(sessionId)!
+  fake.toolCalls.push({ ticket: 'owner-change-work', leaseId: lease.leaseId, call: { id: 'owner-change-work', name: 'qbf_work_start',
+    input: { task: 'Inspect the file', context: '' }, sessionId, requestId, generation: 1,
+    userMessageId: `user-${requestId}`, turn: 1, expiresAt: Date.now() + 10000 } })
+  await until(() => fake.works.size === 1 && fake.toolResults.has('owner-change-work'))
+  fake.rawFinal()
+  await until(() => fake.runtime().executions()!.forConversation('private:123') === null)
+  await fake.save('access', { allow: ['private:123', 'group:456'], deny: [], owner: '321' })
+  const [id, work] = [...fake.works][0]!
+  fake.works.set(id, { ...work, state: 'unknown', result: null, error: 'WORK_RESULT_UNKNOWN' })
+  await until(() => {
+    const database = new DatabaseSync(join(fake.directory, 'native-chat.sqlite'), { readOnly: true })
+    try { return database.prepare('SELECT value FROM durable_records WHERE namespace = ?').all('native-work.failure-notices')
+      .some(row => isRecord(row) && typeof row.value === 'string' && ['rejected', 'unknown'].includes(String(objectForNotice(row.value).status))) }
+    finally { database.close() }
+  })
+  assert.equal(fake.sends.some(value => JSON.stringify(value).includes('未收到可核验的最终结果')), false)
+  function objectForNotice(text: string): Record<string, unknown> { const parsed: unknown = JSON.parse(text); assert(isRecord(parsed)); return parsed }
+})

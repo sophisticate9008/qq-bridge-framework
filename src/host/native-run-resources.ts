@@ -7,6 +7,7 @@ import type { createNativeQuotedContext } from './native-quoted-context.ts'
 import type { createNativeInbox } from './native-inbox.ts'
 import type { createNativeWorkExecutor } from './native-work.ts'
 import type { createNativeWorkFeedback } from './native-work-feedback.ts'
+import type { createNativeWorkFailureNotifier } from './native-work-failure-notices.ts'
 import type { createNativeExecutionClaims } from './native-execution-claims.ts'
 import type { createNativeExecutionController } from './native-execution.ts'
 import type { NativeBootstrapMount } from './native-bootstrap.ts'
@@ -23,6 +24,7 @@ export interface NativePreparedRunResources {
   readonly dsh: DshJsonRpcPort | undefined
   readonly work: ReturnType<typeof createNativeWorkExecutor> | undefined
   readonly workFeedback?: ReturnType<typeof createNativeWorkFeedback>
+  readonly workFailures?: ReturnType<typeof createNativeWorkFailureNotifier>
   readonly claims: ReturnType<typeof createNativeExecutionClaims> | undefined
   readonly executions: ReturnType<typeof createNativeExecutionController> | undefined
   readonly bootstrap: NativeBootstrapMount | undefined
@@ -66,7 +68,7 @@ export async function drainNativeRun(resources: NativePreparedRunResources) {
   // Stop producing work before draining consumers. Failure of one producer must not skip the rest.
   await phase([() => resources.markdownDeliveries?.stop(), () => resources.conversationTasks?.stop(), () => resources.scheduler?.stop(), () => resources.reminders.stop(), () => resources.releaseInteractions?.(),
     () => resources.memory.stop(), () => resources.quotedContext?.clear(), () => resources.inbox?.stop(), resources.clearIngress])
-  await phase([() => resources.work?.close(new AbortController().signal), () => resources.workFeedback?.drain(), () => resources.claims?.drain(),
+  await phase([() => resources.work?.close(new AbortController().signal), () => resources.workFeedback?.drain(), () => resources.workFailures?.drain(), () => resources.claims?.drain(),
     () => resources.executions?.stop(), () => {
       const bootstrap = resources.bootstrap
       if (!bootstrap) return

@@ -448,6 +448,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
       const entry: PendingWork = { controller: new AbortController(),
         record: options.store.write(namespace, id, json({ schema: 1, id, fingerprint, childId, status: 'starting',
           conversationId: scope.conversationId, sourceMessageId: source.sourceMessageId, ownerId: source.userId,
+          taskSummary: input.task.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120),
           parentSessionId, generation: scope.generation, configuration, createdAt, deadlineAt, runId: id,
           stopReason: null, result: null, lateResult: null, delivery: 'not-requested', lastError: null }), { expectedRevision: null }) }
       childIds.set(childId, id)

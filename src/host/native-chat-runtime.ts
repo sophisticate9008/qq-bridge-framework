@@ -132,6 +132,7 @@ import { createNativeMemoryCommand } from './native-memory-commands.ts'
 import { createNativeMemoryEffects } from './native-memory-effects.ts'
 import { assistantPreparationFailure, type NativeAssistantTargetResolution, type NativeAssistantWorkPreparation } from './native-assistant-target.ts'
 import { createNativeWorkExecutor } from './native-work.ts'
+import { createNativeWorkFailureDelivery, createNativeWorkFailureNotifier } from './native-work-failure-notices.ts'
 import { createNativeWorkHistoryReader } from './native-work-history.ts'
 import { createDshNativeWorkBackend } from './dsh-native-work.ts'
 import { createNativeWorkAssets } from './native-work-assets.ts'
@@ -387,6 +388,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
   let bootstrapUnknown = false
   let messageSources: ReturnType<typeof createNativeMessageSources> | undefined
   let workFeedback: ReturnType<typeof createNativeWorkFeedback> | undefined
+  let workFailures: ReturnType<typeof createNativeWorkFailureNotifier> | undefined
   let replyFreshness: ReturnType<typeof createNativeReplyFreshness> | undefined
   const managerDefinitions = [...(options.lifecycleHooks ?? []), ...(options.bootstrap?.lifecycleHooks ?? [])]
   const controlDefinitions = [...(options.controlCommands ?? []), ...(options.bootstrap?.controlCommands ?? [])]
@@ -792,7 +794,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
 
   async function cleanup() {
     frozenRecoveryConversations.clear()
-    const resources = { lifetime, host, dsh, work, workFeedback, claims, executions, bootstrap: bootstrapMount,
+    const resources = { lifetime, host, dsh, work, workFeedback, workFailures, claims, executions, bootstrap: bootstrapMount,
       tools: frameworkTools, packages, inbox, quotedContext, reminders, memory, scheduler: pluginScheduler, conversationTasks, markdownDeliveries,
       releaseInteractions, closeInteractions: stopInteractions, claimTimer,
       clearIngress: inbound.clear, drainConfiguration: configurationGuard.drain, drainPolicy: toolPolicy.drain }
@@ -805,6 +807,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     await stickerLibrary?.stop(); stickerLibrary = undefined
     messageSources = undefined
     workFeedback = undefined
+    workFailures = undefined
     replyFreshness?.clear()
     replyFreshness = undefined
     media = undefined
@@ -1530,7 +1533,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
               const resolved = await resolveTarget(signal)
               return checkedTarget(resolved, configuration)
             })
-          work = createNativeWorkExecutor({ store, onObservation(event) { activity.observe({ ...event, correlation: { ...event.correlation,
+          work = createNativeWorkExecutor({ store, onObservation(event) { if (event.correlation?.workId) workFailures?.observe(event.correlation.workId)
+              activity.observe({ ...event, correlation: { ...event.correlation,
               ...(accountScope ? { protocolId: accountScope.protocolId, accountId: accountScope.accountId } : {}) } }) }, messageSources: messageSources.reader, backend,
             registerChild(binding) { return workInteractions.registerInteractionSession(binding.childId) },
             ...(options.prepareWorkTarget ? { prepareAdmission: async (signal: AbortSignal) => {
@@ -1746,11 +1750,16 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             && executions?.forConversation(conversationId) === null && !inbox?.hasPending(conversationId)
             && host?.replies.get(conversationId)?.status !== 'waiting',
           onFault: code => { lastError = code; activity.record('error', null, undefined, {}, code) } })
+        workFailures = createNativeWorkFailureNotifier({ store, signal: controller.signal,
+          ...createNativeWorkFailureDelivery({ host, store, persona: outgoingPersona, owner: () => active?.access.owner ?? null,
+            guard: (conversationId, signal) => guard(conversationId, signal, true, 'delivery') }),
+          onFault: code => activity.record('error', null, undefined, {}, code) })
         const runningResources: NativeRunningRunResources = { lifetime: controller, host, dsh, work, claims, executions,
-          workFeedback, bootstrap: bootstrapMount, tools: frameworkTools, packages, inbox, quotedContext, reminders, memory, scheduler: pluginScheduler, conversationTasks, releaseInteractions,
+          workFeedback, workFailures, bootstrap: bootstrapMount, tools: frameworkTools, packages, inbox, quotedContext, reminders, memory, scheduler: pluginScheduler, conversationTasks, releaseInteractions,
           closeInteractions: stopInteractions, claimTimer, clearIngress: inbound.clear, drainConfiguration: configurationGuard.drain, drainPolicy: toolPolicy.drain }
         runningResources.lifetime.signal.throwIfAborted()
         state = 'running'
+        await workFailures.recover()
         markdownDeliveries.start()
         pluginScheduler.start()
         await reminderService.start()
