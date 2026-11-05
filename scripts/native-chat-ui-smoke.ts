@@ -20,11 +20,26 @@ try {
   const writes: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (request.method() === 'POST') writes.push(new URL(request.url()).pathname); });
+  let versionChecks = 0;
+  await page.route('**/api/framework/version*', async route => {
+    versionChecks++;
+    await route.fulfill({ json: { schema: 1, currentVersion: '1.12.0', latestVersion: '1.13.0', checkedAt: Date.now(),
+      state: 'available', majorUpgrade: false, installation: 'source', error: null,
+      releaseUrl: 'https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.13.0' } });
+  });
   await page.goto(fixture.origin);
   await page.locator('#token').fill(fixture.adminToken);
   await page.locator('#connect').click();
   await page.getByRole('button', { name: '断开连接', exact: true }).waitFor();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '框架版本与更新', exact: true }).click();
+  const versionDialog = page.getByRole('dialog', { name: '框架版本与更新', exact: true });
+  await versionDialog.getByText('最新发行：v1.13.0', { exact: true }).waitFor();
+  const previousChecks = versionChecks;
+  await versionDialog.getByRole('button', { name: '主动检查更新', exact: true }).click();
+  await capabilityUntil(() => versionChecks > previousChecks, 'Explicit version refresh must request the server');
+  assert.equal(await versionDialog.getByRole('button', { name: '更新框架', exact: true }).count(), 0);
+  await versionDialog.getByRole('button', { name: '关闭', exact: true }).click();
   await navigateConsolePage(page, 'access');
   await page.getByRole('heading', { name: '访问与设置', exact: true, level: 1 }).waitFor();
   assert.equal(await page.getByRole('button', { name: '保存新授权', exact: true }).count(), 0);

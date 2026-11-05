@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { acquireFrameworkProcessLease } from '../src/host/framework-process-lease.ts';
+import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
 import { privatePermissions, securePermissions } from '../src/storage/file-security.ts';
 
 import { parseNativeConversationDiagnostics } from '../src/contracts/native-diagnostics.ts';
@@ -248,11 +249,8 @@ export function resolveConfigurationFilename(
   environment: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd()
 ): string {
-  const live = resolve(PROJECT_ROOT, 'runtime/live/framework-admin.json');
-  const selected = explicit ?? environment.QQ_BRIDGE_FRAMEWORK_CONFIG
-    ?? (resolve(cwd) === resolve(PROJECT_ROOT) && existsSync(live) ? live : 'runtime/admin/config.json');
-  if (selected.length === 0) usage('QQ_BRIDGE_FRAMEWORK_CONFIG 不能为空。');
-  return resolve(cwd, selected);
+  try { return resolveRuntimeConfiguration(PROJECT_ROOT, explicit, environment, cwd); }
+  catch { return usage('QQ_BRIDGE_FRAMEWORK_CONFIG 不能为空。'); }
 }
 
 function trustedServiceManager(filename: string, cwd: string): string {

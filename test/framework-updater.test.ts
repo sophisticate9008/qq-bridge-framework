@@ -68,3 +68,14 @@ test('release inventories reject traversal, protected data, case collisions and 
     }
   } finally { await setup.dispose(); }
 });
+
+test('a completed swap retains its recovery lock until the supervisor records the transaction', async () => {
+  const setup = await fixture();
+  try {
+    const id = await applyFrameworkUpdate({ ...setup, retainLock: true });
+    assert.equal(await readFile(join(setup.target, '.framework-update.lock'), 'utf8'), id);
+    await rollbackFrameworkUpdate(setup.target, id);
+    assert.equal((await verifyFrameworkDistribution(setup.target)).version, '1.11.0');
+    await assert.rejects(readFile(join(setup.target, '.framework-update.lock')));
+  } finally { await setup.dispose(); }
+});

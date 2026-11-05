@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { parseFrameworkReleaseStatus, type FrameworkReleaseStatus } from '../../src/contracts/framework-release.ts';
 import { parseFrameworkUpdateState, type FrameworkUpdateState } from '../../src/contracts/framework-update.ts';
 import { asRecord, errorMessage, type ApiClient } from '../lib/api.ts';
@@ -10,6 +10,7 @@ export function FrameworkVersion({ api, connected }: { readonly api: ApiClient; 
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [updateAvailable, setUpdateAvailable] = useState(false), [update, setUpdate] = useState<FrameworkUpdateState | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const requestedId = useRef<string | null>(null);
   useEffect(() => {
     if (!connected) return;
     const controller = new AbortController();
@@ -21,7 +22,8 @@ export function FrameworkVersion({ api, connected }: { readonly api: ApiClient; 
         setUpdateAvailable(value.available === true);
         const operation = parseFrameworkUpdateState(value.operation);
         setUpdate(operation);
-        if (operation && ['completed', 'failed', 'rolled-back'].includes(operation.state)) setSubmitted(false);
+        if (operation && (!requestedId.current || operation.id === requestedId.current)
+          && ['completed', 'failed', 'rolled-back'].includes(operation.state)) setSubmitted(false);
       } catch { /* During restart the original operation remains visible and POST is never retried. */ }
       if (!controller.signal.aborted && open) timer = setTimeout(() => void read(), 3000);
     }
@@ -31,8 +33,9 @@ export function FrameworkVersion({ api, connected }: { readonly api: ApiClient; 
   async function install() {
     if (!status?.latestVersion || submitted) return;
     setSubmitted(true); setError('');
+    requestedId.current = crypto.randomUUID();
     try {
-      const value = asRecord(await api.post('/api/framework/update', { operationId: crypto.randomUUID(), version: status.latestVersion }));
+      const value = asRecord(await api.post('/api/framework/update', { operationId: requestedId.current, version: status.latestVersion }));
       const operation = parseFrameworkUpdateState(value.operation);
       if (operation) setUpdate(operation);
       else setError('更新受理结果待核对，请等待状态刷新。');

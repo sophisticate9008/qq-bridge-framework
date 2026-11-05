@@ -74,7 +74,7 @@ export async function rollbackFrameworkUpdate(target: string, id: string): Promi
 
 /** Caller stops the runtime and prepares production dependencies before entering this transaction. */
 export async function applyFrameworkUpdate(options: { readonly source: string; readonly target: string;
-  readonly allowMajor?: boolean; readonly allowSameVersion?: boolean; readonly dependencies?: boolean }): Promise<string> {
+  readonly allowMajor?: boolean; readonly allowSameVersion?: boolean; readonly dependencies?: boolean; readonly retainLock?: boolean }): Promise<string> {
   const source = await realpath(options.source), target = await realpath(options.target);
   const contains = (parent: string, child: string) => { const path = relative(parent, child); return !path || !path.startsWith('..') && !isAbsolute(path); };
   if (contains(source, target) || contains(target, source)) throw new Error('update_directories_overlap');
@@ -126,7 +126,7 @@ export async function applyFrameworkUpdate(options: { readonly source: string; r
       }
     }
     await journalWrite(directory, { ...journal, state: 'applied' });
-    await rm(join(target, '.framework-update.lock'));
+    if (!options.retainLock) await rm(join(target, '.framework-update.lock'));
     return id;
   } catch (error) {
     // If rollback fails, the lock remains and startup refuses the partial installation.

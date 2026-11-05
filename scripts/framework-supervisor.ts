@@ -9,18 +9,19 @@ import { applyFrameworkUpdate, rollbackFrameworkUpdate } from '../src/host/frame
 import { readFrameworkUpdateState, writeFrameworkUpdateState } from '../src/host/framework-update-state.ts';
 import { frameworkUpdateStage } from './framework-update-download.ts';
 import { loadGatewayAdminConfiguration, gatewayAdminAddress } from '../src/admin/gateway.ts';
-import { resolveConfigurationFilename } from './cli.ts';
+import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
 import { acquireFrameworkProcessLease } from '../src/host/framework-process-lease.ts';
 
 /** A parent outside the serving child owns restarts and code replacement. No shell or Docker socket is exposed. */
 export async function superviseFramework(root: string, args: readonly string[]): Promise<void> {
   if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') throw new Error('nested_supervisor_rejected');
+  if (!existsSync(join(root, 'distribution.json'))) throw new Error('supervisor_requires_release_archive');
   const release = await acquireFrameworkProcessLease(root, 'supervisor');
   let child: ChildProcess | undefined, exited: Promise<number> = Promise.resolve(0);
   let stopping = false, lastStart = 0, childFinished = false, requireChatReady = false;
   const controller = new AbortController();
   const configIndex = args.indexOf('--config');
-  const configurationFilename = resolveConfigurationFilename(configIndex < 0 ? undefined : args[configIndex + 1], process.env, root);
+  const configurationFilename = resolveRuntimeConfiguration(root, configIndex < 0 ? undefined : args[configIndex + 1], process.env, root);
   const cli = join(root, 'dist/scripts/cli.js');
   const crashes: number[] = [];
   function stop() { stopping = true; controller.abort(); }
@@ -96,8 +97,9 @@ export async function superviseFramework(root: string, args: readonly string[]):
         let transactionId: string | null = null;
         try {
           await stopChild();
-          transactionId = await applyFrameworkUpdate({ source: join(frameworkUpdateStage(root, update.id), `qq-bridge-framework-${update.version}`), target: root, dependencies: true });
+          transactionId = await applyFrameworkUpdate({ source: join(frameworkUpdateStage(root, update.id), `qq-bridge-framework-${update.version}`), target: root, dependencies: true, retainLock: true });
           await writeFrameworkUpdateState(root, { ...update, state: 'verifying', transactionId, updatedAt: Date.now() });
+          await rm(join(root, '.framework-update.lock'));
           startChild();
           let ready = false;
           for (let attempt = 0; attempt < 30 && !stopping; attempt++) {

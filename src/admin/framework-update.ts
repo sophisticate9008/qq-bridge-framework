@@ -32,11 +32,11 @@ export function createFrameworkUpdateRoutes(version: string): AdminRoute[] {
       const state = { schema: 1 as const, id, version: targetVersion, state: 'preparing' as const,
         createdAt: at, updatedAt: at, error: null, transactionId: null };
       await writeFile(join(directory, `${id}.received`), '', { flag: 'wx', mode: 0o600 });
-      await writeFrameworkUpdateState(root, state);
+      await writeFrameworkUpdateState(root, state, true);
       const child = spawn(process.execPath, [join(root, 'dist/scripts/framework-update-download.js'), root, id], { detached: true, stdio: 'ignore' });
       await new Promise<void>(resolve => {
         child.once('spawn', () => { child.unref(); resolve(); });
-        child.once('error', () => { void writeFrameworkUpdateState(root, { ...state, state: 'failed', error: 'update_worker_start_failed', updatedAt: Date.now() }).finally(resolve); });
+        child.once('error', () => { void writeFrameworkUpdateState(root, { ...state, state: 'failed', error: 'update_worker_start_failed', updatedAt: Date.now() }, true).catch(() => undefined).finally(resolve); });
       });
       return { schema: 1, available, operation: await readFrameworkUpdateState(root) };
     });

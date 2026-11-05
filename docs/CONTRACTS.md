@@ -461,3 +461,5 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 `GET /api/framework/version` 返回 schema 1 的实际版本、最新正式版本、检查时间、安装类型、同主版本／跨主版本提示及固定官方发行链接；`?refresh=1` 主动刷新，失败明确标记 unavailable。公网请求只访问固定 GitHub Releases API，最多 512 KiB、8 秒，普通请求缓存 60 秒、主动请求最短 10 秒；不接受浏览器指定仓库或 URL。
 
 自动恢复通过已保存运行意图与现有生命周期和修复入口执行，预算持久化且故障消失不清空小时预算。`GET /api/chat/automatic-recovery` 提供只读证据；恢复不会增加权限或重试业务未知执行。详细适用范围见 [恢复手册](RECOVERY.md#有界自动恢复)。
+
+完整发行包的 `distribution.json` 新增兼容文件清单与 `compatibility: { data: 1, overwrite: 1 }`，原 schema 1 的组件与来源字段保留。`GET /api/framework/update` 提供监督更新能力与当前操作；`POST` 只接受 `{ operationId, version }`，只允许官方仓库、同主版本前进更新。操作由 preparing → ready → applying → verifying → completed 前进，失败或回滚为终态；跨进程写入串行并验证状态转换，终态不能被迟到下载结果重新激活。收到编号单独持久去重；替换阶段的写屏障与进程租约阻止并行程序替换。详见 [更新流程](UPDATING.md)。
