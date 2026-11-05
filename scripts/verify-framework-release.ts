@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isRecord } from '../src/core/values.ts';
+import { verifyFrameworkUpgrade } from './verify-framework-upgrade.ts';
 import { assertFrameworkReleasePath } from './framework-release.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -115,6 +116,8 @@ try {
     }
     evidence.windowsChatAndAcl = true;
   }
+  checkpoint('previous-release-upgrade');
+  await verifyFrameworkUpgrade(cwd);
   // Removing original TS proves that the runtime package actually uses compiled backend/worker files.
   await rm(join(cwd, 'src'), { recursive: true });
   await rm(join(cwd, 'scripts'), { recursive: true });
@@ -151,7 +154,7 @@ try {
   assert.equal(await readFile(configuration, 'utf8'), original);
   const origin = `http://127.0.0.1:${adminPort}`;
   async function launch(): Promise<void> {
-    child = spawn(process.execPath, process.platform === 'win32' ? [join(cwd, 'dist/scripts/windows-launcher.js')] : [cli, 'start'], { cwd, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    child = spawn(process.execPath, process.platform === 'win32' ? [join(cwd, 'dist/scripts/windows-launcher.js')] : [cli, 'serve'], { cwd, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     childExit = once(child, 'exit');
     void childExit.catch(() => {});
     for (const stream of [child.stdout, child.stderr]) stream?.on('data', chunk => { diagnostics = (diagnostics + String(chunk)).slice(-16000); });

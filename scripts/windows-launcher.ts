@@ -51,7 +51,7 @@ try {
   if (!installOnly && !existsSync(configuration)) await run([cli, 'init']);
   if (!installOnly && !stopping) {
     console.log('启动后请打开日志中的本机网页地址；按 Ctrl+C 正常退出。');
-    await run([cli, 'start'], true);
+    await run([cli, 'serve'], true);
   }
 } catch (error: unknown) {
   console.error(error instanceof Error ? error.message : '启动失败，请检查日志。');

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { acquireFrameworkProcessLease } from '../src/host/framework-process-lease.ts';
 import { privatePermissions, securePermissions } from '../src/storage/file-security.ts';
 
 import { parseNativeConversationDiagnostics } from '../src/contracts/native-diagnostics.ts';
@@ -108,6 +109,8 @@ const GENERAL_HELP = `QQ Bridge Framework 命令行
   qbf-cli protocol [napcat|snowluma]
   qbf-cli extensions [list|reload <插件标识>]
   qbf-cli maintenance [--apply]
+  qbf-cli serve [--config <管理配置>] [--admin-only]
+  qbf-cli update <新包目录> [--allow-major]
   qbf-cli --version
   qbf-cli test [--suite all|fast|deadline|integration|artifacts] [--built] [--skip-build] [--shard <序号/总数>]
   qbf-cli test --browser [--target <项目>] [--with-deps]
@@ -665,6 +668,15 @@ async function doctor(configurationFilename: string, conversationId: string, out
 
 async function start(configurationFilename: string, adminOnly: boolean, output: (message: string) => void,
   bootstrapFilename?: string): Promise<void> {
+  const release = existsSync(join(PROJECT_ROOT, 'distribution.json')) && !existsSync(join(PROJECT_ROOT, '.git'))
+    ? await acquireFrameworkProcessLease(PROJECT_ROOT, 'runtime') : async () => undefined;
+  try { await startRuntime(configurationFilename, adminOnly, output, bootstrapFilename); }
+  finally { await release(); }
+}
+
+async function startRuntime(configurationFilename: string, adminOnly: boolean, output: (message: string) => void,
+  bootstrapFilename?: string): Promise<void> {
+  if (existsSync(join(PROJECT_ROOT, '.framework-update.lock'))) throw new CliOperationError('框架更新尚未完成，请使用受监督启动入口恢复或执行更新回滚。');
   const configuration = loadGatewayAdminConfiguration(configurationFilename);
   const bootstrap = await loadSelectedNativeBootstrap(configurationFilename, bootstrapFilename);
   await prepareStartupAssets();
@@ -755,6 +767,18 @@ async function prepareStartupAssets(): Promise<void> {
 }
 
 export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAULT_IO): Promise<number> {
+  if (argumentsList[0] === 'serve') {
+    try {
+      parseCliArguments(['start', ...argumentsList.slice(1)]);
+      const { superviseFramework } = await import('./framework-supervisor.ts');
+      await superviseFramework(PROJECT_ROOT, argumentsList.slice(1));
+      return 0;
+    } catch { io.stderr('受监督启动失败，请检查发行包、配置及更新恢复记录。'); return 1; }
+  }
+  if (argumentsList[0] === 'update') {
+    try { const { updateFrameworkCli } = await import('./update-framework.ts'); await updateFrameworkCli(argumentsList.slice(1), PROJECT_ROOT, io.stdout); return 0; }
+    catch (error) { io.stderr(error instanceof Error ? error.message : '更新失败'); return 1; }
+  }
   const managed = serviceArguments(argumentsList);
   if (managed) return new Promise<number>(resolvePromise => {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./service-manager' + (import.meta.url.endsWith('.js') ? '.js' : '.ts'), import.meta.url)), ...managed],

@@ -30,7 +30,9 @@ import { createNativeRuntimeRoutes, createNativeRuntimeApplicationPorts, withNat
 import { nativeApplicationService } from './native-application.ts';
 import { nativeApplicationRequiresReconciliation } from '../contracts/native-application.ts';
 import { createNativeDshRestartRoutes } from './native-dsh-restart.ts';
-import { createFrameworkReleaseRoutes, createFrameworkReleaseService } from './framework-release.ts';
+import { createFrameworkUpdateRoutes } from './framework-update.ts';
+import { frameworkInstallationRoot, createFrameworkReleaseRoutes, createFrameworkReleaseService } from './framework-release.ts';
+import { readFrameworkUpdateState } from '../host/framework-update-state.ts';
 import { createAutomaticChatRecovery } from './automatic-chat-recovery.ts';
 import { parseChatRepairSnapshot } from '../contracts/chat-repair.ts';
 import { createChatRepairRoutes } from './chat-repair.ts';
@@ -702,6 +704,10 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
   const repairStorage = createChatRepairStorage(directory);
   const maintenanceGuard = (route: AdminRoute): AdminRoute => ({ ...route, async handle(request) {
     if (route.method === 'POST') {
+      if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') {
+        const update = await readFrameworkUpdateState(frameworkInstallationRoot());
+        if (update && ['ready', 'applying', 'verifying'].includes(update.state)) throw new AdminRequestError(409, 'framework_update_busy');
+      }
       for (const repair of (await repairStorage.read()).value.records) {
         if ((await projectChatRepair(repair)).state !== 'running') continue;
         if (route.pathname === '/api/chat/application' && repair.applicationId && request.body?.operationId === repair.applicationId) continue;
@@ -716,6 +722,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
   } });
   const routes: AdminRoute[] = [
     healthRoute,
+    ...createFrameworkUpdateRoutes(FRAMEWORK_VERSION).map(maintenanceGuard),
     ...createFrameworkReleaseRoutes(createFrameworkReleaseService({ version: FRAMEWORK_VERSION })),
     ...createNativeAccountRoutes(accounts).map(maintenanceGuard),
     ...createNativeAccountDispatchRoutes({ accounts, async bundle(id) {
@@ -764,6 +771,10 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     enabled: process.env.QQ_BRIDGE_FRAMEWORK_AUTO_RECOVERY !== '0',
     async observe(signal) {
       const blocked = (reason: string) => ({ eligible: false, fault: false, reason });
+      if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') {
+        const update = await readFrameworkUpdateState(frameworkInstallationRoot());
+        if (update && !['completed', 'failed', 'rolled-back'].includes(update.state)) return blocked('framework_update_busy');
+      }
       const intent = await repository.readRunningIntent();
       if (!intent.value.desiredRunning) return blocked('explicitly_stopped');
       const registered = await accounts.read();

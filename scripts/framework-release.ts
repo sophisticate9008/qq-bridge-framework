@@ -1,3 +1,4 @@
+import { isDistributionPath, type DistributionFile } from '../src/contracts/framework-distribution.ts';
 import { htmlRendererBuildHash } from './html-renderer-component.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -99,8 +100,24 @@ export async function packFrameworkRelease(options: {
     const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const sourceModified = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim() !== '';
     assert(!sourceModified, 'Commit the reviewed public sources before packing a framework release');
+    const inventory: DistributionFile[] = [];
+    async function inventoryDirectory(relative = ''): Promise<void> {
+      for (const entry of await readdir(join(stage, relative), { withFileTypes: true })) {
+        const path = relative ? `${relative}/${entry.name}` : entry.name;
+        assert(isDistributionPath(path), `Invalid managed update path: ${path}`);
+        if (entry.isDirectory()) await inventoryDirectory(path);
+        else {
+          assert(entry.isFile() && !entry.isSymbolicLink());
+          const metadata = await lstat(join(stage, path));
+          inventory.push({ path, size: metadata.size, executable: Boolean(metadata.mode & 0o111),
+            sha256: createHash('sha256').update(await readFile(join(stage, path))).digest('hex') });
+        }
+      }
+    }
+    await inventoryDirectory();
     await writeFile(join(stage, 'distribution.json'), JSON.stringify({ schema: 1, kind: 'framework-runtime',
-      version: options.version, sourceCommit, sourceModified, components, publicFiles: count }, null, 2) + '\n');
+      version: options.version, sourceCommit, sourceModified, components, publicFiles: count,
+      compatibility: { data: 1, overwrite: 1 }, files: inventory.sort((a, b) => a.path.localeCompare(b.path)) }, null, 2) + '\n');
     const filename = join(options.destination, `${name}.tar.gz`);
     execFileSync('tar', ['-czf', filename, '-C', temporary, name], { stdio: 'pipe' });
     execFileSync('zip', ['-q', '-r', join(options.destination, `${name}-windows-x64.zip`), name], { cwd: temporary, stdio: 'pipe' });
