@@ -388,7 +388,9 @@ async function supervise(config: Configuration, id: string): Promise<void> {
   const service = component(config, id, true);
   const environment = { ...process.env, ...service.env };
   delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
-  const child = spawn(service.command, service.args, { cwd: service.cwd, env: environment, shell: false, stdio: 'inherit', detached: true });
+  let child: ReturnType<typeof spawn>;
+  const crashes: number[] = [];
+  let restartTimer: ReturnType<typeof setTimeout> | undefined;
   let stopping = false;
   let completed = false;
   let exitCode = 1;
@@ -402,16 +404,27 @@ async function supervise(config: Configuration, id: string): Promise<void> {
     completed = true;
     if (timer) clearTimeout(timer);
     forward('SIGKILL');
-    process.exitCode = exitCode;
+    const now = Date.now();
+    while (crashes.length && crashes[0] < now - 900_000) crashes.shift();
+    if (!stopping && exitCode !== 0 && ['framework-admin', 'framework-gateway'].includes(id) && crashes.length < 5) {
+      crashes.push(now);
+      console.error(`${id} 异常退出，将自动恢复（本轮 ${crashes.length}/5）。`);
+      restartTimer = setTimeout(launch, Math.min(30_000, 1000 * 2 ** (crashes.length - 1)));
+    } else process.exitCode = exitCode;
   };
   const stoppingNow = (signalValue: NodeJS.Signals): void => {
     if (stopping) return;
     stopping = true;
+    if (restartTimer) clearTimeout(restartTimer);
     // Let wrappers forward to their own child; reserve group signals for force cleanup.
     child.kill(signalValue);
     timer = setTimeout(cleanup, 20000);
   };
   for (const signalValue of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signalValue, () => stoppingNow(signalValue));
+  function launch(): void {
+    if (stopping) return;
+    completed = false; exitCode = 1;
+    child = spawn(service.command, service.args, { cwd: service.cwd, env: environment, shell: false, stdio: 'inherit', detached: true });
   child.on('error', () => { console.error(`${id} 子进程启动失败。`); exitCode = 1; cleanup(); });
   child.on('exit', (code, signalValue) => {
     exitCode = code ?? (signalValue ? 1 : 0);
@@ -419,6 +432,8 @@ async function supervise(config: Configuration, id: string): Promise<void> {
     if (timer) clearTimeout(timer);
     timer = setTimeout(cleanup, 500);
   });
+  }
+  launch();
 }
 
 function help(): void {
