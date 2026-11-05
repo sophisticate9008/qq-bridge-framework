@@ -140,6 +140,7 @@ export function createNativeActivity({ now = Date.now }: { readonly now?: () => 
 }
 
 const activityMapping: Record<keyof typeof descriptions, readonly [string,string]> = {
+    correlation_restored:['connection','connected'],
     html_queued:['message','queued'],html_failed:['message','rejected'],
     markdown_queued:['message','queued'],markdown_failed:['message','rejected'],
     tool_projection_failed:['execution','failed'],

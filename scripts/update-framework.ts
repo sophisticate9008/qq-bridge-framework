@@ -10,15 +10,18 @@ import { isRecord } from '../src/contracts/values.ts';
 import { applyFrameworkUpdate, rollbackFrameworkUpdate, verifyFrameworkDistribution } from '../src/host/framework-updater.ts';
 import { loadGatewayAdminConfiguration } from '../src/admin/gateway.ts';
 import { loadOneBotGatewayConfiguration } from '../src/host/onebot-gateway.ts';
+import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
 
 async function assertStopped(root: string): Promise<void> {
-  for (const relative of ['runtime/admin/config.json', 'runtime/live/framework-admin.json']) {
-    if (!existsSync(join(root, relative))) continue;
-    const config = loadGatewayAdminConfiguration(join(root, relative));
+  for (const filename of new Set([resolveRuntimeConfiguration(root, undefined, process.env, root),
+    join(root, 'runtime/admin/config.json'), join(root, 'runtime/live/framework-admin.json')])) {
+    if (!existsSync(filename)) continue;
+    const config = loadGatewayAdminConfiguration(filename);
     const gateway = loadOneBotGatewayConfiguration(config.gatewayConfiguration);
-    for (const port of [config.port, gateway.port]) {
+    for (const endpoint of [{ host: config.host, port: config.port }, { host: '127.0.0.1', port: gateway.port }]) {
       const closed = await new Promise<boolean>(resolve => {
-        const socket = connect({ host: '127.0.0.1', port });
+        const host = endpoint.host === '0.0.0.0' ? '127.0.0.1' : endpoint.host === '::' ? '::1' : endpoint.host;
+        const socket = connect({ host, port: endpoint.port });
         socket.setTimeout(2000);
         socket.once('connect', () => { socket.destroy(); resolve(false); });
         socket.once('timeout', () => { socket.destroy(); resolve(false); });
