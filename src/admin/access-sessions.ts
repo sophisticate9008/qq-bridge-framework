@@ -69,10 +69,12 @@ export function createAccessSessionStore({
         || !('administrator' in value) || value.administrator !== null && (typeof value.administrator !== 'string' || !/^[a-f0-9]{64}$/.test(value.administrator))
         || !('sessions' in value) || !Array.isArray(value.sessions) || value.sessions.length > MAX_ACCESS_SESSIONS) throw new Error('Invalid access session storage')
       administratorTokenHash = value.administrator === null ? null : Buffer.from(value.administrator, 'hex')
+      const seenHashes = new Set<string>()
       for (const entry of value.sessions) {
         if (!entry || typeof entry !== 'object' || !('hash' in entry) || typeof entry.hash !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(entry.hash)
           || !('expiresAt' in entry) || typeof entry.expiresAt !== 'number' || !Number.isSafeInteger(entry.expiresAt) || entry.expiresAt < 0
-          || sessions.has(entry.hash)) throw new Error('Invalid access session storage')
+          || seenHashes.has(entry.hash)) throw new Error('Invalid access session storage')
+        seenHashes.add(entry.hash)
         if (entry.expiresAt > clock()) sessions.set(entry.hash, { expiresAt: entry.expiresAt })
       }
     } catch (error) {

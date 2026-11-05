@@ -48,12 +48,15 @@ test('persistent sessions reject symlink storage and duplicate cookie hashes', {
     symlinkSync(target, setup.filename)
     assert.throws(() => createAccessSessionStore({ filename: setup.filename, ttlMs: 100 }))
     rmSync(setup.filename)
-    const options = { filename: setup.filename, ttlMs: 100 }
+    let now = 1000
+    const options = { filename: setup.filename, ttlMs: 100, clock: () => now }
     createAccessSessionStore(options).issue(administrator)
     const value: unknown = JSON.parse(readFileSync(setup.filename, 'utf8'))
     assert(value !== null && typeof value === 'object' && 'sessions' in value && Array.isArray(value.sessions))
     value.sessions.push(value.sessions[0])
     writeFileSync(setup.filename, JSON.stringify(value))
     assert.throws(() => createAccessSessionStore(options))
+    now += 101
+    assert.throws(() => createAccessSessionStore(options), 'Expired duplicate hashes remain invalid storage')
   } finally { setup.dispose() }
 })
