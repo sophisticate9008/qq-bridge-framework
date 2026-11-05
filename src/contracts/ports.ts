@@ -65,6 +65,8 @@ export interface DurableStore {
   stats?(options?: DurableStoreStatsOptions): DurableStoreStats;
   createIndex?(definition: DurableIndexDefinition): void;
   lookup?(query: DurableLookup): readonly StoredRecord[];
+  /** Bounded equality page; reading never creates an index. */
+  listByField?(query: DurableLookup): readonly StoredRecord[];
   /** Descending numeric field + key pagination, independent of later record updates. */
   listByNumber?(query: DurableNumberPage): readonly StoredRecord[];
   close(): void;

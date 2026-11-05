@@ -167,12 +167,13 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
   const follows = new Map<string, { binding: SessionBinding; controller: AbortController; dispose?: () => void | Promise<void> }>();
   const retiringFollows = new Map<string, { binding: SessionBinding; controller: AbortController; dispose?: () => void | Promise<void> }>();
   const unhealthyFollows = new Set<string>();
-  const followFailures = new Map<string, { code: string; attempts: number; nextAt: number }>();
+  const followFailures = new Map<string, { bindingKey: string; code: string; attempts: number; nextAt: number }>();
   let followRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
   let followRecovery: Promise<void> | undefined;
   const following = new Map<string, Promise<void>>();
   const followUsers = new Map<string, number>();
   let followAdmission = Promise.resolve();
+  const followReservations = new Set<string>();
   const pending = new Map<string, { fingerprint: string; promise: Promise<InboundReceipt> }>();
   let timer: ReturnType<typeof setInterval> | undefined;
   let started: Promise<void> | null = null;
@@ -295,7 +296,11 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
         request.signal.throwIfAborted();
         const binding = await sessions.resolve(conversationId, request.signal);
         request.signal.throwIfAborted();
-        await ensureFollow(binding, request.signal);
+        try { await ensureFollow(binding, request.signal); }
+        catch (error) {
+          // Session creation may itself be uncertain; only the failed listener is known to precede prompt submission.
+          throw new FrameworkError('AGENT_NOT_SUBMITTED', 'Reply listening failed before model submission.');
+        }
         return binding;
       });
       try {
@@ -502,7 +507,7 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
       assert(digest(object(record.value).payload) === digest(payload), 'EVENT_CONFLICT', 'A repeated agent event has different data.');
       scheduleAgentRecord(record);
       void tasks.runDue().catch(fault);
-    } catch (error) { fault(error); }
+    } catch (error) { fault(error); throw error; }
   }
 
   function ensureFollow(binding: SessionBinding, signal = controller.signal): Promise<void> {
@@ -510,6 +515,10 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
     const key = digest(binding);
     const opening = following.get(key);
     if (opening) return opening;
+    const recordedFailure = followFailures.get(binding.conversationId);
+    const failure = recordedFailure?.bindingKey === key ? recordedFailure : undefined;
+    if (recordedFailure && !failure) followFailures.delete(binding.conversationId);
+    assert(failure?.nextAt !== Infinity, failure?.code ?? 'AGENT_FOLLOW_UNAVAILABLE', 'The listener requires an explicit compatibility repair.');
     const previous = follows.get(binding.conversationId) ?? retiringFollows.get(binding.conversationId);
     if (previous?.binding.generation === binding.generation && !previous.controller.signal.aborted) {
       return following.get(key) ?? Promise.resolve();
@@ -536,7 +545,8 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
               unhealthyFollows.add(binding.conversationId);
               const code = typeof event.data.code === 'string' && /^(?:DSH|AGENT)_FOLLOW_[A-Z_]{1,64}$/.test(event.data.code)
                 ? event.data.code : 'AGENT_FOLLOW_TERMINATED';
-              followFailures.set(binding.conversationId, { code, attempts: 0, nextAt: Date.now() + 1000 });
+              followFailures.set(binding.conversationId, { bindingKey: key, code, attempts: 0, nextAt: nextFollowAttempt(code, 0) });
+              recordFollowState(binding, code);
               followController.abort();
               fault(new FrameworkError('AGENT_FOLLOW_TERMINATED', 'The agent event stream ended.'));
               scheduleFollowRecovery();
@@ -553,9 +563,17 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
         }
         unhealthyFollows.delete(binding.conversationId);
         followFailures.delete(binding.conversationId);
+        recordFollowState(binding, null);
         if (retiringFollows.get(binding.conversationId) === previous) retiringFollows.delete(binding.conversationId);
       } catch (error) {
         if (follows.get(binding.conversationId) === entry) follows.delete(binding.conversationId);
+        if (!parent.aborted) {
+          const code = errorCode(error, 'AGENT_FOLLOW_UNAVAILABLE');
+          unhealthyFollows.add(binding.conversationId);
+          followFailures.set(binding.conversationId, { bindingKey: key, code, attempts: 0, nextAt: nextFollowAttempt(code, 0) });
+          recordFollowState(binding, code);
+          scheduleFollowRecovery();
+        }
         throw error;
       } finally { parent.removeEventListener('abort', abort); }
     })();
@@ -565,22 +583,36 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
     return work;
   }
 
+  function recordFollowState(binding: SessionBinding, code: string | null): void {
+    const key = digest(binding.conversationId);
+    const prior = store.read('native-chat.listener-state', key);
+    store.write('native-chat.listener-state', key, json({ schema: 1, binding, errorCode: code, at: clock() }),
+      { expectedRevision: prior?.revision ?? null });
+  }
+
+  function nextFollowAttempt(code: string, attempts: number): number {
+    return ['DSH_FOLLOW_FRAME_TOO_LARGE', 'DSH_FOLLOW_EVENT_TOO_LARGE', 'DSH_FOLLOW_CURSOR_CONFLICT',
+      'DSH_FOLLOW_CURSOR_INVALID', 'DSH_FOLLOW_INVALID_FRAME', 'DSH_FOLLOW_REPLAY_LIMIT', 'DSH_FOLLOW_REPLAY_UNAVAILABLE'].includes(code)
+      ? Infinity : Date.now() + Math.min(30_000, 1000 * 2 ** attempts);
+  }
+
   function scheduleFollowRecovery(): void {
-    if (controller.signal.aborted || followRecoveryTimer || followRecovery || unhealthyFollows.size === 0) return;
+    if (controller.signal.aborted || followRecoveryTimer || followRecovery || unhealthyFollows.size === 0
+      || ![...followFailures.values()].some(value => Number.isFinite(value.nextAt))) return;
     followRecoveryTimer = setTimeout(() => {
       followRecoveryTimer = undefined;
       followRecovery = (async () => {
         const due = [...unhealthyFollows].filter(id => (followFailures.get(id)?.nextAt ?? 0) <= Date.now()).slice(0, 4);
-        for (const conversationId of due) {
+        await Promise.all(due.map(async conversationId => {
           if (controller.signal.aborted) return;
           const failure = followFailures.get(conversationId);
-          if (failure && failure.nextAt > Date.now()) continue;
+          if (failure && failure.nextAt > Date.now()) return;
           const binding = sessions.get(conversationId);
           // A full pool may retire idle failed listeners. Otherwise reconnect
           // existing subscriptions, including idle ones, without a new prompt.
           if (!binding || followPool && follows.size + retiringFollows.size >= followPool.maxSessions
             && followPool.isIdle(binding) === true && !followUsers.has(conversationId)) {
-            unhealthyFollows.delete(conversationId); followFailures.delete(conversationId); continue;
+            unhealthyFollows.delete(conversationId); followFailures.delete(conversationId); return;
           }
           try {
             await admitFollow(conversationId, controller.signal, () => ensureFollow(binding));
@@ -589,10 +621,10 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
             if (controller.signal.aborted) return;
             const attempts = Math.min(16, (failure?.attempts ?? 0) + 1);
             const code = errorCode(error, 'AGENT_FOLLOW_UNAVAILABLE');
-            followFailures.set(conversationId, { code: /^(?:DSH|AGENT)_[A-Z_]{1,80}$/.test(code) ? code : 'AGENT_FOLLOW_UNAVAILABLE',
-              attempts, nextAt: Date.now() + Math.min(30_000, 1000 * 2 ** attempts) });
+            followFailures.set(conversationId, { bindingKey: digest(binding), code: /^(?:DSH|AGENT)_[A-Z_]{1,80}$/.test(code) ? code : 'AGENT_FOLLOW_UNAVAILABLE',
+              attempts, nextAt: nextFollowAttempt(code, attempts) });
           }
-        }
+        }));
       })().catch(fault).finally(() => { followRecovery = undefined; scheduleFollowRecovery(); });
     }, 1000);
     followRecoveryTimer.unref();
@@ -609,8 +641,10 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
     const work = followAdmission.then(async () => {
       signal.throwIfAborted();
       const previous = follows.get(conversationId);
+      const occupied = () => follows.size + retiringFollows.size + [...followReservations]
+        .filter(id => !follows.has(id) && !retiringFollows.has(id)).length;
       if (!previous || previous.controller.signal.aborted) {
-        if (follows.size + retiringFollows.size >= followPool.maxSessions) {
+        if (!followReservations.has(conversationId) && occupied() >= followPool.maxSessions) {
           const idle = [...follows.values()].find(entry => !followUsers.has(entry.binding.conversationId)
             && entry.dispose && !entry.controller.signal.aborted && followPool.isIdle(entry.binding) === true);
           assert(idle, 'AGENT_FOLLOW_BACKPRESSURE', 'All agent follow slots are busy.');
@@ -624,19 +658,25 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
           if (retiringFollows.get(idleId) === idle) retiringFollows.delete(idleId);
         }
         signal.throwIfAborted();
-        assert(follows.size + retiringFollows.size < followPool.maxSessions,
+        assert(followReservations.has(conversationId) || occupied() < followPool.maxSessions,
           'AGENT_FOLLOW_BACKPRESSURE', 'All agent follow slots are busy.');
       }
       followUsers.set(conversationId, (followUsers.get(conversationId) ?? 0) + 1);
-      try {
-        const result = await operation();
-        const current = follows.get(conversationId);
-        if (current) { follows.delete(conversationId); follows.set(conversationId, current); }
-        return result;
-      } catch (error) { releaseFollowUser(conversationId); throw error; }
+      followReservations.add(conversationId);
+      // Begin under the slot lock, but release it while network handshakes run.
+      const result = Promise.resolve().then(operation);
+      return { result };
     });
     followAdmission = work.then(() => undefined, () => undefined);
-    return work;
+    return work.then(async ({ result }) => {
+      try {
+        const value = await result;
+        const current = follows.get(conversationId);
+        if (current) { follows.delete(conversationId); follows.set(conversationId, current); }
+        return value;
+      } catch (error) { releaseFollowUser(conversationId); throw error; }
+      finally { followReservations.delete(conversationId); }
+    });
   }
 
   return Object.freeze({
@@ -644,6 +684,7 @@ export function createBridgeHost({ store, agent: sourceAgent, transport: sourceT
     /** Reattach an existing binding; no session creation, prompt, tool execution or history replay. */
     async connectAgentListener(binding: SessionBinding, signal: AbortSignal): Promise<void> {
       assert(digest(sessions.get(binding.conversationId)) === digest(binding), 'SESSION_STALE', 'The session binding changed.');
+      followFailures.delete(binding.conversationId);
       await admitFollow(binding.conversationId, signal, () => ensureFollow(binding, signal));
       releaseFollowUser(binding.conversationId);
     },

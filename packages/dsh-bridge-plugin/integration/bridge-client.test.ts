@@ -64,6 +64,7 @@ interface FrameworkClient {
   }
   createSession(request: { conversationId: string; requestId: string; signal: AbortSignal }): Promise<{ ok: true; value: { sessionId: string } } | { ok: false; error: { code: string } }>
   prompt(request: { sessionId: string; requestId: string; mode: 'queue'; content: { type: 'text'; text: string }[]; signal: AbortSignal }): Promise<{ ok: boolean }>
+  follow(request: { sessionId: string; signal: AbortSignal; onEvent(event: unknown): void }): Promise<() => Promise<void>>
   close(): Promise<void>
 }
 
@@ -742,6 +743,27 @@ test('official plugin entry and actual framework HTTP client isolate claims, per
         await assert.rejects(client.work.readAsset({...address,kind:'file',attachmentId:'not-in-result'},signal))
         await assert.rejects(client.work.readAsset({...address,generation:6,kind:'file',attachmentId:'sdk-file'},signal))
       } finally { adapter.workOutput = false; adapter.workHold = false; adapter.workMedia = false; unregister() }
+    })
+    await context.test('official SDK event carrier opens without historical payload and resumes an acknowledged cursor without model calls', async () => {
+      const created = await client.createSession({ conversationId: 'group:event-carrier', requestId: 'event-carrier-create', signal })
+      assert(created.ok)
+      const eventAgent = ctx.agents.get(SessionId(created.value.sessionId))
+      assert(eventAgent)
+      let cursor: number | undefined
+      const observed: unknown[] = []
+      const eventClient = factory({ endpoint, auth, preferSessionEvents: true,
+        followCursors: { load() { return cursor }, save(_id: string, sequence: number) { cursor = sequence } } }) as FrameworkClient
+      clients.push(eventClient)
+      const initialStreams = adapter.streams
+      const stop = await eventClient.follow({ sessionId: eventAgent.id, signal, onEvent(event) { observed.push(event) } })
+      assert.equal(cursor, eventAgent.session.seq - 1)
+      await stop()
+      eventAgent.session.append('model/selection', { provider: 'safe-fixture', model: 'safe-model' })
+      const resumed = await eventClient.follow({ sessionId: eventAgent.id, signal, onEvent(event) { observed.push(event) } })
+      assert.equal(cursor, eventAgent.session.seq - 1)
+      assert(observed.some(frame => object(frame).replayed === true))
+      assert.equal(adapter.streams, initialStreams)
+      await resumed()
     })
   } finally {
     await Promise.all(clients.map(client => client.close()))

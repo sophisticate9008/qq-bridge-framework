@@ -63,6 +63,7 @@ import { isAbsolute, join } from 'node:path'
 
 import { createDshAdapter } from '../adapters/dsh.ts'
 import { createDshJsonRpcPort, type DshPresetBinding } from '../adapters/dsh-jsonrpc.ts'
+import { createNativeDshCursors } from './native-dsh-cursors.ts'
 import { createOneBotActionPort, ONEBOT_READ_ACTIONS } from '../adapters/onebot-actions.ts'
 import { createOneBotMediaReader } from '../adapters/onebot-media.ts'
 import type { NativeMediaTranscriber } from '../contracts/native-media.ts'
@@ -994,6 +995,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         dsh = createDshJsonRpcPort({ endpoint: configuration.adapters.dshAgent.endpoint,
           ...createDshAuthenticationOptions(configuration.adapters.dshAgent), sessionDefinition: definition,
           presetBindings: selected.deployment.presetBindings, timeoutMs: 5_000,
+          preferSessionEvents: true, followCursors: createNativeDshCursors(store, configuration.adapters.dshAgent.endpoint),
           async resolvePromptImage(request) {
             const binding = bindingForSession(request.sessionId)
             const registry = media

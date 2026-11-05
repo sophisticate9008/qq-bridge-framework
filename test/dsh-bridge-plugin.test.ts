@@ -5,15 +5,14 @@ import { createDshJsonRpcPort } from '../src/adapters/dsh-jsonrpc.ts'
 import { BRIDGE_PLUGIN_PROTOCOL, RECEIPT_LIMITS, createClaimReceiptJournal } from '../packages/dsh-bridge-plugin/src/receipts.ts'
 import { createDshBridgePluginPort, type ClaimReceiptQuery } from '../src/adapters/dsh-tool-scope.ts'
 
-test('bridge descriptions accept the current generation and reject earlier or unrecognized versions', async () => {
+test('bridge compatibility uses the protocol independently of component build versions', async () => {
   const journal = createClaimReceiptJournal()
   for (const pluginVersion of ['0.1.0', '0.2.0', '1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.3.1', '1.4.0', '1.4.1', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.6.0', '1.6.1', '1.7.0', '1.7.1', '1.7.2', '1.7.3', '1.8.0', '1.9.0', '2.0.0']) {
     const port = createDshBridgePluginPort(async () => ({ protocol: BRIDGE_PLUGIN_PROTOCOL,
       issuerEpoch: journal.issuerEpoch, pluginVersion, sdkVersion: '0.2.1-rc.2',
       authentication: 'dsh-owner-peer', durableReceipts: false, claimMeaning: 'inbox-claimed-not-completed',
       externalToolAuthorizationVerified: false, retention: RECEIPT_LIMITS }))
-    if (!['1.4.1', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.6.0', '1.6.1', '1.7.0', '1.7.1', '1.7.2', '1.7.3', '1.8.0', '1.9.0'].includes(pluginVersion)) await assert.rejects(port.describe(new AbortController().signal), /DSH_PLUGIN_INVALID_RESPONSE/)
-    else assert.equal((await port.describe(new AbortController().signal)).pluginVersion, pluginVersion)
+    assert.equal((await port.describe(new AbortController().signal)).pluginVersion, pluginVersion)
   }
 })
 

@@ -3,7 +3,7 @@ import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { validIdentifier } from './receipts.js'
-import { migrationDigest } from './migration-journal.js'
+import { executionCheckpoint, executionRequestIndex } from './execution-checkpoint.js'
 import { DSH_EXECUTION_EVIDENCE_PROTOCOL, type DshExecutionEvidence, type DshExecutionEvidenceRequest } from './execution-evidence-protocol.js'
 
 /** Positive evidence only: a missing request never proves that an uncertain submission did not execute. */
@@ -26,26 +26,13 @@ export async function inspectSdkExecution(ctx: Context, request: DshExecutionEvi
     const observation = await query.observeSession(sessionId, { signal, projectionMode: 'none' })
     try {
       const events = observation.events
-      if (observation.header.id !== sessionId || events.length > 100000 || Buffer.byteLength(JSON.stringify(events)) > 16777216)
+      if (observation.header.id !== sessionId)
         return unavailable('execution_checkpoint_unsupported')
-      let activeTurn: number | null = null
-      let match: { messageId: string; turn: number; sequence: number } | undefined
-      let terminal: { sequence: number; outcome: 'completed' | 'failed' | 'cancelled' } | undefined
-      for (const event of events) {
-        if (event.type === 'turn/start') activeTurn = event.data.turn
-        if (event.type === 'user/message' && event.data.source?.kind === 'user' && 'rpcId' in event.data.source && event.data.source.rpcId === request.requestId) {
-          if (match || activeTurn === null) return unavailable('execution_request_ambiguous')
-          match = { messageId: event.data.id, turn: activeTurn, sequence: Number(event.seq) }
-        }
-        if (event.type === 'turn/end') {
-          if (match?.turn === event.data.turn) {
-            const kind = event.data.reason.kind
-            if (!['completed', 'error', 'aborted'].includes(kind)) return unavailable('execution_terminal_unverifiable')
-            terminal = { sequence: Number(event.seq), outcome: kind === 'completed' ? 'completed' : kind === 'aborted' ? 'cancelled' : 'failed' }
-          }
-          activeTurn = null
-        }
-      }
+      const observedHash = await executionCheckpoint({ ...observation.header, delegationDepth: observation.header.delegationDepth ?? 0 }, events, signal)
+      const match = await executionRequestIndex(ctx, observedHash, events, request.requestId, signal)
+      if (match?.ambiguous) return unavailable('execution_request_ambiguous')
+      if (match?.terminalUnverifiable) return unavailable('execution_terminal_unverifiable')
+      const terminal = match?.terminal
       const live = ctx.agents.get(sessionId)
       const quiescent = (!live || live.status === 'idle') && (!live || live.inbox.nextTurn.length === 0 && live.inbox.nextStep.length === 0)
       if (!match) return { ...base, state: 'not-observed', quiescent, missingReasons: ['execution_request_not_observed'] }
@@ -59,13 +46,13 @@ export async function inspectSdkExecution(ctx: Context, request: DshExecutionEvi
         const checkpoint = await durable.read()
         signal.throwIfAborted()
         // The JSONL SDK persists an omitted live delegationDepth as zero. Compare that documented storage form.
-        if (durable.header.id !== sessionId || migrationDigest({ header: durable.header, events: checkpoint.events })
-          !== migrationDigest({ header: { ...observation.header, delegationDepth: observation.header.delegationDepth ?? 0 }, events })) return unavailable('execution_checkpoint_not_confirmed', partial)
+        const checkpointHash = await executionCheckpoint(durable.header, checkpoint.events, signal)
+        if (durable.header.id !== sessionId || checkpointHash !== observedHash) return unavailable('execution_checkpoint_not_confirmed', partial)
         const current = ctx.agents.get(sessionId)
         if (current !== live || current && (current.status !== 'idle' || current.inbox.nextTurn.length || current.inbox.nextStep.length
           || current.session.seq - 1 !== observation.cursor)) return unavailable('execution_observation_changed', partial)
         return { ...base, ...partial, state: 'settled', outcome: terminal.outcome, terminalSequence: terminal.sequence,
-          checkpointSequence: Number(observation.cursor), checkpointHash: migrationDigest({ header: durable.header, events: checkpoint.events }), missingReasons: [] }
+          checkpointSequence: Number(observation.cursor), checkpointHash, missingReasons: [] }
       } finally { await durable.close() }
     } finally { observation[Symbol.dispose]() }
   } catch {

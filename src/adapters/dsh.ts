@@ -37,6 +37,7 @@ export interface DshCancelRequest {
 }
 
 export interface DshSessionEvent {
+  readonly replayed?: boolean
   type: 'session/event'
   sessionId: string
   event: {
@@ -614,6 +615,11 @@ export function createDshAdapter(client: DshClientPort, observations: {
           signal: request.signal,
           async onEvent(frame) {
             if (frame.sessionId !== request.sessionId) return
+            if (frame.type === 'session/event' && frame.replayed) {
+              const event = normalizeDshEvent(frame)
+              if (event) await request.onEvent(snapshot({ ...event, data: { ...event.data, replayed: true } }))
+              return
+            }
             let outputFailure: AgentEvent | undefined
             if (frame.type === 'session/event' && observations.onObservation) {
               try {

@@ -163,6 +163,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
     'INVALID_NATIVE_WORK_OPTIONS', 'Work recovery must have a bounded record limit.')
   const childIds = new Map<string, string>()
   if (options.store.createIndex && options.store.lookup) options.store.createIndex({ namespace, field: 'childId', unique: true })
+  options.store.createIndex?.({ namespace, field: 'conversationId' })
   let recovered = 0
   let after: string | undefined
   for (;;) {

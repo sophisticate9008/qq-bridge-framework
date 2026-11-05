@@ -36,12 +36,13 @@ export function createFrameworkToolPump(options: {
       // Empty channels wait on the DSH side and wake as soon as a tool arrives.
       // While executing, retain the short observation interval for withdrawal/expiry.
       // Older bridge plugins ignore waitMs and retain their original polling behavior.
-      const pending = await options.port.poll({ issuerEpoch: options.issuerEpoch,
-        waitMs: active.size === 0 ? 1000 : 0 }, lifetime.signal)
+      const request = { issuerEpoch: options.issuerEpoch, waitMs: active.size === 0 ? 1000 : 0 }
+      const page = options.port.pollPage ? await options.port.pollPage(request, lifetime.signal) : null
+      const pending = page?.calls ?? await options.port.poll(request, lifetime.signal)
       if (lifetime.signal.aborted) return
       if (state === 'recovering') options.onRecovered?.()
       state = 'running'; lastError = null; retryDelay = interval
-      const tickets = new Set(pending.map(entry => entry.ticket))
+      const tickets = new Set(page?.pendingTickets ?? pending.map(entry => entry.ticket))
       for (const [ticket, entry] of active) if (!tickets.has(ticket)) entry.controller.abort()
       // Settled tickets absent from the authoritative pending page no longer need
       // channel retention. The registry and SDK keep their own call idempotency.

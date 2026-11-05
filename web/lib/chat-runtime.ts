@@ -159,6 +159,11 @@ export function chatRuntimeLastError(code: string, status: ChatRuntimeStatus | n
     return '最近记录过会话回复监听中断；当前是否恢复请查看聊天运行状态。';
   }
   const messages: Readonly<Record<string, string>> = {
+    DSH_FOLLOW_FRAME_TOO_LARGE: 'DSH 回复监听收到的数据包超过接收上限；请核对配套桥接插件版本与逐会话诊断。',
+    DSH_FOLLOW_EVENT_TOO_LARGE: '单条 DSH 事件超过有界传输容量；原执行结果需要核对，历史与会话保持保留。',
+    DSH_FOLLOW_CURSOR_CONFLICT: '保存的监听位置与 DSH 会话不一致；已停止衔接，请核对原会话记录。',
+    DSH_FOLLOW_REPLAY_LIMIT: '断线期间的事件超过单次补读范围；请核对原执行证据，原请求不会重复提交。',
+    AGENT_NOT_SUBMITTED: '回复监听建立失败，本轮尚未提交模型；请查看该会话的具体监听原因。',
     DSH_TIMEOUT: '最近有 DSH 通信请求超时；请按当前链路诊断核对连接，原请求不会自动重发。',
     DSH_TRANSPORT_UNKNOWN: '最近有 DSH 网络请求未能确认结果；请按当前链路诊断核对连接和原执行。',
     TOOL_CHANNEL_UNKNOWN: '框架工具通道结果尚未确认；请查看对应执行记录，DSH 服务状态单独显示。',

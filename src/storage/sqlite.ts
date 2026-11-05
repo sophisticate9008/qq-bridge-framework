@@ -10,6 +10,7 @@ import { FrameworkError, isRecord, snapshot } from '../core/values.ts';
 import { openReadonlySqliteStore, validateExistingSqliteSchema } from './sqlite-readonly.ts';
 import type { DurableCasMutation, DurableIndexDefinition, DurableLookup, DurableNumberPage, DurableStore, DurableStoreStats, DurableStoreStatsOptions, StoredRecord, WriteOptions } from '../contracts/ports.ts';
 import { readNumberPage } from './sqlite-number-page.ts';
+import { readFieldPage } from './sqlite-field-page.ts';
 
 const DEFAULT_MAX_RECORDS = 100_000;
 const DEFAULT_MAX_VALUE_BYTES = 1_048_576;
@@ -697,5 +698,10 @@ export function createSqliteStore(options: SqliteStoreOptions): SqliteStore {
     try { return Object.freeze(readNumberPage(database, query, now(), true).map(decodeRecord)); }
     catch (error) { redact(error); }
   }
-  return { read, write, delete: deleteRecord, list, changeToken, listByNumber, compareAndSetBatch, purgeExpired, stats, createIndex, lookup, maintenancePage, close };
+  function listByField(query: DurableLookup): readonly StoredRecord[] {
+    assertOpen();
+    try { return Object.freeze(readFieldPage(database, query, now()).map(decodeRecord)); }
+    catch (error) { redact(error); }
+  }
+  return { read, write, delete: deleteRecord, list, changeToken, listByNumber, listByField, compareAndSetBatch, purgeExpired, stats, createIndex, lookup, maintenancePage, close };
 }

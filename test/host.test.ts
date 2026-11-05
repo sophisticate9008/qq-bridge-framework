@@ -541,7 +541,8 @@ test('failed follow setup retries against the existing durable session', async (
   await host.start();
 
   const first = await host.receive(inbound('follow-fails-once'));
-  assert.equal(first.status, 'unknown');
+  assert.equal(first.status, 'rejected');
+  assert.equal(first.errorCode, 'AGENT_NOT_SUBMITTED');
   assert.equal(agent.createRequests.length, 1);
   assert.equal(agent.followRequests.length, 1);
   assert.equal(agent.submitRequests.length, 0);

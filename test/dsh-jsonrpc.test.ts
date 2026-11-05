@@ -11,6 +11,8 @@ import type { DshFollowEvent } from '../src/adapters/dsh.ts'
 import { createDshJsonRpcPort, DSH_JSONRPC_CAPABILITIES } from '../src/adapters/dsh-jsonrpc.ts'
 import type { DshJsonRpcOptions } from '../src/adapters/dsh-jsonrpc.ts'
 import type { ChatSessionDefinition } from '../src/host/chat-plans.ts'
+import { createHash } from 'node:crypto'
+import type { AgentEvent } from '../src/host/types.ts'
 
 const sessionDefinition: ChatSessionDefinition = {
   planId: 'chat', personaId: 'persona', instructions: 'System behavior only.',
@@ -127,6 +129,7 @@ async function fixture(context: TestContext, overrides: {
   connect?: (response: ServerResponse) => void
   snapshot?: Record<string, unknown> | ((input: Record<string, unknown>) => Record<string, unknown>)
   autoPong?: boolean
+  opened?: (socket: WebSocket, streamId: string) => void
 } = {}) {
   const requests: WireRequest[] = []
   const httpCookies: Array<string | undefined> = []
@@ -171,6 +174,7 @@ async function fixture(context: TestContext, overrides: {
           records: [{ type: 'event', event: { seq: 3, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'Historical, never emit.' }] } } } }],
           projections: { asOfSeq: 3, values: {} }, hasMore: true,
         } }))
+        overrides.opened?.(connection, stream.id)
       })
     })
   })
@@ -473,12 +477,75 @@ test('DSH follows a large history using a minimal snapshot and emits only new ev
   } })
   const events: DshFollowEvent[] = []
   const stop = await fake.port().follow({ sessionId: 'session-1', signal: signal(), onEvent(event) { events.push(event) } })
-  assert.deepEqual(events, [])
+  assert.equal(events.length, 0)
   fake.event(100)
   await until(() => events.length === 1)
   assert.equal(events[0]!.type, 'session/event')
   assert.deepEqual(fake.requests, [])
   await stop()
+})
+
+test('DSH bridge stream resumes persisted progress, reassembles large events and keeps historical replies private', async context => {
+  const protocol = 'qq-bridge-framework.session-events/1'
+  const send = (socket: WebSocket, id: string, value: unknown) => socket.send(JSON.stringify({ type: 'item', streamId: id, value }))
+  const chunks = (socket: WebSocket, id: string, event: { seq: number; type: string; time: number; data: Record<string, unknown> }, replayed: boolean) => {
+    const bytes = Buffer.from(JSON.stringify(event)), hash = createHash('sha256').update(bytes).digest('hex')
+    for (let offset = 0; offset < bytes.length; offset += 192 * 1024) send(socket, id, {
+      type: 'event-chunk', seq: event.seq, offset, bytes: bytes.length, hash, replayed,
+      data: bytes.subarray(offset, offset + 192 * 1024).toString('base64'),
+    })
+  }
+  const fake = await fixture(context, {
+    rpc(request, response) {
+      if (request.method !== 'bridgePlugin/describe') return false
+      response.end(JSON.stringify({ type: 'server-response', rpcId: request.rpcId, result: { ok: true, value: {
+        protocol: 'qq-bridge-framework.dsh-bridge/1', pluginVersion: '99.0.0', sdkVersion: 'future-build',
+        issuerEpoch: 'epoch', authentication: 'dsh-owner-peer', durableReceipts: false,
+        claimMeaning: 'inbox-claimed-not-completed', externalToolAuthorizationVerified: false,
+        retention: { maxReceipts: 4096, maxAgeMs: 300000, maxPage: 128 }, sessionEventsProtocol: protocol,
+        methods: ['bridgePlugin/followSessionEvents'],
+      } } })); return true
+    },
+    snapshot: { type: 'snapshot', protocol, issuerEpoch: 'epoch', header: { id: 'session-1' }, cursor: 3, headCursor: 5, records: [] },
+    opened(socket, id) {
+      chunks(socket, id, { seq: 4, time: 1, type: 'assistant/message', data: { turn: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Private historical reply.' }] } } }, true)
+      chunks(socket, id, { seq: 5, time: 1, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }, true)
+      send(socket, id, { type: 'ready', cursor: 5 })
+    },
+  })
+  let saved = 3
+  const client = fake.port({ preferSessionEvents: true, timeoutMs: 2000,
+    followCursors: { load: () => saved, save(_id, sequence) { saved = sequence } } })
+  const events: AgentEvent[] = []
+  const stop = await createDshAdapter(client).follow({ sessionId: 'session-1', signal: signal(), onEvent(event) { events.push(event) } })
+  assert.equal(saved, 5)
+  assert.equal(events.length, 1)
+  assert.equal(events[0]!.type, 'completed')
+  assert.equal(events[0]!.data?.replayed, true)
+  assert.equal(JSON.stringify(events).includes('Private historical reply'), false)
+  assert.equal(fake.requests.filter(request => request.method === 'session/prompt').length, 0)
+  await stop()
+  // The generic transport preserves a large event byte-for-byte under the bounded chunk carrier.
+  const big = 'x'.repeat(1_200_000)
+  let received = ''
+  const other = await fixture(context, { snapshot: { type: 'snapshot', protocol, issuerEpoch: 'epoch', header: { id: 'session-1' }, cursor: 5, records: [] },
+    opened(socket, id) { send(socket, id, { type: 'ready', cursor: 5 }) } })
+  const { createDshSessionFollower } = await import('../src/adapters/dsh-session-follow.ts')
+  const { createDshCallbackBudget } = await import('../src/adapters/dsh-stream-common.ts')
+  const lifetime = new AbortController()
+  context.after(() => lifetime.abort())
+  const follow = createDshSessionFollower({ base: new URL(other.endpoint + '/'), timeoutMs: 2000, idleMs: 300000,
+    maxPendingEvents: 64, maxFollows: 16, maxBytes: 1048576, lifetime, follows: new Map(),
+    callbacks: createDshCallbackBudget(16, async operation => operation(lifetime.signal)),
+    authenticate: async () => 'test=cookie', bridgeStream: async () => ({ issuerEpoch: 'epoch' }) })
+  const dispose = await follow({ sessionId: 'session-1', signal: lifetime.signal, onEvent(event) {
+    if (event.type === 'session/event') received = String(event.event.data?.text)
+  } })
+  chunks(other.streams[0]!.socket, other.streams[0]!.id, { seq: 6, time: 1, type: 'custom', data: { text: big } }, false)
+  await until(() => received.length === big.length)
+  assert.equal(received, big)
+  await dispose()
 })
 
 test('DSH never follows authentication redirects or includes credential/body in errors', async context => {

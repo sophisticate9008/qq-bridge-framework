@@ -14,7 +14,7 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 ## 版本与安装
 
-当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **1.10.0**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
+当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **1.11.0**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
 
 
 ### 安全依赖覆盖
@@ -40,7 +40,7 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 下一次实际模型调用后，pi-ai 的 `dist/api/qbf-provider-usage-observed.json` 保留最近一次上游用量诊断：只包含白名单数值计数、缓存报告标记及时间，不记录请求、正文或凭据。文件以 `0600` 权限原子覆盖，不累积历史；诊断写入失败不影响聊天。它用于区分网关缺少缓存字段与下游映射丢失。
 
-从 [v1.10.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.10.0) 下载插件 tarball，或直接使用完整框架包内的 `components/qq-bridge-framework-dsh-bridge-plugin-1.10.0.tgz`。无需在安装机器上构建插件。
+从 [v1.11.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.11.0) 下载插件 tarball，或直接使用完整框架包内的 `components/qq-bridge-framework-dsh-bridge-plugin-1.11.0.tgz`。无需在安装机器上构建插件。
 
 开发者也可在框架仓库根目录执行以下命令生成安装包：
 
@@ -55,7 +55,7 @@ printf '安装包目录：%s\n' "$artifact_dir"
 记下输出的 `.tgz` 绝对路径。在你管理的独立 DSH Node 项目目录中明确安装它，例如：
 
 ```sh
-npm install --ignore-scripts /absolute/path/qq-bridge-framework-dsh-bridge-plugin-1.10.0.tgz
+npm install --ignore-scripts /absolute/path/qq-bridge-framework-dsh-bridge-plugin-1.11.0.tgz
 ```
 
 安装前核对该实例的 SDK 版本与锁文件。安装包只包含公开清单及编译后的插件文件，不包含框架配置、凭据或会话数据。隔离打包验收会在临时项目中安装真实 tarball，核对既有依赖的版本和完整性，并运行官方 SDK 的加载及 owner 认证测试。
@@ -106,7 +106,11 @@ export async function loadFrameworkBridge(ctx: Context): Promise<void> {
 
 实现见 [本机发现](../src/host/local-dsh-discovery.ts)、[本机鉴权](../src/adapters/dsh-local-auth.ts) 和 [DSH 端口工厂](../src/adapters/dsh-jsonrpc.ts)。
 
-框架建立会话回复监听时，以 `maxMessages: 1` 请求最小历史页，只用快照游标衔接后续实时事件；快照中的旧回复不会重新投递。该参数限制监听连接的历史传输量，模型仍使用原 DSH 会话的完整有效上下文。接收帧保持 1 MiB 上限，单条内容或事件过大仍会中断监听。
+框架按已鉴权插件声明的接口协议与能力选择实现，组件构建版本仅用于诊断，不维护逐版本允许名单。配套内置桥接插件提供 `qq-bridge-framework.session-events/1`：首帧仅含身份和游标，旧聊天正文不随首帧发送；桥在所属账号存储中保存完成回调后的事件位置，重连从该位置补读执行观察。补读不发送历史回复、不重新提交模型或工具，模型仍使用原 DSH 会话的有效上下文。
+
+实时事件按 192 KiB 原始字节分块，桥核对位置、长度和 SHA-256 后消费；单事件最多 16 MiB，单会话待处理字节最多 16 MiB，主聊天与插件模型共用 64 MiB 预算。监听帧继续限制为 1 MiB。身份、请求、轮次和用量等必要信息保留，模型请求头、压缩摘要及工具结果正文不作为监听材料重复传输。SDK 仍负责历史读取与原子订阅边界；桥接层不修改 DSH 日志、压缩策略、模型输入或提示词缓存。
+
+未声明新能力的插件继续走 `session/follow` 的最小历史页兼容路径，不保存或冒充可恢复游标。鉴权、协议或读取失败不会触发隐式降级。确定的超限、游标冲突与协议错误停止自动重连，修复后可明确重新连接；网络故障按退避间隔恢复。断线补读单次最多十万事件，超过时保留原位置与执行核对入口。
 
 ## 应用方案与实际模型元数据
 

@@ -14,6 +14,24 @@ function port(poll: DshFrameworkToolPort['poll'], complete: DshFrameworkToolPort
   return { poll, complete, async inspect() { throw new Error('unused') }, async install() { throw new Error('unused') }, async withdraw() { throw new Error('unused') } }
 }
 
+test('a byte page cannot withdraw an active ticket listed on another page', async () => {
+  let polls = 0, executions = 0, aborted = false
+  let finish!: (value: FrameworkToolResult) => void
+  const operation = new Promise<FrameworkToolResult>(resolve => { finish = resolve })
+  const base = port(async () => { throw new Error('Unpaged polling must not run') }, async () => true)
+  const pump = createFrameworkToolPump({ issuerEpoch: 'epoch-1', pollIntervalMs: 10,
+    port: { ...base, async pollPage() {
+      polls++; return { calls: polls % 2 ? [item] : [], pendingTickets: [item.ticket] }
+    } }, accepts: () => true, async execute(_call, currentSignal) {
+      executions++; currentSignal.addEventListener('abort', () => { aborted = true }, { once: true }); return operation
+    } })
+  pump.start()
+  try {
+    await awaitCondition(() => polls >= 4, { message: 'multiple byte pages', timeoutMs: 1000 })
+    assert.equal(executions, 1); assert.equal(aborted, false)
+  } finally { finish({ status: 'confirmed', value: 'once' }); await pump.close(signal) }
+})
+
 test('transient read-only polling reconnects without dispatching a retained ticket twice', async () => {
   let polls = 0
   let executions = 0

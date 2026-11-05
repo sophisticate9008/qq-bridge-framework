@@ -28,7 +28,8 @@ export function createNativeChatHealthRoutes(directory: string, runtime: NativeC
       'DSH_ABORTED', 'TOOL_CHANNEL_UNKNOWN', 'TOOL_CALL_CAPACITY'].includes(toolCode) ? toolCode.toLowerCase() : 'framework_tool_channel_unavailable';
     const replyCode = status.host?.followRecovery.lastError;
     const replyReason = replyCode && ['DSH_FOLLOW_ENDED', 'DSH_FOLLOW_PONG_TIMEOUT', 'DSH_FOLLOW_SEQUENCE_GAP',
-      'DSH_FOLLOW_INVALID_FRAME', 'DSH_FOLLOW_TRANSPORT_UNKNOWN', 'DSH_FOLLOW_BACKPRESSURE', 'DSH_FOLLOW_CALLBACK_FAILED'].includes(replyCode)
+      'DSH_FOLLOW_INVALID_FRAME', 'DSH_FOLLOW_FRAME_TOO_LARGE', 'DSH_FOLLOW_EVENT_TOO_LARGE', 'DSH_FOLLOW_CURSOR_CONFLICT',
+      'DSH_FOLLOW_REPLAY_LIMIT', 'DSH_FOLLOW_TRANSPORT_UNKNOWN', 'DSH_FOLLOW_BACKPRESSURE', 'DSH_FOLLOW_CALLBACK_FAILED'].includes(replyCode)
       ? replyCode.toLowerCase() : 'agent_follow_unavailable';
     const layers: ChatHealthLayer[] = [
       layer('framework', status.state === 'stopped' ? 'stopped' : status.state !== 'running' || frameworkReasons.length > 0 ? 'unavailable' : 'ready',

@@ -230,7 +230,8 @@ test('late follow setup is disposed and late frames cannot produce outbound work
   await host.start();
 
   const receipt = await within(host.receive(inbound('follow-timeout', 'group:follow')), 'follow receipt');
-  assert.equal(receipt.status, 'unknown');
+  assert.equal(receipt.status, 'rejected');
+  assert.equal(receipt.errorCode, 'AGENT_NOT_SUBMITTED');
   assert.equal(agent.followRequests.length, 1);
   const lateRequest = agent.followRequests[0];
   assert(lateRequest?.signal.aborted);

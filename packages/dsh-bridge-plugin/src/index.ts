@@ -23,6 +23,8 @@ import { createWorkChannel, type WorkAddress, type WorkStart, type WorkTarget } 
 import { installWorkAttachmentTool } from './work-attachments.js'
 import { createReplyDecisionRepair } from './reply-decision-repair.js'
 import { createPluginModelChannel } from './plugin-model.js'
+import { followSessionEvents, SESSION_EVENTS_PROTOCOL, type SessionEventsRequest } from './session-events.js'
+import { createSdkSessionEventSource } from './session-event-source.js'
 
 export default class BridgePlugin extends TypertRemoteService {
   static inject = ['agents', 'agentPresets', 'tools', 'typertGateway']
@@ -32,6 +34,7 @@ export default class BridgePlugin extends TypertRemoteService {
   private readonly frameworkTools
   private readonly work
   private readonly pluginModels
+  private eventStreams = 0
 
   constructor(ctx: Context) {
     super(ctx, 'bridgePlugin')
@@ -157,18 +160,32 @@ export default class BridgePlugin extends TypertRemoteService {
   @Remote('describe')
   describe() {
     this.assertOperator()
-    return { protocol: BRIDGE_PLUGIN_PROTOCOL, pluginVersion: '1.10.0', sdkVersion: '0.2.1-rc.2',
+    return { protocol: BRIDGE_PLUGIN_PROTOCOL, pluginVersion: '1.11.0', sdkVersion: '0.2.1-rc.2',
       issuerEpoch: this.journal.issuerEpoch, authentication: 'dsh-owner-peer', retention: RECEIPT_LIMITS,
       migrationProtocol: MIGRATION_PROTOCOL, migrationApiVersion: 2,
       frameworkToolProtocol: 'qq-bridge-framework.tools/1',
+      sessionEventsProtocol: SESSION_EVENTS_PROTOCOL,
       workProtocol: 'qq-bridge-framework.work/1', executionEvidenceProtocol: DSH_EXECUTION_EVIDENCE_PROTOCOL,
       methods: ['bridgePlugin/inspectToolInventory', 'bridgePlugin/describe', 'bridgePlugin/inspectScope', 'bridgePlugin/claimReceipts',
         'bridgePlugin/forkPreview', 'bridgePlugin/forkWithPreset', 'bridgePlugin/inspectMigration',
         'bridgePlugin/installFrameworkTools', 'bridgePlugin/withdrawFrameworkTools',
         'bridgePlugin/pollFrameworkTools', 'bridgePlugin/completeFrameworkTool', 'bridgePlugin/inspectFrameworkTools',
         'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkAsset', 'bridgePlugin/inspectExecution', 'bridgePlugin/inspectSessionStorage',
-        'bridgePlugin/preparePluginModelSession', 'bridgePlugin/pluginModels', 'bridgePlugin/createPluginModelSession', 'bridgePlugin/inspectPluginModelSession', 'bridgePlugin/startPluginModel', 'bridgePlugin/waitPluginModelIdle', 'bridgePlugin/inspectPluginModelRun'],
+        'bridgePlugin/preparePluginModelSession', 'bridgePlugin/pluginModels', 'bridgePlugin/createPluginModelSession', 'bridgePlugin/inspectPluginModelSession', 'bridgePlugin/startPluginModel', 'bridgePlugin/waitPluginModelIdle', 'bridgePlugin/inspectPluginModelRun', 'bridgePlugin/followSessionEvents'],
       claimMeaning: 'inbox-claimed-not-completed', durableReceipts: false, externalToolAuthorizationVerified: false }
+  }
+
+  @Remote({ name: 'followSessionEvents', mode: 'stream' })
+  async *followSessionEvents(request: SessionEventsRequest) {
+    const invocation = this.assertOperator()
+    if (this.eventStreams >= 32) throw new Error('DSH_FOLLOW_BACKPRESSURE')
+    this.eventStreams++
+    try { yield* followSessionEvents(createSdkSessionEventSource(this.ctx), request, this.journal.issuerEpoch, invocation.signal) }
+    catch (error) {
+      const reason = error instanceof Error && /^DSH_FOLLOW_[A-Z_]{1,64}$/.test(error.message) ? error.message : 'DSH_FOLLOW_ENDED'
+      throw new RemoteError('bridgePlugin/session-events-failed', 'Session event delivery could not continue', { reason })
+    }
+    finally { this.eventStreams-- }
   }
 
   @Remote('inspectToolInventory')
@@ -275,7 +292,7 @@ export default class BridgePlugin extends TypertRemoteService {
   }
 
   @Remote('pollFrameworkTools')
-  pollFrameworkTools(request: { issuerEpoch: string; waitMs?: number }) {
+  pollFrameworkTools(request: { issuerEpoch: string; waitMs?: number; bytePages?: true }) {
     const invocation = this.assertOperator()
     return this.frameworkTools.waitForCalls(request, invocation.signal)
   }
@@ -328,6 +345,7 @@ export default class BridgePlugin extends TypertRemoteService {
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     'bridgePlugin/operator-required': Record<string, never>
+    'bridgePlugin/session-events-failed': { readonly reason: string }
   }
 }
 

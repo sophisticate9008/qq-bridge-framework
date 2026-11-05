@@ -13,10 +13,20 @@ const check = (code: string, state: NativeDiagnosticCheck['state'], summary: str
   href: string | null = null): NativeDiagnosticCheck => ({ code, state, summary, nextAction, href })
 
 /** Snapshot reads only. Bounded scans explicitly report incomplete coverage; no controller is started. */
-export function readNativeDiagnosticHistory(store: Pick<DurableStore, 'read' | 'list'>, conversationId: string): NativeDiagnosticHistory {
+export function readNativeDiagnosticHistory(store: Pick<DurableStore, 'read' | 'list' | 'listByField'>, conversationId: string): NativeDiagnosticHistory {
   assert(isNativeAccessScope(conversationId), 'INVALID_CONVERSATION', 'A canonical conversation is required.')
   const checks: NativeDiagnosticCheck[] = []
   const session = store.read('host.sessions', conversationId)
+  const listener = store.read('native-chat.listener-state', digest(conversationId))
+  if (listener) {
+    const value = object(listener.value)
+    const binding = object(value.binding)
+    const current = session ? object(session.value) : null
+    if (current?.sessionId === binding.sessionId && current?.generation === binding.generation
+      && typeof value.errorCode === 'string' && /^(?:DSH|AGENT)_[A-Z_]{1,80}$/.test(value.errorCode)) checks.push(
+      check('conversation_listener_unavailable', 'blocked', `本会话回复监听未就绪：${value.errorCode}。`,
+        '框架按退避间隔恢复监听；尚未提交的输入与结果未知的执行分别核对。', '#adapters'))
+  }
   if (session) {
     const value = object(session.value)
     assert(value.schema === 1 && ['ready', 'creating', 'unknown', 'retired'].includes(String(value.state)), 'DIAGNOSTIC_HISTORY_INVALID', 'Invalid session metadata.')
@@ -62,7 +72,8 @@ export function readNativeDiagnosticHistory(store: Pick<DurableStore, 'read' | '
   }
   let partial = false
   for (const namespace of ['outbox', 'native-work.executions']) {
-    const rows = store.list(namespace, { limit: 257 })
+    const rows = store.listByField ? store.listByField({ namespace, field: 'conversationId', equals: conversationId, limit: 257 })
+      : store.list(namespace, { limit: 257 })
     partial ||= rows.length > 256
     let pending = 0
     let uncertain = 0

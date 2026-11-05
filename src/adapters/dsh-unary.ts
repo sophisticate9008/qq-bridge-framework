@@ -40,7 +40,7 @@ export function createDshUnaryTransport(options: { readonly base: URL; readonly 
     }
   }
 
-  const readJson = async (response: Response): Promise<unknown> => {
+  const readJson = async (response: Response, byteLimit: number): Promise<unknown> => {
     const reader = response.body?.getReader()
     if (!reader) throw failure('DSH_INVALID_RESPONSE')
     const chunks: Uint8Array[] = []
@@ -50,7 +50,7 @@ export function createDshUnaryTransport(options: { readonly base: URL; readonly 
         const chunk = await reader.read()
         if (chunk.done) break
         length += chunk.value.byteLength
-        if (length > maxBytes) throw failure('DSH_RESPONSE_TOO_LARGE')
+        if (length > byteLimit) throw failure('DSH_RESPONSE_TOO_LARGE')
         chunks.push(chunk.value)
       }
       return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
@@ -127,7 +127,9 @@ export function createDshUnaryTransport(options: { readonly base: URL; readonly 
           await response.body?.cancel().catch(() => undefined)
           throw failure(response.status === 401 || response.status === 403 ? 'DSH_AUTH_REJECTED' : 'DSH_HTTP_UNKNOWN')
         }
-        const envelope = await readJson(response)
+        const byteLimit = method === 'session/modelCatalog' ? 4 * 1024 * 1024
+          : ['settings/describe', 'agentPresets/read', 'bridgePlugin/inspectToolInventory'].includes(method) ? 2 * 1024 * 1024 : maxBytes
+        const envelope = await readJson(response, byteLimit)
         combined.throwIfAborted()
         if (!record(envelope) || envelope.type !== 'server-response' || envelope.rpcId !== rpcId || !record(envelope.result)) {
           throw failure('DSH_INVALID_RESPONSE')

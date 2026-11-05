@@ -25,6 +25,7 @@ function fixture(context: TestContext, options: {
   isIdle?: (conversationId: string) => boolean
   submit?: AgentAdapter['submit']
   createSession?: AgentAdapter['createSession']
+  follow?: AgentAdapter['follow']
 } = {}) {
   const store = createSqliteStore({ filename: ':memory:' })
   const contexts = createContextStore()
@@ -43,6 +44,7 @@ function fixture(context: TestContext, options: {
       },
       async follow(request) {
         followed.push(request)
+        if (options.follow) return options.follow(request)
         return () => { disposed.push(request.sessionId) }
       },
       submit: options.submit ?? (async () => ({ status: 'accepted' }))
@@ -59,6 +61,33 @@ function fixture(context: TestContext, options: {
       content: [{ type: 'text', text: 'input' }], directed: true, isSelf: false }, { signal })
   } }
 }
+
+test('a slow listener does not hold the admission lock for another conversation', async context => {
+  const gate = deferred<void>()
+  const fake = fixture(context, { async follow(request) {
+    if (request.sessionId === 'session-one') await gate.promise
+    return () => {}
+  } })
+  await fake.host.start()
+  const first = fake.receive('one')
+  await until(() => fake.followed.length === 1)
+  try {
+    assert.equal((await fake.receive('two')).status, 'accepted')
+  } finally { gate.resolve() }
+  assert.equal((await first).status, 'accepted')
+})
+
+test('a failed listener is diagnosed per conversation before any model submission', async context => {
+  let submits = 0
+  const fake = fixture(context, { async follow() { throw new Error('unavailable') },
+    async submit() { submits++; return { status: 'accepted' } } })
+  await fake.host.start()
+  const result = await fake.receive('one')
+  assert.equal(result.status, 'rejected')
+  assert.equal(result.errorCode, 'AGENT_NOT_SUBMITTED')
+  assert.equal(submits, 0)
+  assert.equal(fake.host.metrics().unhealthyFollows, 1)
+})
 
 test('follow pool serializes concurrent capacity admission before persistent creation and reclaims least-recently-used idle follow', async context => {
   const idle = new Set<string>()

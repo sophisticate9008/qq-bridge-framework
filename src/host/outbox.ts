@@ -30,6 +30,7 @@ export function createDurableTransport({ store, transport, clock = Date.now, acc
   { store: DurableStore; transport: TransportAdapter; clock?: Clock; accountScope?: AccountScope }) {
   const accountScope = accountInput === undefined ? undefined : normalizeAccountScope(accountInput);
   bindAccountStore(store, accountScope);
+  store.createIndex?.({ namespace, field: 'conversationId' });
   const inflight = new Map<string, { fingerprint: string; promise: Promise<DeliveryReceipt> }>();
 
   function recoverEntries(entries: Iterable<StoredRecord>) {

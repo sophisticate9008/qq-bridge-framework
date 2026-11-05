@@ -28,7 +28,10 @@ test('bounded history, missing input and unreadable storage are never called hea
   try {
     for (let index = 0; index < 257; index++) store.write('outbox', String(index).padStart(4, '0'), { conversationId: 'group:999', status: 'confirmed' })
     const result = projectNativeDiagnostics({ ...base, history: readNativeDiagnosticHistory(store, 'group:123') })
-    assert.equal(result.state, 'unknown'); assert.equal(result.coverage.history, 'partial')
+    assert.equal(result.state, 'ready'); assert.equal(result.coverage.history, 'complete')
+    for (let index = 0; index < 257; index++) store.write('outbox', 'target-' + String(index), { conversationId: 'group:123', status: 'confirmed' })
+    const limited = projectNativeDiagnostics({ ...base, history: readNativeDiagnosticHistory(store, 'group:123') })
+    assert.equal(limited.state, 'unknown'); assert.equal(limited.coverage.history, 'partial')
     assert.equal(projectNativeDiagnostics({ ...base, history: null, historyState: 'unavailable' }).state, 'unknown')
     assert.equal(projectNativeDiagnostics({ ...base, history: null, input: null }).state, 'unknown')
   } finally { store.close() }

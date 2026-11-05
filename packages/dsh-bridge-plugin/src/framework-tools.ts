@@ -83,12 +83,25 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
   const pending = new Map<string, Pending>()
   const waiters = new Set<() => void>()
   let closed = false
+  let lastPageTicket = ''
   function epoch(value: string): void {
     if (closed || value !== options.issuerEpoch) throw new TypeError('Framework tool channel epoch changed')
   }
   function wake(): void { for (const notify of [...waiters]) notify() }
-  function page() {
-    return { schema: 1 as const, issuerEpoch: options.issuerEpoch, calls: [...pending.values()].map(entry => json(entry.wire)) }
+  function page(bytePages = false) {
+    if (!bytePages) return { schema: 1 as const, issuerEpoch: options.issuerEpoch, calls: [...pending.values()].map(entry => json(entry.wire)) }
+    const entries = [...pending.values()].sort((a, b) => a.wire.ticket.localeCompare(b.wire.ticket))
+    const first = entries.findIndex(entry => entry.wire.ticket > lastPageTicket)
+    const ordered = first < 0 ? entries : [...entries.slice(first), ...entries.slice(0, first)]
+    const calls: JsonValue[] = []
+    let bytes = 16384
+    for (const entry of ordered) {
+      const wire = json(entry.wire)
+      const size = Buffer.byteLength(JSON.stringify(wire)) + 1
+      if (bytes + size > 512 * 1024) break
+      calls.push(wire); bytes += size; lastPageTicket = entry.wire.ticket
+    }
+    return { schema: 1 as const, issuerEpoch: options.issuerEpoch, calls, pendingTickets: entries.map(entry => entry.wire.ticket) }
   }
   function withdraw(lease: Lease): void {
     if (leases.get(lease.agent.id) === lease) leases.delete(lease.agent.id)
@@ -230,7 +243,7 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
       epoch(request.issuerEpoch)
       return page()
     },
-    async waitForCalls(request: { issuerEpoch: string; waitMs?: number }, signal: AbortSignal) {
+    async waitForCalls(request: { issuerEpoch: string; waitMs?: number; bytePages?: true }, signal: AbortSignal) {
       epoch(request.issuerEpoch)
       const waitMs = request.waitMs ?? 0
       if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 10000) throw new TypeError('Invalid framework tool wait')
@@ -254,7 +267,7 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
       }
       signal.throwIfAborted()
       epoch(request.issuerEpoch)
-      return page()
+      return page(request.bytePages === true)
     },
     async complete(request: FrameworkToolCompletion, signal: AbortSignal = new AbortController().signal) {
       epoch(request.issuerEpoch)

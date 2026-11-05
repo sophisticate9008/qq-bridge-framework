@@ -315,7 +315,8 @@ export function createNativeInboundController(options: {
       if (receipt.status === 'unknown') unknown++
       lastReceipt = { status: receipt.status, errorCode: receipt.errorCode ?? null }
       if (incoming.directed && receipt.status !== 'accepted' && !activity.requestFailureReported(requestId))
-        activity.record(receipt.status, message.conversationId, undefined, {}, receipt.errorCode)
+        activity.record(receipt.errorCode === 'AGENT_NOT_SUBMITTED' ? 'submit_not_started' : receipt.status,
+          message.conversationId, undefined, {}, receipt.errorCode)
       return receipt
     } catch (error) {
       unknown++

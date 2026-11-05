@@ -17,6 +17,7 @@ import { createDshWorkPort, type DshWorkPort, type DshWorkMethod } from './dsh-w
 import { prepareDshPromptContent, type DshPromptImageResolver } from './dsh-prompt-content.ts'
 import { createDshPluginModelBackend } from './dsh-plugin-model.ts'
 import type { PluginModelBackend } from '../contracts/plugin-model.ts'
+import { createDshFollowByteBudget, type DshFollowCursors } from './dsh-follow-budget.ts'
 
 export type { NativeDeploymentPresetBinding as DshPresetBinding } from '../contracts/native-deployment.ts'
 import type { NativeDeploymentPresetBinding as DshPresetBinding } from '../contracts/native-deployment.ts'
@@ -32,6 +33,8 @@ export interface DshJsonRpcOptions {
   readonly maxPendingEvents?: number
   readonly maxFollows?: number
   readonly resolvePromptImage?: DshPromptImageResolver
+  readonly preferSessionEvents?: boolean
+  readonly followCursors?: DshFollowCursors
 }
 
 export interface DshJsonRpcPort extends DshClientPort, DshInteractionPort {
@@ -129,11 +132,34 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
   const follows = new Map<string, () => Promise<void>>()
   const pluginFollows = new Map<string, () => Promise<void>>()
   const { limited, authenticate, rpc } = createDshUnaryTransport({ base, auth, initialCookie: cookie, authenticationProvider, timeoutMs, maxBytes, lifetime })
+  // DSH token peers own exactly one API socket. Each physical follow receives
+  // its own peer; unary calls keep their coalesced authentication cache.
+  const authenticateStream = (signal: AbortSignal) => auth !== '' && !auth.startsWith('cookie:')
+    ? createDshUnaryTransport({ base, auth, initialCookie: undefined, authenticationProvider: undefined, timeoutMs, maxBytes, lifetime }).authenticate(signal)
+    : authenticate(signal)
 
   const callbacks = createDshCallbackBudget(maxFollows, limited)
-  const follow = createDshSessionFollower({ base, timeoutMs, idleMs, maxPendingEvents, maxFollows, maxBytes, lifetime, follows, callbacks, authenticate })
+  const byteBudget = createDshFollowByteBudget()
+  let streamDescription: Promise<{ issuerEpoch: string } | null> | undefined
+  const bridgeStream = async (signal: AbortSignal) => {
+    if (!options.preferSessionEvents) return null
+    streamDescription ??= bridgePlugin.describe(lifetime.signal).then(description =>
+      description.sessionEventsProtocol === 'qq-bridge-framework.session-events/1'
+        && description.methods?.includes('bridgePlugin/followSessionEvents') ? { issuerEpoch: description.issuerEpoch } : null)
+    const pending = streamDescription
+    void pending.catch(() => { if (streamDescription === pending) streamDescription = undefined })
+    signal.throwIfAborted()
+    return pending
+  }
+  const cursorOptions = options.followCursors ? { cursors: options.followCursors } : {}
+  const follow = createDshSessionFollower({ base, timeoutMs, idleMs, maxPendingEvents, maxFollows, maxBytes, lifetime,
+    follows, callbacks, authenticate: authenticateStream, bridgeStream, byteBudget, ...cursorOptions })
   const pluginFollow = createDshSessionFollower({ base, timeoutMs, idleMs, maxPendingEvents, maxFollows, maxBytes, lifetime,
-    follows: pluginFollows, callbacks, authenticate })
+    follows: pluginFollows, callbacks, authenticate: authenticateStream, bridgeStream, byteBudget,
+    ...(options.followCursors ? { cursors: {
+      load: (id: string) => options.followCursors!.load(JSON.stringify(['plugin-model', id])),
+      save: (id: string, sequence: number) => options.followCursors!.save(JSON.stringify(['plugin-model', id]), sequence),
+    } } : {}) })
   const interactions = createDshInteractionChannel({ base, timeoutMs, maxPendingEvents, maxFollows, maxBytes, lifetime, callbacks, authenticate, rpc })
 
   const bridgePlugin = createDshBridgePluginPort(async (method, request, signal) => {
