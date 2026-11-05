@@ -39,7 +39,10 @@ test('overwrite removes only obsolete managed files, retains data/custom files, 
     assert.equal((await verifyFrameworkDistribution(setup.target)).version, '1.11.0');
     assert.equal(await readFile(join(setup.target, 'obsolete.txt'), 'utf8'), 'old');
     await assert.rejects(readFile(join(setup.target, 'new.txt')));
+    // Simulate termination after recording rollback, before removing the transaction lock.
+    await writeFile(join(setup.target, '.framework-update.lock'), id);
     await rollbackFrameworkUpdate(setup.target, id);
+    await assert.rejects(readFile(join(setup.target, '.framework-update.lock')));
   } finally { await setup.dispose(); }
 });
 test('corruption, a running framework and cross-major updates fail before replacing old files', async () => {

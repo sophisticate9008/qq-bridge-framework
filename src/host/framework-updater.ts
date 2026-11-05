@@ -55,7 +55,11 @@ export async function rollbackFrameworkUpdate(target: string, id: string): Promi
   for (const entry of value.entries) if (!isRecord(entry) || typeof entry.existed !== 'boolean'
     || !allowed(entry.path) && entry.path !== 'distribution.json' && entry.path !== 'node_modules') throw new Error('update_journal_invalid');
   const journal = value as unknown as UpdateJournal;
-  if (journal.state === 'rolled-back') return;
+  if (journal.state === 'rolled-back') {
+    // A crash may occur after the rollback journal is durable but before lock removal.
+    await rm(lock, { force: true });
+    return;
+  }
   if (journal.state === 'applied') {
     const current: unknown = JSON.parse(await readFile(await safePath(root, 'package.json'), 'utf8'));
     if (!isRecord(current) || current.version !== journal.to) throw new Error('update_rollback_version_conflict');
