@@ -107,7 +107,8 @@ export function createDshSessionFollower(options: { readonly base: URL; readonly
       })
       socket.on('open', () => {
         if (stopped) return
-        socket!.send(JSON.stringify({ type: 'open', streamId, endpoint: 'session/follow', payload: { args: { request: { address: { kind: 'session', sessionId: request.sessionId } } } } }))
+        // Only the opening cursor is consumed; keep DSH's history page minimal.
+        socket!.send(JSON.stringify({ type: 'open', streamId, endpoint: 'session/follow', payload: { args: { request: { address: { kind: 'session', sessionId: request.sessionId }, maxMessages: 1 } } } }))
       })
       socket.on('message', (data, binary) => {
         if (stopped) return

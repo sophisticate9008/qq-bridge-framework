@@ -125,7 +125,7 @@ async function until(predicate: () => boolean): Promise<void> {
 async function fixture(context: TestContext, overrides: {
   rpc?: (request: WireRequest, response: ServerResponse) => boolean
   connect?: (response: ServerResponse) => void
-  snapshot?: Record<string, unknown>
+  snapshot?: Record<string, unknown> | ((input: Record<string, unknown>) => Record<string, unknown>)
   autoPong?: boolean
 } = {}) {
   const requests: WireRequest[] = []
@@ -166,7 +166,7 @@ async function fixture(context: TestContext, overrides: {
         assert.equal(input.type, 'open')
         const stream = { socket: connection, id: String(input.streamId), input }
         streams.push(stream)
-        connection.send(JSON.stringify({ type: 'item', streamId: stream.id, value: overrides.snapshot ?? {
+        connection.send(JSON.stringify({ type: 'item', streamId: stream.id, value: (typeof overrides.snapshot === 'function' ? overrides.snapshot(input) : overrides.snapshot) ?? {
           type: 'snapshot', header: { id: 'session-1' }, cursor: 3,
           records: [{ type: 'event', event: { seq: 3, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'Historical, never emit.' }] } } } }],
           projections: { asOfSeq: 3, values: {} }, hasMore: true,
@@ -458,7 +458,27 @@ test('DSH explicit operator cookie bypasses token exchange and is used for HTTP 
   assert.equal(fake.exchanges.length, 0)
   assert.deepEqual(fake.httpCookies, ['operator=signed.value'])
   assert.deepEqual(fake.socketCookies, ['operator=signed.value'])
-  assert.deepEqual(fake.streams[0]!.input, { type: 'open', streamId: fake.streams[0]!.id, endpoint: 'session/follow', payload: { args: { request: { address: { kind: 'session', sessionId: 'session-1' } } } } })
+  assert.deepEqual(fake.streams[0]!.input, { type: 'open', streamId: fake.streams[0]!.id, endpoint: 'session/follow', payload: { args: { request: { address: { kind: 'session', sessionId: 'session-1' }, maxMessages: 1 } } } })
+})
+
+test('DSH follows a large history using a minimal snapshot and emits only new events', async context => {
+  const history = Array.from({ length: 100 }, (_value, seq) => ({ type: 'event', event: {
+    seq, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'x'.repeat(16_384) }] } },
+  } }))
+  assert(Buffer.byteLength(JSON.stringify(history)) > 1_048_576)
+  const fake = await fixture(context, { snapshot(input) {
+    const request = (input.payload as { args: { request: { maxMessages?: number } } }).args.request
+    return { type: 'snapshot', header: { id: 'session-1' }, cursor: 99,
+      records: history.slice(-(request.maxMessages ?? 100)), hasMore: true }
+  } })
+  const events: DshFollowEvent[] = []
+  const stop = await fake.port().follow({ sessionId: 'session-1', signal: signal(), onEvent(event) { events.push(event) } })
+  assert.deepEqual(events, [])
+  fake.event(100)
+  await until(() => events.length === 1)
+  assert.equal(events[0]!.type, 'session/event')
+  assert.deepEqual(fake.requests, [])
+  await stop()
 })
 
 test('DSH never follows authentication redirects or includes credential/body in errors', async context => {

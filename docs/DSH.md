@@ -106,6 +106,8 @@ export async function loadFrameworkBridge(ctx: Context): Promise<void> {
 
 实现见 [本机发现](../src/host/local-dsh-discovery.ts)、[本机鉴权](../src/adapters/dsh-local-auth.ts) 和 [DSH 端口工厂](../src/adapters/dsh-jsonrpc.ts)。
 
+框架建立会话回复监听时，以 `maxMessages: 1` 请求最小历史页，只用快照游标衔接后续实时事件；快照中的旧回复不会重新投递。该参数限制监听连接的历史传输量，模型仍使用原 DSH 会话的完整有效上下文。接收帧保持 1 MiB 上限，单条内容或事件过大仍会中断监听。
+
 ## 应用方案与实际模型元数据
 
 先保存提供方、模型和人设，再在方案页选择“应用”（按状态也可能显示“应用并启动”）。这一操作保存当前编辑方案并选择启用，再创建一次应用；无更改且已启用的方案不会重复保存。其他页面保留对应应用入口。宿主读取保存后的实际 revision，自动识别 DSH 静态配置层、目标路由和模型元数据，生成受管理配置；用户不需要重新填写内部路径或已经可读的模型容量。
