@@ -30,6 +30,7 @@ import { createNativeRuntimeRoutes, createNativeRuntimeApplicationPorts, withNat
 import { nativeApplicationService } from './native-application.ts';
 import { nativeApplicationRequiresReconciliation } from '../contracts/native-application.ts';
 import { createNativeDshRestartRoutes } from './native-dsh-restart.ts';
+import { createFrameworkReleaseRoutes, createFrameworkReleaseService } from './framework-release.ts';
 import { createChatRepairRoutes } from './chat-repair.ts';
 import { createChatRepairStorage, projectChatRepair } from '../storage/chat-repair.ts';
 import { createNativeDshRestartService } from '../host/native-dsh-restart.ts';
@@ -713,6 +714,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
   } });
   const routes: AdminRoute[] = [
     healthRoute,
+    ...createFrameworkReleaseRoutes(createFrameworkReleaseService({ version: FRAMEWORK_VERSION })),
     ...createNativeAccountRoutes(accounts).map(maintenanceGuard),
     ...createNativeAccountDispatchRoutes({ accounts, async bundle(id) {
       const accountDirectory = await accounts.accountDirectory(id);

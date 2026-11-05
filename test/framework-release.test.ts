@@ -1,6 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assertFrameworkReleasePath, frameworkRuntimeManifest } from '../scripts/framework-release.ts';
+import { createFrameworkReleaseService, createFrameworkReleaseRoutes } from '../src/admin/framework-release.ts';
+import { compareReleaseVersions, parseFrameworkReleaseStatus } from '../src/contracts/framework-release.ts';
+
+test('release checks compare numeric versions, coalesce requests and throttle refreshes', async () => {
+  let at = 100_000, calls = 0;
+  const service = createFrameworkReleaseService({ version: '1.9.0', installation: 'archive', now: () => at,
+    fetch: async () => { calls++; return Response.json({ tag_name: 'v1.12.0', prerelease: false, draft: false }); } });
+  const results = await Promise.all([service.read(), service.read(true), service.read()]);
+  assert.equal(calls, 1); assert.equal(results[0].state, 'available');
+  assert.equal(parseFrameworkReleaseStatus(results[0])?.majorUpgrade, false);
+  at += 9999; await service.read(true); assert.equal(calls, 1);
+  at++; await service.read(true); assert.equal(calls, 2);
+  assert.equal(compareReleaseVersions('1.12.0', '1.9.0'), 1);
+  assert.equal(compareReleaseVersions('1.12.0', '1.12.0'), 0);
+  assert.throws(() => compareReleaseVersions('1.12.0-rc.1', '1.12.0'));
+});
+test('untrusted release links, drafts, prereleases, excessive responses and outages never become executable input', async () => {
+  for (const response of [Response.json({ tag_name: 'v2.0.0', draft: true, prerelease: false }),
+    Response.json({ tag_name: 'v2.0.0-rc.1', draft: false, prerelease: true }),
+    new Response('x'.repeat(524289)), new Response('', { status: 403 })]) {
+    const service = createFrameworkReleaseService({ version: '1.11.0', fetch: async () => response });
+    assert.equal((await service.read()).state, 'unavailable');
+  }
+  const service = createFrameworkReleaseService({ version: '1.11.0', fetch: async () => Response.json({
+    tag_name: 'v2.0.0', draft: false, prerelease: false, html_url: 'javascript:bad' }) });
+  const status = await service.read();
+  assert.equal(status.majorUpgrade, true);
+  assert.equal(status.releaseUrl, 'https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v2.0.0');
+  const route = createFrameworkReleaseRoutes(service)[0];
+  await assert.rejects(async () => route.handle({ query: new URLSearchParams('refresh=1&refresh=1'), body: null, signal: AbortSignal.timeout(1000) }));
+});
 
 test('framework archives exclude private paths, stores, traversal and credential files', () => {
   for (const filename of ['private/extensions/local.ts', 'runtime/live/config.json', 'src/../private/key',
