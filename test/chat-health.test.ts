@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
-import { CHAT_HEALTH_LAYERS, parseChatHealth, type ChatHealth } from '../src/contracts/chat-health.ts';
+import { CHAT_HEALTH_LAYERS, chatHealthChecks, parseChatHealth, type ChatHealth } from '../src/contracts/chat-health.ts';
 import { probeOneBotHttpHealth } from '../src/adapters/onebot-health.ts';
 import { chatHealthBadge, chatHealthGuidance } from '../web/lib/chat-health.ts';
 import type { ChatRuntimeStatus } from '../web/lib/chat-runtime.ts';
@@ -11,6 +11,20 @@ const runtime: ChatRuntimeStatus = { state: 'running', chatReady: true, canStart
   lastError: null, readinessScope: null, modelExecutionVerified: false };
 const ready: ChatHealth = { schema: 1, checkedAt: 1, healthy: true, modelExecutionVerified: false,
   layers: CHAT_HEALTH_LAYERS.map(id => ({ id, state: 'ready', reason: null })) };
+
+test('optional assistant health preserves legacy layers and prevents false overall readiness', () => {
+  const blocked: ChatHealth = { ...ready, healthy: false, assistant: {
+    id: 'assistant', state: 'unavailable', reason: 'assistant_deployment_configuration_changed' } };
+  assert(parseChatHealth(ready));
+  assert(parseChatHealth(blocked));
+  assert.equal(blocked.layers.length, 7);
+  assert.equal(chatHealthChecks(blocked).length, 8);
+  assert.equal(parseChatHealth({ ...blocked, healthy: true }), null);
+  assert.equal(parseChatHealth({ ...blocked, assistant: { ...blocked.assistant, reason: '/private/key' } }), null);
+  assert.equal(chatHealthBadge(blocked, runtime), '后台助手需要恢复');
+  assert.match(chatHealthGuidance(blocked.assistant!), /助手部署需要更新/);
+  assert(parseChatHealth({ ...ready, assistant: { id: 'assistant', state: 'idle', reason: 'assistant_disabled' } }));
+});
 
 test('chat readiness never treats an assembled host as proof of a working external path', () => {
   assert.equal(chatHealthBadge(ready, runtime), '聊天链路就绪');

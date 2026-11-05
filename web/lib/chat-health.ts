@@ -1,18 +1,26 @@
 import type { ChatHealth, ChatHealthLayer } from '../../src/contracts/chat-health.ts';
+export { chatHealthChecks } from '../../src/contracts/chat-health.ts';
 import { chatRuntimeBadge, chatRuntimeReason, type ChatRuntimeStatus } from './chat-runtime.ts';
 
 export const chatHealthNames: Readonly<Record<ChatHealthLayer['id'], string>> = {
   framework: '框架处理', receive: 'QQ 消息接收', send: 'HTTP 发送接口', dsh: 'DSH 鉴权接口', replies: '会话回复监听', tools: '框架工具通道',
-  interactions: '模型提问通道',
+  interactions: '模型提问通道', assistant: '后台助手',
 };
 export const chatHealthStates: Readonly<Record<ChatHealthLayer['state'], string>> = {
   ready: '正常', idle: '待命', recovering: '正在重连', unavailable: '异常', unknown: '未确认', stopped: '未运行',
 };
 export function chatHealthLayerLabel(layer: ChatHealthLayer): string {
   if (layer.state !== 'ready') return chatHealthStates[layer.state];
-  return { framework: '已运行', receive: '已连接', send: '接口可连接', dsh: '鉴权可用', replies: '已连接', tools: '轮询可用', interactions: '已连接' }[layer.id];
+  return { framework: '已运行', receive: '已连接', send: '接口可连接', dsh: '鉴权可用', replies: '已连接', tools: '轮询可用', interactions: '已连接', assistant: '部署已核验' }[layer.id];
 }
 export function chatHealthGuidance(layer: ChatHealthLayer): string {
+  if (layer.id === 'assistant') {
+    if (layer.reason === 'assistant_disabled') return '后台助手已关闭。';
+    if (layer.state === 'ready') return '助手部署与当前配置一致；实际工作结果单独核对。';
+    if (/configuration_changed|not_applied/.test(layer.reason ?? '')) return '助手部署需要更新，请在聊天方案中重新保存并应用助手设置；原会话保留。';
+    if (/reconciliation|unknown|interrupted|pending_reload/.test(layer.reason ?? '')) return '助手加载结果尚未确认，请核对原部署记录；未受理的任务没有交给模型，不自动重发。';
+    return '请检查聊天方案中的助手状态与 DSH 连接；原工作与会话记录保留。';
+  }
   if (layer.state === 'ready') return layer.id === 'dsh' ? '鉴权接口可用；模型生成结果单独核对。' : '当前检查通过。';
   if (layer.state === 'idle') return '当前没有活动连接需求；新请求会建立连接，也可手动检查连接。';
   if (layer.id === 'receive') return layer.reason === 'onebot_account_offline' ? '请在协议端重新登录 QQ；框架等待连接恢复。'
@@ -58,5 +66,6 @@ export function chatHealthBadge(health: ChatHealth | null, runtime: ChatRuntimeS
       replies: '会话回复监听正在重连', tools: layer.state === 'recovering' ? '工具通道正在重连' : '工具通道需要恢复',
       interactions: '模型提问通道需要恢复', framework: '框架处理需要恢复' }[id];
   }
+  if (health.assistant && !['ready', 'idle'].includes(health.assistant.state)) return '后台助手需要恢复';
   return chatRuntimeBadge(runtime);
 }

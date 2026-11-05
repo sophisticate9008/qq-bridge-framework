@@ -460,6 +460,11 @@ export async function simulateQq(values = process.argv.slice(2)) {
         handle: context => accessCommand(context.message, context.reply, context.signal) }],
       loadConfiguration: load, resolveDeployment: configuration => deployment.reconcile(configuration),
       resolveWorkTarget: signal => assistant.resolve(signal),
+      synchronizeWorkTarget: async signal => {
+        const result = await assistant.synchronizeVerified(signal)
+        record({ type: 'assistant-deployment-synchronized', state: result.state, missingReasons: result.missingReasons,
+          configurationRevision: result.configurationRevision, agentPreset: result.agentPreset })
+      },
       prepareWorkTarget: async signal => {
         const startedAt = Date.now()
         try {

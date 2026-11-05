@@ -16,7 +16,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { createNativeRuntimeRoutes, readNativeChatConfiguration } from '../src/admin/runtime.ts'
 import type { AdminRoute } from '../src/admin/server.ts'
 import { buildChatSessionDefinition } from '../src/host/chat-plans.ts'
-import { createNativeChatRuntime } from '../src/host/native-chat-runtime.ts'
+import { createNativeChatRuntime, type NativeChatRuntimeOptions } from '../src/host/native-chat-runtime.ts'
 import { bindSyntheticPaginationSessions } from './fixtures/native-session-pages.ts'
 import { createDshClaimPluginFixture } from './fixtures/dsh-claim-plugin.ts'
 import { DEFAULT_NATIVE_EXECUTION_POLICY } from '../src/host/native-execution.ts'
@@ -37,12 +37,73 @@ import { capabilityLabel, featureLabel } from '../web/lib/feature-labels.ts'
 import type { DshWorkSnapshot } from '../src/contracts/dsh-work.ts'
 import type { FrameworkToolPendingCall, FrameworkToolResult } from '../src/contracts/framework-tools.ts'
 import { DEFAULT_PERSONA_WAKE } from '../src/contracts/persona-wake.ts'
+import { createNativeChatHealthRoutes } from '../src/admin/native-chat-health.ts'
+import { DEFAULT_NATIVE_WORK_CONFIGURATION } from '../src/host/native-work-configuration.ts'
 
 const persona = { id: 'native', name: 'Native', identity: 'A test-only identity.', style: 'Concise.',
   wake: { ...DEFAULT_PERSONA_WAKE, groupWakeProbabilityPercent: 0 } }
 const plan = { id: 'daily', name: 'Daily', description: '', instructions: 'Test behavior.',
   personaId: 'native', provider: 'provider', model: 'model', reasoningEffort: 'off' as const,
   contextLimits: { group: 100_000, private: 120_000 } }
+
+test('assistant synchronization runs once before input and independently unavailable assistant is visible in health', async context => {
+  let synchronizations = 0
+  const fake = await fixture(context, { synchronizeWorkTarget: async () => { synchronizations++ } })
+  await fake.configure()
+  await fake.start()
+  assert.equal(synchronizations, 1)
+  const first = await invoke(fake.routes(), 'GET', '/api/chat/health')
+  assert(isRecord(first.assistant))
+  assert.equal(first.assistant.state, 'idle')
+  await writeFile(join(fake.directory, 'chat-assistant.json'), JSON.stringify({ schema: 1, mode: 'chat-assistant',
+    provider: 'provider', model: 'model', nickname: 'Helper', reasoningEffort: 'off' }), { mode: 0o600 })
+  const reads = fake.rpc.length
+  const health = await invoke(fake.routes(), 'GET', '/api/chat/health')
+  assert.equal(health.healthy, false)
+  assert(isRecord(health.assistant))
+  assert.equal(health.assistant.state, 'unknown')
+  assert.equal(health.assistant.reason, 'assistant_target_unavailable')
+  assert.equal(synchronizations, 1, 'GET must not synchronize or apply deployment')
+  assert(fake.rpc.slice(reads).every(row => !['session/create', 'session/prompt', 'bridgePlugin/startWork'].includes(row.method)))
+  await fake.runtime().stop()
+  await fake.start()
+  assert.equal(synchronizations, 2)
+})
+
+test('failed assistant synchronization leaves ordinary chat running and rejects unsafe hidden recovery', async context => {
+  const fake = await fixture(context, { synchronizeWorkTarget: async () => { throw new Error('Original assistant deployment requires review') } })
+  await fake.configure()
+  await fake.start()
+  assert.equal((await fake.runtime().status()).chatReady, true)
+})
+
+test('health coalesces read-only assistant verification and detects configuration changes during the check', async context => {
+  const fake = await fixture(context, { workChannel: true })
+  await fake.configure(); await fake.start()
+  const filename = join(fake.directory, 'chat-assistant.json')
+  const settings = { schema: 1, mode: 'chat-assistant', provider: 'provider', model: 'model', nickname: 'Helper', reasoningEffort: 'off' }
+  await writeFile(filename, JSON.stringify(settings), { mode: 0o600 })
+  let checks = 0, change = false
+  const routes = createNativeChatHealthRoutes(fake.directory, fake.runtime(), { async resolve() {
+    checks++
+    if (change) await writeFile(filename, JSON.stringify({ ...settings, nickname: 'Changed' }), { mode: 0o600 })
+    return { configuration: DEFAULT_NATIVE_WORK_CONFIGURATION, externalProvider: null, agentPreset: null,
+      assistantRevision: 'a'.repeat(64), configurationRevision: 'b'.repeat(64), missingReasons: ['assistant_deployment_configuration_changed'] }
+  } })
+  const [first, second] = await Promise.all([invoke(routes, 'GET', '/api/chat/health'), invoke(routes, 'GET', '/api/chat/health')])
+  assert.equal(checks, 1)
+  assert.deepEqual(first, second)
+  assert.equal(first.healthy, false)
+  assert(isRecord(first.assistant))
+  assert.equal(first.assistant.state, 'unavailable')
+  assert.equal(first.assistant.reason, 'assistant_deployment_configuration_changed')
+  change = true
+  const changed = await invoke(routes, 'GET', '/api/chat/health')
+  assert(isRecord(changed.assistant))
+  assert.equal(changed.assistant.state, 'unknown')
+  assert.equal(changed.assistant.reason, 'configuration_changed')
+  assert.equal(fake.works.size, 0)
+})
 
 test('native live readiness reuses its writer and still rejects private path or inode changes', async context => {
   const fake = await fixture(context)
@@ -108,6 +169,8 @@ async function fixture(context: TestContext, options: {
   quotedMessages?: Readonly<Record<string, Record<string, unknown>>>
   frameworkToolChannel?: boolean
   workChannel?: boolean
+  synchronizeWorkTarget?: (signal: AbortSignal) => Promise<void>
+  prepareWorkTarget?: NativeChatRuntimeOptions['prepareWorkTarget']
   mediaBytes?: boolean
   executionCheckpoint?: boolean
   migrationChannel?: boolean
@@ -311,6 +374,8 @@ async function fixture(context: TestContext, options: {
   assert(address && typeof address !== 'string')
   const base = `http://127.0.0.1:${address.port}`
   const createRuntime = (historyOnly = false) => createNativeChatRuntime({ directory, accountScope: options.accountScope, expectedSelfId: options.expectedSelfId, bootstrap: options.bootstrap,
+    synchronizeWorkTarget: options.synchronizeWorkTarget,
+    prepareWorkTarget: options.prepareWorkTarget,
     ...(options.workChannel ? { resolveWorkTarget: async () => ({ configuration: { schema: 1 as const, enabled: true,
       provider: 'provider', model: 'model', agentPreset: 'test-work', fullAccess: false, timeoutMs: 300000 },
       externalProvider: 'external-work', agentPreset: 'test-work', assistantRevision: 'a'.repeat(64), configurationRevision: 'b'.repeat(64), missingReasons: [] }) } : {}),
@@ -3035,4 +3100,28 @@ for (const promptFailure of ['rejected', 'unknown'] as const) test(`unaccepted $
   await until(() => fake.runtime().inboxSummary().items.some(item => item.state === 'blocked' || item.state === 'idle'))
   assert.deepEqual(history.snapshot('group:456').expiredUnreadIds, [])
   assert.equal(history.snapshot('group:456').readThrough, 0)
+})
+
+test('stale assistant deployment rejects tool admission with its exact reason and creates no child work', async context => {
+  const fake = await fixture(context, { workChannel: true, prepareWorkTarget: async () => ({ resolution: {
+    configuration: DEFAULT_NATIVE_WORK_CONFIGURATION, externalProvider: null, agentPreset: null,
+    assistantRevision: 'a'.repeat(64), configurationRevision: 'b'.repeat(64), missingReasons: ['assistant_deployment_configuration_changed'] },
+    async assertCurrent() { throw new Error('Rejected preparation must never reach a child') } }) })
+  await fake.configure()
+  const path = '/api/chat/tool-permissions', initial = await invoke(fake.routes(), 'GET', path)
+  await invoke(fake.routes(), 'POST', path, { revision: initial.revision, action: 'grant', grant: {
+    id: randomUUID(), conversationId: 'private:123', capabilities: ['native.work.start'], maxUses: { 'native.work.start': 1 }, expiresAt: null } })
+  await fake.start(); fake.message(1300)
+  await until(() => fake.rpc.some(row => row.method === 'session/prompt'))
+  const prompt = fake.rpc.find(row => row.method === 'session/prompt')!.request
+  const sessionId = String(prompt.sessionId), requestId = String(prompt.requestId), lease = fake.toolLeases.get(sessionId)!
+  fake.toolCalls.push({ ticket: 'stale-assistant-start', leaseId: lease.leaseId, call: { id: 'stale-assistant-start',
+    name: 'qbf_work_start', input: { task: 'Read the provided file', context: '' }, sessionId, requestId, generation: 1,
+    userMessageId: `user-${requestId}`, turn: 1, expiresAt: Date.now() + 10000 } })
+  await until(() => fake.toolResults.has('stale-assistant-start'))
+  assert.deepEqual(fake.toolResults.get('stale-assistant-start'), { status: 'rejected', code: 'ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED' })
+  assert.equal(fake.works.size, 0)
+  assert.equal(fake.runtime().listWork().records.length, 0)
+  assert.equal(fake.rpc.some(row => row.method === 'bridgePlugin/startWork'), false)
+  fake.rawFinal()
 })

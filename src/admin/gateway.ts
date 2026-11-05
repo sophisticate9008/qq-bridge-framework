@@ -560,6 +560,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
   chatRuntime = createNativeChatRuntime({ directory, packageConfigurationRegistry, bootstrap: options.bootstrap,
     resolveWorkTarget: signal => assistantTarget.resolve(signal),
     prepareWorkTarget: signal => assistantTarget.prepareWork(signal),
+    synchronizeWorkTarget: async signal => { await assistantTarget.synchronizeVerified(signal); },
     async readWorkIdentity(signal) {
       signal.throwIfAborted();
       const { value } = await repository.readAssistant();

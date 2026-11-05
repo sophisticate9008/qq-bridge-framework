@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
-import { createNativeAssistantTarget, resolveAssistantReasoning } from '../src/host/native-assistant-target.ts'
+import { assistantPreparationFailure, createNativeAssistantTarget, resolveAssistantReasoning } from '../src/host/native-assistant-target.ts'
 import { createNativeAssistantDeploymentRoutes } from '../src/admin/native-assistant-target.ts'
 import { createAdminServer } from '../src/admin/server.ts'
 import { NativeConfigurationRepository } from '../src/admin/native-configuration-repository.ts'
@@ -38,12 +38,14 @@ async function fixture(context: TestContext) {
   await writeFile(profilePath, originalProfile, { mode: 0o600 })
   await writeFile(credentialsPath, 'version: 1\nrefs:\n  ORIGINAL_KEY: keep-existing-private-value\n', { mode: 0o600 })
   const calls: string[] = []
+  let onRpc: ((method: string) => Promise<void>) | undefined
   let loaded = true
   const server = createServer(async (incoming, response) => {
     try {
       const chunks: Buffer[] = []; for await (const chunk of incoming) chunks.push(Buffer.from(chunk))
       const wire = object(JSON.parse(Buffer.concat(chunks).toString('utf8')))
       const method = String(wire.method); calls.push(method)
+      await onRpc?.(method)
       const args = object(object(wire.payload).args)
       const layers = [JSON.parse(await readFile(basePath, 'utf8')) as unknown,
         staticDshProfileValues(readStaticDshProfile(await readFile(profilePath, 'utf8')))]
@@ -87,8 +89,97 @@ async function fixture(context: TestContext) {
     deploymentOptions: { verificationTimeoutMs: 1_000, pollIntervalMs: 5 } }
   const target = createNativeAssistantTarget(options)
   return { directory, profilePath, credentialsPath, basePath, configuration, target, options, calls, originalProfile, main,
+    setConfiguration(value: NativeChatConfiguration) { configuration = value },
+    onRpc(callback: (method: string) => Promise<void>) { onRpc = callback },
     assistant: () => ({ revision: revision(assistant), value: assistant }), setAssistant(value: ChatAssistantConfiguration) { assistant = value }, loaded(value: boolean) { loaded = value } }
 }
+
+test('moved dependency paths refresh verified assistant evidence without changing presets, credentials or sessions', async context => {
+  const data = await fixture(context)
+  const applied = await data.target.apply(request(await data.target.prepare(data.assistant().revision, signal)), signal)
+  const profile = await readFile(data.profilePath)
+  const credentials = await readFile(data.credentialsPath)
+  const moved = join(data.directory, 'moved-base.patch.yml')
+  await writeFile(moved, await readFile(data.basePath), { mode: 0o600 })
+  data.setConfiguration({ ...data.configuration, deployment: { ...data.configuration.deployment,
+    target: { ...data.configuration.deployment.target!, layerPaths: [moved] } } })
+  assert.deepEqual((await data.target.resolve(signal)).missingReasons, ['assistant_deployment_configuration_changed'])
+  const synchronized = await data.target.synchronizeVerified(signal)
+  assert.equal(synchronized.state, 'verified', JSON.stringify(synchronized))
+  assert.notEqual(synchronized.configurationRevision, applied.configurationRevision)
+  assert.equal(synchronized.agentPreset, applied.agentPreset)
+  assert.equal(synchronized.externalProvider, applied.externalProvider)
+  assert.equal((await data.target.prepareWork(signal)).resolution.configuration.enabled, true)
+  const journal = await readFile(join(data.directory, 'assistant-deployment.json'))
+  await data.target.synchronizeVerified(signal)
+  assert.deepEqual(await readFile(join(data.directory, 'assistant-deployment.json')), journal)
+  assert.deepEqual(await readFile(data.profilePath), profile)
+  assert.deepEqual(await readFile(data.credentialsPath), credentials)
+  assert(data.calls.every(method => ['settings/describe', 'agentPresets/list', 'agentPresets/read', 'credentials/describe', 'session/modelCatalog'].includes(method)))
+})
+
+test('synchronization never adopts a missing, uncertain or changed assistant target', async context => {
+  const data = await fixture(context)
+  await data.target.synchronizeVerified(signal)
+  assert.equal((await data.target.resolve(signal)).configuration.enabled, false)
+  await data.target.apply(request(await data.target.prepare(data.assistant().revision, signal)), signal)
+  const filename = join(data.directory, 'assistant-deployment.json')
+  const original = await readFile(filename, 'utf8')
+  const moved = join(data.directory, 'moved-base.patch.yml')
+  await writeFile(moved, await readFile(data.basePath), { mode: 0o600 })
+  const changed = { ...data.configuration, deployment: { ...data.configuration.deployment,
+    target: { ...data.configuration.deployment.target!, layerPaths: [moved] } } }
+  data.setConfiguration(changed)
+  for (const state of ['unknown', 'applying', 'pending_reload', 'prepared', 'blocked']) {
+    const journal = JSON.parse(original) as { pending: { state: string } }
+    journal.pending.state = state
+    const bytes = JSON.stringify(journal)
+    await writeFile(filename, bytes, { mode: 0o600 })
+    await data.target.synchronizeVerified(signal)
+    assert.equal(await readFile(filename, 'utf8'), bytes)
+  }
+  await writeFile(filename, original, { mode: 0o600 })
+  data.loaded(false)
+  assert.notEqual((await data.target.synchronizeVerified(signal)).state, 'verified')
+  assert.equal(await readFile(filename, 'utf8'), original)
+  data.loaded(true)
+  data.setConfiguration({ ...changed, providers: changed.providers.map(provider => provider.id === 'assistant'
+    ? { ...provider, apiKey: 'changed-private-key' } : provider) })
+  assert.notEqual((await data.target.synchronizeVerified(signal)).state, 'verified')
+  assert.equal(await readFile(filename, 'utf8'), original)
+  data.setConfiguration(changed)
+  data.setAssistant({ ...data.assistant().value, reasoningEffort: 'high' })
+  assert.notEqual((await data.target.synchronizeVerified(signal)).state, 'verified')
+  assert.equal(await readFile(filename, 'utf8'), original)
+})
+
+test('assistant admission failures expose bounded actionable reasons before work submission', () => {
+  assert.equal(assistantPreparationFailure(['assistant_deployment_configuration_changed']).code, 'ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED')
+  assert.equal(assistantPreparationFailure(['assistant_deployment_not_applied']).code, 'ASSISTANT_DEPLOYMENT_NOT_APPLIED')
+  assert.equal(assistantPreparationFailure(['assistant_deployment_reconciliation_required']).code, 'ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED')
+  assert.equal(assistantPreparationFailure(['/private/credential']).code, 'ASSISTANT_TARGET_UNAVAILABLE')
+})
+
+test('dependency files changing during live verification cannot advance assistant evidence', async context => {
+  const data = await fixture(context)
+  await data.target.apply(request(await data.target.prepare(data.assistant().revision, signal)), signal)
+  const moved = join(data.directory, 'moved-base.patch.yml')
+  await writeFile(moved, await readFile(data.basePath), { mode: 0o600 })
+  data.setConfiguration({ ...data.configuration, deployment: { ...data.configuration.deployment,
+    target: { ...data.configuration.deployment.target!, layerPaths: [moved] } } })
+  const journal = await readFile(join(data.directory, 'assistant-deployment.json'))
+  let changed = false
+  data.onRpc(async method => {
+    if (method !== 'settings/describe' || changed) return
+    changed = true
+    await writeFile(moved, (await readFile(moved, 'utf8')) + '\n', { mode: 0o600 })
+  })
+  const rejected = await data.target.synchronizeVerified(signal)
+  assert.equal(changed, true)
+  assert.equal(rejected.state, 'blocked')
+  assert(rejected.missingReasons.length > 0)
+  assert.deepEqual(await readFile(join(data.directory, 'assistant-deployment.json')), journal)
+})
 
 test('assistant explicit application creates one independent verified target while main presets/routes/session state remain intact', async context => {
   const data = await fixture(context)

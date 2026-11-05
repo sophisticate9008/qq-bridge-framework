@@ -67,6 +67,16 @@ function journal(input: unknown): Journal {
 }
 function unresolved(document: Journal): boolean { return document.pending !== null && ['applying', 'pending_reload', 'unknown'].includes(document.pending.state) }
 
+export function assistantPreparationFailure(reasons: readonly string[]): FrameworkError {
+  const detail = reasons.join(' ')
+  const code = /configuration_changed/.test(detail) ? 'ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED'
+    : /not_applied/.test(detail) ? 'ASSISTANT_DEPLOYMENT_NOT_APPLIED'
+    : /reconciliation|interrupted|unknown|pending_reload/.test(detail) ? 'ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED'
+    : reasons.includes('assistant_disabled') ? 'ASSISTANT_DISABLED'
+    : 'ASSISTANT_TARGET_UNAVAILABLE'
+  return new FrameworkError(code, '助手尚未接收任务。请检查助手部署状态；配置变化需更新部署，未确认操作需核对原记录。')
+}
+
 export interface NativeAssistantTargetResolution {
   readonly configuration: NativeWorkConfiguration
   readonly externalProvider: string | null
@@ -258,7 +268,8 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
       await capture?.(current)
       const document = await readJournal()
       if (unresolved(document.value)) fail('ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED')
-      if (document.value.applied?.configurationRevision !== current.configurationRevision) fail('ASSISTANT_DEPLOYMENT_NOT_APPLIED')
+      if (!document.value.applied) fail('ASSISTANT_DEPLOYMENT_NOT_APPLIED')
+      if (document.value.applied.configurationRevision !== current.configurationRevision) fail('ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED')
       const live = await verified(current)
       if (!live.applied) return { configuration: DEFAULT_NATIVE_WORK_CONFIGURATION, externalProvider: null, agentPreset: null,
         assistantRevision: current.assistantRevision, configurationRevision: current.configurationRevision, missingReasons: live.reasons }
@@ -284,6 +295,35 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     }
   }
   return Object.freeze({
+    /** Refresh verified evidence without writing the external profile or replaying an uncertain operation. */
+    async synchronizeVerified(signal: AbortSignal): Promise<NativeAssistantDeploymentSnapshot> {
+      return exclusive(async () => {
+        const document = await readJournal()
+        let current: Selected
+        try { current = await selected(signal) }
+        catch (error) { signal.throwIfAborted(); return projection(document, null, { state: 'blocked', missingReasons: [reason(error)] }) }
+        const { pending, applied } = document.value
+        if (pending?.state !== 'verified' || !applied || pending.assistantRevision !== current.assistantRevision
+          || applied.provider !== current.assistant.provider || applied.model !== current.assistant.model
+          || applied.configurationRevision === current.configurationRevision) return projection(document, current)
+        const target = current.configuration.deployment.target
+        if (!target) return projection(document, current)
+        const fingerprint = await targetFingerprint(target, signal)
+        const live = await verified(current)
+        // Both the generated identity and complete file/live provenance must still match the owned target.
+        if (!live.applied || live.applied.agentPreset !== applied.agentPreset || live.applied.externalProvider !== applied.externalProvider)
+          return projection(document, current, { missingReasons: live.reasons.length ? live.reasons : ['assistant_deployment_target_unverified'] })
+        const preview = await deployment.prepare(current.configuration)
+        if (preview.state !== 'prepared') return projection(document, current, { missingReasons: preview.missingReasons })
+        const fresh = await selected(signal)
+        if (fresh.assistantRevision !== current.assistantRevision || fresh.sourceConfigurationRevision !== current.sourceConfigurationRevision
+          || fresh.configurationRevision !== current.configurationRevision || await targetFingerprint(target, signal) !== fingerprint)
+          fail('ASSISTANT_CONFIGURATION_CHANGED')
+        const saved = await writeJournal(document.revision, { schema: 1, applied: live.applied,
+          pending: { ...pending, instanceId, configurationRevision: current.configurationRevision, targetRevision: preview.targetRevision, missingReasons: [] } }, signal)
+        return projection(saved, fresh)
+      })
+    },
     /** Startup-only eligibility: never adopt missing records or replay an uncertain deployment. */
     async needsManagedSynchronization(signal: AbortSignal): Promise<boolean> {
       if (busy) return false

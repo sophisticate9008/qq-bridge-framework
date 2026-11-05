@@ -57,6 +57,7 @@ export function createNativeAccountRuntimeBundle(options: {
   const runtime = createNativeChatRuntime({ directory, accountScope: options.accountScope, expectedSelfId: options.expectedSelfId,
     packageConfigurationRegistry, bootstrap, resolveWorkTarget: signal => assistantTarget.resolve(signal),
     prepareWorkTarget: signal => assistantTarget.prepareWork(signal),
+    synchronizeWorkTarget: async signal => { await assistantTarget.synchronizeVerified(signal) },
     async readWorkIdentity(signal) {
       signal.throwIfAborted()
       const { value } = await repository.readAssistant()

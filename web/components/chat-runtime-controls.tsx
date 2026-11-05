@@ -15,7 +15,7 @@ import { ReadOnlyDetails, TechnicalDetails } from './read-only-details.tsx';
 import { SettingsWindow } from './settings-window.tsx';
 import { useDshRestart } from '../lib/use-dsh-restart.ts';
 import { parseChatHealth } from '../../src/contracts/chat-health.ts';
-import { chatHealthBadge, chatHealthGuidance, chatHealthLayerLabel, chatHealthNames } from '../lib/chat-health.ts';
+import { chatHealthChecks, chatHealthBadge, chatHealthGuidance, chatHealthLayerLabel, chatHealthNames } from '../lib/chat-health.ts';
 import { FrameworkRestartControl } from './framework-restart-control.tsx';
 import { ChatRepairControl } from './chat-repair-control.tsx';
 import { useChatRepair } from '../lib/chat-repair.ts';
@@ -163,9 +163,9 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   const refreshControl = <Button variant="ghost" size="sm" disabled={active} onClick={() => { resource.refresh(); chain.refresh(); dshHealth.refresh(); refreshApplication(); }}><RefreshCw className="size-3.5" />刷新状态</Button>;
   const statusTone = health?.healthy && !resource.error ? 'success' : running || uncertain || resource.error || applicationState.blocked ? 'warning' : 'neutral';
   const statusLabel = repair.pending ? '正在恢复聊天' : active ? '正在处理' : resource.error ? '运行状态待确认' : chatHealthBadge(health, status);
-  const interrupted = health?.layers.filter(layer => !['ready', 'idle', 'stopped'].includes(layer.state)) ?? [];
+  const interrupted = health ? chatHealthChecks(health).filter(layer => !['ready', 'idle', 'stopped'].includes(layer.state)) : [];
   const chainChecks = <div className="stack" data-chat-health>
-    {health ? <dl className="info">{health.layers.map(layer => <div key={layer.id} className="contents"><dt>{chatHealthNames[layer.id]}</dt><dd><StatusPill tone={['ready', 'idle'].includes(layer.state) ? 'success' : layer.state === 'stopped' ? 'neutral' : 'warning'}>{chatHealthLayerLabel(layer)}</StatusPill></dd></div>)}</dl>
+    {health ? <dl className="info">{chatHealthChecks(health).map(layer => <div key={layer.id} className="contents"><dt>{chatHealthNames[layer.id]}</dt><dd><StatusPill tone={['ready', 'idle'].includes(layer.state) ? 'success' : layer.state === 'stopped' ? 'neutral' : 'warning'}>{chatHealthLayerLabel(layer)}</StatusPill></dd></div>)}</dl>
       : <p className="small muted">{chain.error ? '聊天链路诊断暂不可用。请刷新；若框架持续无响应，使用重启框架入口或运行机器上的命令。' : '正在分别检查收发接口与框架聊天链路。'}</p>}
     {interrupted.map(layer => <p key={layer.id} className="small" data-chat-health-guidance={layer.id}><strong>{chatHealthNames[layer.id]}：</strong>{chatHealthGuidance(layer)}</p>)}
   </div>;

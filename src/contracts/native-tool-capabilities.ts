@@ -76,7 +76,7 @@ export const NATIVE_TOOL_CAPABILITY_CATALOG = Object.freeze([
     description: '提议记录当前发言者的一条记忆或偏好，保存为待确认状态。将返回的确认命令告知用户；确认后才会参与上下文。' },
   { capability: 'native.work.start', tool: 'qbf_work_start', name: '启动独立工作',
     summary: '交给助手执行任务，并将结果送回会话。',
-    description: '调用已配置的独立助手模型执行任务，这就是让助手（例如 GPT）帮忙的入口。用户明确要求交给助手时提交 task 和必要 context，不用自己代答，也不要把聊天侧缺少文件或命令工具理解为助手也不能执行。助手按其实际工具处理任务，真实结果自动送回当前QQ会话。只返回路径不等于已发送文件，实际附件需由助手产出并经宿主登记回传。以调用结果判断是否受理或失败，不沿用先前回复中未经核实的“无法调用”；未知结果不重复提交。' },
+    description: '调用已配置的独立助手模型执行任务，这就是让助手（例如 GPT）帮忙的入口。用户明确要求交给助手时提交 task 和必要 context，不用自己代答，也不要把聊天侧缺少文件或命令工具理解为助手也不能执行。助手按其实际工具处理任务，真实结果自动送回当前QQ会话。只返回路径不等于已发送文件，实际附件需由助手产出并经宿主登记回传。以调用结果判断是否受理或失败，不沿用先前回复中未经核实的“无法调用”；未知结果不重复提交。ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED 表示助手部署需更新，ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED 表示原部署需核对，均尚未受理任务；说明实际原因，不猜测附件故障，不通过更换任务内容反复试投。' },
   { capability: 'native.work.status', tool: 'qbf_work_status', name: '查看工作状态',
     summary: '查看后台工作的进度和结果。',
     description: '读取当前会话内一项工作的实际状态、结果和投递回执。查询不会重放工作。' },

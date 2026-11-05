@@ -11,6 +11,22 @@ const call = (changes: Partial<FrameworkToolCall> = {}): FrameworkToolCall => ({
   sessionId: 'session-1', generation: 3, requestId: 'qq-inbox-request-1', userMessageId: 'dsh-user-message-1', turn: 4,
   input: { assetId: 'opaque-asset' }, expiresAt: Date.now() + 1000, ...changes })
 const signal = new AbortController().signal
+
+test('assistant preparation errors remain definite rejections with actionable codes', async () => {
+  for (const code of ['ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED', 'ASSISTANT_DEPLOYMENT_NOT_APPLIED',
+    'ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED', 'ASSISTANT_DISABLED', 'ASSISTANT_TARGET_UNAVAILABLE']) {
+    let calls = 0
+    const registry = createFrameworkToolRegistry({ async resolveScope(request) { return { eventId: 'source',
+      conversationId: 'group:123', sessionId: request.sessionId, generation: 3, featureId: 'work-tools', version: '1' } },
+      async invoke() { calls++; throw new FrameworkError(code, 'private details must not leak') } })
+    registry.register(definition, validate)
+    const request = call()
+    assert.deepEqual(await registry.execute(request, signal), { status: 'rejected', code })
+    assert.deepEqual(await registry.execute(request, signal), { status: 'rejected', code })
+    assert.equal(calls, 1)
+    registry.close()
+  }
+})
 const validate = (input: unknown) => {
   assert(input && typeof input === 'object' && !Array.isArray(input) && Object.keys(input).length === 1
     && 'assetId' in input && typeof input.assetId === 'string')

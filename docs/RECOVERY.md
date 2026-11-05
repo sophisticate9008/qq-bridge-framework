@@ -90,6 +90,10 @@ GET /api/chat/application?id=<原 operationId>
 
 助手目标独立使用 `/api/chat/assistant/deployment` 及其 `/prepare`、`/apply`、`/reconcile`。保存并启用 `chat-assistant` 的 provider/model/reasoning 会自动准备、应用并核验独立 target；只选择但未保存时不部署，target resolver 仍检查当前配置、已应用证据与模型元数据。unknown 不在工作启动时隐式部署。只有真实主人准入的独立工作子会话才应用 `fullAccess: true`，首轮前通过 DSH 官方权限服务设置并读回全本机权限；父会话和普通聊天不改变。请求范围与实际授予证据随工作记录持久保留，冷恢复仍核验原子会话绑定。
 
+聊天启动时对已确认的助手部署执行一次依赖同步，单账号与多账号使用相同检查。依赖路径变化后，只有原助手设置版本、供应商、模型、受管预设和路由身份均保持一致，且当前文件、实际 DSH 加载结果与凭据来源完整核验通过时，才以 CAS 更新本地部署证据。此过程不写外部配置、不创建预设或会话、不调用模型、不重放工作；检查期间配置或文件变化时拒绝更新。缺失记录、未确认或等待加载的部署均保留原状态，普通聊天可独立启动，助手异常由健康检查显示。实际模型、密钥、工具或预设变化仍需明确应用助手设置。
+
+`qbf_work_start` 的 `ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED` 表示部署需要同步，`ASSISTANT_DEPLOYMENT_NOT_APPLIED` 表示尚未应用，`ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED` 表示原操作需要核对。这些拒绝发生在助手任务受理前；修改任务措辞或附件形式不能恢复部署，模型应报告具体原因。
+
 本机接入优先自动发现实际 profile、凭据层与所选模型元数据，不要求重复填写已知路径或容量。修改受管配置之外的文件，不应通过“重新生成全部配置”来修复。实现与核对见 [dsh-profile-deployment.ts](../src/adapters/dsh-profile-deployment.ts)、[native-assistant-target.ts](../src/host/native-assistant-target.ts)。
 
 ## DSH 重启维护

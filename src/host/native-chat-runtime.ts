@@ -130,7 +130,7 @@ import { createNativeMemoryRuntime } from './native-memory-runtime.ts'
 import type { NativeMemoryReadOptions, NativeMemorySource } from '../contracts/native-memory.ts'
 import { createNativeMemoryCommand } from './native-memory-commands.ts'
 import { createNativeMemoryEffects } from './native-memory-effects.ts'
-import type { NativeAssistantTargetResolution, NativeAssistantWorkPreparation } from './native-assistant-target.ts'
+import { assistantPreparationFailure, type NativeAssistantTargetResolution, type NativeAssistantWorkPreparation } from './native-assistant-target.ts'
 import { createNativeWorkExecutor } from './native-work.ts'
 import { createNativeWorkHistoryReader } from './native-work-history.ts'
 import { createDshNativeWorkBackend } from './dsh-native-work.ts'
@@ -171,6 +171,7 @@ export interface NativeChatRuntimeOptions {
     => Promise<NativeChatDeploymentResolution>
   readonly resolveWorkTarget?: (signal: AbortSignal) => Promise<NativeAssistantTargetResolution>
   readonly prepareWorkTarget?: (signal: AbortSignal) => Promise<NativeAssistantWorkPreparation>
+  readonly synchronizeWorkTarget?: (signal: AbortSignal) => Promise<void>
   readonly readWorkEnabled?: (signal: AbortSignal) => Promise<boolean>
   readonly readWorkIdentity?: (signal: AbortSignal) => Promise<{ readonly nickname: string; readonly model: string | null } | null>
   readonly mediaTranscriber?: NativeMediaTranscriber
@@ -955,6 +956,12 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
       try {
         await options.prepareAuthorization?.()
         controller.signal.throwIfAborted()
+        // One pass before accepting input. Assistant failure remains independently visible in health.
+        if (options.synchronizeWorkTarget) {
+          try { await withDeadline({ signal: controller.signal, timeoutMs: 8_000,
+            code: 'ASSISTANT_SYNCHRONIZATION_TIMEOUT', run: options.synchronizeWorkTarget }) }
+          catch { controller.signal.throwIfAborted() }
+        }
         const selected = await withDeadline({ signal: controller.signal, timeoutMs: 15_000,
           code: 'NATIVE_CHAT_CONFIGURATION_TIMEOUT', run: () => inspect() })
         if (!sameRevisions(revisions, selected.configuration.revisions)) failure('NATIVE_CHAT_REVISION_CONFLICT')
@@ -1528,7 +1535,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             registerChild(binding) { return workInteractions.registerInteractionSession(binding.childId) },
             ...(options.prepareWorkTarget ? { prepareAdmission: async (signal: AbortSignal) => {
               const prepared = await options.prepareWorkTarget!(signal)
-              if (prepared.resolution.missingReasons.length || !prepared.resolution.configuration.enabled) failure('NATIVE_WORK_PREPARATION_REJECTED')
+              if (prepared.resolution.missingReasons.length || !prepared.resolution.configuration.enabled)
+                throw assistantPreparationFailure(prepared.resolution.missingReasons)
               checkedTarget(prepared.resolution, prepared.resolution.configuration)
               return { configuration: prepared.resolution.configuration, assertCurrent: prepared.assertCurrent,
                 backend: createBackend(async (configuration, currentSignal) => {

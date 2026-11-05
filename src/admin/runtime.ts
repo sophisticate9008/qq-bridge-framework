@@ -1036,7 +1036,7 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
     routes.push(...createPluginScheduleRoutes({ runtime: chatRuntime }))
     routes.push(...createStickerLibraryRoutes(chatRuntime))
     routes.push(...nativeChatControlRoutes(directory, chatRuntime, options.deploymentRuntime === undefined ? undefined : checkedNativeDeploymentRuntime(options.deploymentRuntime)))
-    routes.push(...createNativeChatHealthRoutes(directory, chatRuntime))
+    routes.push(...createNativeChatHealthRoutes(directory, chatRuntime, options.assistantTarget))
     routes.push(...createNativeSessionManagementRoutes({ directory, state: () => chatRuntime.activity().state,
       unbind: target => chatRuntime.unbindSession(target), bind: (target, sessionId, signal) => chatRuntime.bindSession(target, sessionId, signal) })
       .map(route => ({ ...route, handle: (request: Parameters<AdminRoute['handle']>[0]) =>

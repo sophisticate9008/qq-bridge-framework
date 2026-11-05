@@ -3,7 +3,7 @@ import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gatewayAdminAddress, type GatewayAdminConfiguration } from '../src/admin/gateway.ts';
 import { parseDshHealth } from '../src/contracts/dsh-health.ts';
-import { parseChatHealth } from '../src/contracts/chat-health.ts';
+import { chatHealthChecks, parseChatHealth } from '../src/contracts/chat-health.ts';
 import { parseNativeApplicationSnapshot } from '../src/contracts/native-application.ts';
 import { isRecord } from '../src/core/values.ts';
 import { privatePermissions } from '../src/storage/file-security.ts';
@@ -93,7 +93,7 @@ export async function readAdminHealth(configuration: Readonly<GatewayAdminConfig
     checks.push({ id: 'chat', state: restoring ? 'pending' : r.state === 'stopped' ? blocked ? 'blocked' : 'stopped'
       : r.state === 'starting' || r.state === 'stopping' ? 'pending' : !chatHealth ? 'unknown' : r.chatReady && chatHealth.healthy ? 'ready' : 'unavailable',
       reasons: [...new Set([...codes(r.missingReasons), ...(!r.chatReady ? codes([r.lastError]) : []),
-        ...(r.state === 'running' ? chatHealth ? codes(chatHealth.layers.filter(layer => !['ready', 'idle'].includes(layer.state)).map(layer => layer.reason))
+        ...(r.state === 'running' ? chatHealth ? codes(chatHealthChecks(chatHealth).filter(layer => !['ready', 'idle'].includes(layer.state)).map(layer => layer.reason))
           : ['chat_health_unavailable'] : []), ...(notRestored ? [restoring ? 'startup_restoring_chat' : 'running_intent_not_restored'] : [])])] });
   } else checks.push(unknown('protocol', runtime.reason), unknown('chat', runtime.reason));
   const a = application.value;
