@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>配置工作台 · 视觉更新静态设计案</title>
+    <link rel="stylesheet" href="preview.css" />
+  </head>
+  <body>
+    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <symbol id="sparkles" viewBox="0 0 24 24">
+          <path
+            d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z M20 2v4m-2-2h4"
+          />
+        </symbol>
+        <symbol id="grid" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5" />
+        </symbol>
+        <symbol id="waves" viewBox="0 0 24 24">
+          <path
+            d="M2 6q3-4 7 0t7 0 6 0M2 12q3-4 7 0t7 0 6 0M2 18q3-4 7 0t7 0 6 0"
+          />
+        </symbol>
+        <symbol id="user" viewBox="0 0 24 24">
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
+        </symbol>
+        <symbol id="bot" viewBox="0 0 24 24">
+          <rect x="4" y="7" width="16" height="13" rx="3" />
+          <path d="M12 3v4M9 12v2m6-2v2M9 17h6M1 12v4m22-4v4" />
+        </symbol>
+        <symbol id="monitor" viewBox="0 0 24 24">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8m-4-4v4" />
+        </symbol>
+        <symbol id="chat" viewBox="0 0 24 24">
+          <path
+            d="M21 11a2 2 0 0 1-2 2H9l-5 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v6ZM10 17h6l4 4v-5"
+          />
+        </symbol>
+        <symbol id="calendar" viewBox="0 0 24 24">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M7 2v6m10-6v6M3 11h18m-13 5h2m4 0h2" />
+        </symbol>
+        <symbol id="activity" viewBox="0 0 24 24">
+          <path d="M2 12h5l3-9 4 18 3-9h5" />
+        </symbol>
+        <symbol id="shield" viewBox="0 0 24 24">
+          <path d="M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6l-9-4Z m-4 9 3 3 5-5" />
+        </symbol>
+        <symbol id="cpu" viewBox="0 0 24 24">
+          <rect x="5" y="5" width="14" height="14" rx="2" />
+          <rect x="9" y="9" width="6" height="6" rx="1" />
+          <path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3" />
+        </symbol>
+        <symbol id="panel" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16" />
+        </symbol>
+        <symbol id="search" viewBox="0 0 24 24">
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 5 5" />
+        </symbol>
+        <symbol id="refresh" viewBox="0 0 24 24">
+          <path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" />
+        </symbol>
+        <symbol id="arrow" viewBox="0 0 24 24">
+          <path d="m9 5 7 7-7 7" />
+        </symbol>
+        <symbol id="chevron" viewBox="0 0 24 24">
+          <path d="m6 9 6 6 6-6" />
+        </symbol>
+        <symbol id="logout" viewBox="0 0 24 24">
+          <path d="M9 3H4v18h5m5-14 5 5-5 5m-5-5h10" />
+        </symbol>
+        <symbol id="list" viewBox="0 0 24 24">
+          <path d="M9 6h12M9 12h12M9 18h12M3 6h1m-1 6h1m-1 6h1" />
+        </symbol>
+        <symbol id="check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+        <symbol id="help" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1 .5-1.5 1-1.5 2m0 3h.01" />
+        </symbol>
+        <symbol id="link" viewBox="0 0 24 24">
+          <path
+            d="M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"
+          />
+        </symbol>
+      </defs>
+    </svg>
+
+    <div class="shell">
+      <aside class="sidebar" aria-label="工作台导航">
+        <div class="brand">
+          <span class="brand-mark"
+            ><svg><use href="#sparkles" /></svg
+          ></span>
+          <div>
+            <strong>配置工作台</strong
+            ><button
+              id="version-trigger"
+              class="version"
+              aria-haspopup="dialog"
+            >
+              v1.12.0 <svg><use href="#chevron" /></svg>
+            </button>
+          </div>
+        </div>
+        <nav>
+          <button class="nav-item active" aria-current="page">
+            <svg><use href="#grid" /></svg><span>连接与概览</span
+            ><small>01</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#waves" /></svg><span>连接设置</span
+            ><small>02</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#user" /></svg><span>人设编辑</span
+            ><small>03</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#bot" /></svg><span>聊天方案</span><small>04</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#monitor" /></svg><span>模型服务</span
+            ><small>05</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#chat" /></svg><span>会话与日志</span
+            ><small>06</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#calendar" /></svg><span>任务与日程</span
+            ><small>07</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#sparkles" /></svg><span>表情库</span
+            ><small>08</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#activity" /></svg><span>用量统计</span
+            ><small>09</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#sparkles" /></svg><span>功能与扩展</span
+            ><small>10</small>
+          </button>
+          <button class="nav-item">
+            <svg><use href="#shield" /></svg><span>访问与设置</span
+            ><small>11</small>
+          </button>
+        </nav>
+      </aside>
+      <button class="sidebar-scrim" aria-label="关闭导航" hidden></button>
+      <div class="workspace">
+        <header class="topbar">
+          <button
+            class="icon-button"
+            id="sidebar-toggle"
+            aria-label="切换侧栏"
+            aria-expanded="true"
+          >
+            <svg><use href="#panel" /></svg></button
+          ><span class="breadcrumb">连接与概览</span>
+          <div class="toolbar">
+            <button class="search">
+              <svg><use href="#search" /></svg><span>搜索工作台</span
+              ><kbd>Ctrl K</kbd>
+            </button>
+            <button class="icon-button" aria-label="本页目录">
+              <svg><use href="#list" /></svg>
+            </button>
+            <span class="connection"><i class="dot"></i>已连接</span
+            ><span class="divider"></span>
+            <label class="theme-control"
+              ><svg><use href="#monitor" /></svg
+              ><select id="theme" aria-label="配色模式">
+                <option value="light">日间模式</option>
+                <option value="dark">夜间模式</option>
+              </select></label
+            >
+            <button class="icon-button" aria-label="断开连接">
+              <svg><use href="#logout" /></svg>
+            </button>
+          </div>
+        </header>
+        <main>
+          <div class="page-heading">
+            <div class="heading-text">
+              <h1>连接与概览</h1>
+              <p>查看连接、调整当前聊天、处理运行问题</p>
+            </div>
+            <div class="row">
+              <button class="icon-button" aria-label="启动检查">
+                <svg><use href="#help" /></svg></button
+              ><button class="button ghost">
+                <svg><use href="#refresh" /></svg>刷新
+              </button>
+            </div>
+          </div>
+          <div class="summary-grid">
+            <section class="summary-card">
+              <div class="card-title">
+                <span class="avatar"
+                  ><svg><use href="#waves" /></svg
+                ></span>
+                <div>
+                  <h2>日常聊天</h2>
+                  <p>QQ · OneBot</p>
+                </div>
+                <span class="badge success"><i class="dot"></i>聊天就绪</span>
+              </div>
+              <div class="meta">
+                <span>8 个已绑定会话</span><span>机器人已连接</span>
+              </div>
+              <div class="summary-note">
+                已选方案：<span>日常聊天方案</span>
+              </div>
+              <div class="card-actions">
+                <button class="button outline">查看连接</button
+                ><button class="button ghost">详情</button
+                ><button class="button ghost">设置</button
+                ><button class="button ghost push">运行控制</button>
+              </div>
+            </section>
+            <section class="summary-card">
+              <div class="card-title">
+                <span class="avatar"
+                  ><svg><use href="#cpu" /></svg
+                ></span>
+                <div>
+                  <h2>DSH 服务</h2>
+                  <p>鉴权接口 · 独立连接检查</p>
+                </div>
+                <span class="badge success"><i class="dot"></i>服务可连接</span>
+              </div>
+              <div class="meta">
+                <span>3 个聊天方案</span><span>保持已有会话上下文</span>
+              </div>
+              <div class="summary-note">
+                DSH 鉴权接口已响应，聊天处理状态独立核对。
+              </div>
+              <div class="card-actions">
+                <button class="button outline">检查 DSH</button
+                ><button class="button ghost">详情</button
+                ><button class="button ghost push">设置</button>
+              </div>
+            </section>
+            <section class="summary-card">
+              <div class="card-title">
+                <span class="avatar"
+                  ><svg><use href="#bot" /></svg
+                ></span>
+                <div>
+                  <h2>后台助手</h2>
+                  <p>独立工作模式</p>
+                </div>
+                <span class="badge success"><i class="dot"></i>已开启</span>
+              </div>
+              <div class="meta">
+                <span>工作模型</span><span>敏感操作仅主人可用</span>
+              </div>
+              <div class="summary-note">助手已开启</div>
+              <div class="card-actions">
+                <button class="button outline">选择模型</button
+                ><button class="button ghost">详情</button
+                ><button class="button ghost push">工作记录</button>
+              </div>
+            </section>
+          </div>
+
+          <div class="content-split">
+            <section class="panel activity-panel">
+              <div class="panel-heading">
+                <h2>最近活动</h2>
+                <div class="activity-tools">
+                  <div class="segments" role="group" aria-label="活动来源">
+                    <button aria-pressed="true" data-source="all">全部</button
+                    ><button aria-pressed="false" data-source="qq">QQ</button
+                    ><button aria-pressed="false" data-source="simulation">
+                      模拟
+                    </button>
+                  </div>
+                  <span class="muted running">运行中</span
+                  ><button class="button ghost" aria-label="刷新活动">
+                    <svg><use href="#refresh" /></svg></button
+                  ><button class="text-button">全部记录</button>
+                </div>
+              </div>
+              <div class="activity-scroll">
+                <div class="activity-columns">
+                  <span>时间</span><span>状态</span><span>来源 / 会话</span
+                  ><span>活动内容</span><span></span>
+                </div>
+                <div id="activity-rows"></div>
+              </div>
+            </section>
+            <section class="panel chat-panel">
+              <div class="panel-heading">
+                <h2>当前聊天</h2>
+                <button class="text-button">
+                  完整编辑 <svg><use href="#arrow" /></svg>
+                </button>
+              </div>
+              <div class="settings-scroll">
+                <section class="settings-group">
+                  <h3>模型与人设</h3>
+                  <div class="form-grid">
+                    <label
+                      ><span>聊天方案</span
+                      ><select aria-label="聊天方案">
+                        <option>日常聊天方案</option>
+                        <option>专注工作方案</option>
+                      </select></label
+                    >
+                    <label
+                      ><span>关联人设</span
+                      ><select aria-label="关联人设">
+                        <option>默认伙伴</option>
+                      </select></label
+                    >
+                    <label
+                      ><span>聊天模型</span
+                      ><select aria-label="聊天模型">
+                        <option>日常模型</option>
+                      </select></label
+                    >
+                    <label
+                      ><span>思考强度</span
+                      ><select aria-label="思考强度">
+                        <option>高</option>
+                        <option>中</option>
+                        <option>低</option>
+                      </select></label
+                    >
+                  </div>
+                </section>
+                <section class="settings-group">
+                  <div class="group-heading">
+                    <h3>
+                      续聊策略 <svg class="help"><use href="#help" /></svg>
+                    </h3>
+                    <div class="row">
+                      <button class="text-button save" disabled>保存</button
+                      ><button class="text-button secondary">重新读取</button>
+                    </div>
+                  </div>
+                  <div class="number-grid">
+                    <label
+                      >基础续聊<span class="number-input"
+                        ><input
+                          type="number"
+                          value="90"
+                          aria-label="基础续聊秒数"
+                        /><span>秒</span></span
+                      ></label
+                    >
+                    <label
+                      >群聊唤醒概率<span class="number-input"
+                        ><input
+                          type="number"
+                          value="2"
+                          aria-label="群聊唤醒概率"
+                        /><span>%</span></span
+                      ></label
+                    >
+                    <label
+                      >发言后追加<span class="number-input"
+                        ><input
+                          type="number"
+                          value="2"
+                          aria-label="发言后追加秒数"
+                        /><span>秒</span></span
+                      ></label
+                    >
+                    <label
+                      >未读保留时长<span class="number-input"
+                        ><input
+                          type="number"
+                          value="15"
+                          aria-label="未读保留分钟数"
+                        /><span>分钟</span></span
+                      ></label
+                    >
+                  </div>
+                </section>
+                <section class="settings-group">
+                  <div class="group-heading">
+                    <h3>回复方式</h3>
+                    <button class="text-button secondary">详情</button>
+                  </div>
+                  <div class="row check-row">
+                    <label
+                      ><input type="checkbox" checked />短回复分条
+                      <svg class="help"><use href="#help" /></svg></label
+                    ><label
+                      ><input type="checkbox" checked />长文合并转发
+                      <svg class="help"><use href="#help" /></svg
+                    ></label>
+                  </div>
+                  <div class="group-footer">
+                    <span class="muted">保存后对后续回复生效</span>
+                    <div class="row">
+                      <button class="text-button secondary">长文设置</button
+                      ><button class="text-button secondary">重新读取</button
+                      ><button class="button save" disabled>
+                        保存回复设置
+                      </button>
+                    </div>
+                  </div>
+                </section>
+                <section class="settings-group">
+                  <div class="group-heading">
+                    <h3>媒体观察</h3>
+                    <button class="text-button secondary">详情</button>
+                  </div>
+                  <div class="row media-row">
+                    <label class="check-row"
+                      ><input type="checkbox" checked />允许观察视频</label
+                    ><label class="inline-field"
+                      ><span>画面方案</span
+                      ><select aria-label="画面方案">
+                        <option>V2 · 四宫格</option>
+                        <option>V1 · 单帧</option>
+                      </select></label
+                    >
+                  </div>
+                  <div class="group-footer">
+                    <span class="muted">保存后立即生效</span>
+                    <div class="row">
+                      <button class="text-button secondary">重新读取</button
+                      ><button class="button save" disabled>保存设置</button>
+                    </div>
+                  </div>
+                </section>
+                <section class="settings-group">
+                  <div class="group-heading">
+                    <h3>访问范围</h3>
+                    <div class="row">
+                      <span class="chip">3 个群聊</span
+                      ><span class="chip">5 个私聊</span
+                      ><button class="text-button secondary">管理</button>
+                    </div>
+                  </div>
+                  <p class="access-note">
+                    <span>✓ 群聊 @ 唤醒</span><span>✓ 私聊唤醒</span
+                    ><span class="muted">引用与续聊跟随人设</span>
+                  </p>
+                </section>
+                <section class="settings-group">
+                  <div class="group-heading">
+                    <h3>自动维护</h3>
+                    <span class="badge success">已启用</span>
+                  </div>
+                  <p class="muted">
+                    已结束运行记录保留 7 天；未完成和未知结果保留。
+                  </p>
+                </section>
+              </div>
+            </section>
+          </div>
+          <section class="panel attention">
+            <div class="panel-heading">
+              <h2>需要关注</h2>
+              <button class="text-button secondary">详情</button>
+            </div>
+            <div class="attention-body">
+              <svg><use href="#check" /></svg
+              ><span>当前没有需要处理的运行问题。</span>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <dialog
+      id="version-dialog"
+      aria-labelledby="version-title"
+      aria-describedby="version-description"
+    >
+      <div class="dialog-heading">
+        <div>
+          <h2 id="version-title">框架版本与更新</h2>
+          <p id="version-description">查看运行版本和 GitHub 正式发行版本。</p>
+        </div>
+        <button id="close-dialog" class="icon-button" aria-label="关闭版本窗口">
+          <svg><use href="#close" /></svg>
+        </button>
+      </div>
+      <div class="dialog-body">
+        <div class="version-summary">
+          <span class="version-logo"
+            ><svg><use href="#sparkles" /></svg
+          ></span>
+          <div>
+            <p class="muted">当前运行版本</p>
+            <strong>v1.12.0</strong>
+          </div>
+          <span class="badge success"><i class="dot"></i>最新正式版</span>
+        </div>
+        <dl class="version-facts">
+          <div>
+            <dt>最新发行</dt>
+            <dd>v1.12.0</dd>
+          </div>
+          <div>
+            <dt>安装方式</dt>
+            <dd>源码安装</dd>
+          </div>
+          <div>
+            <dt>检查状态</dt>
+            <dd id="check-status" role="status">当前已是最新正式版本</dd>
+          </div>
+        </dl>
+        <div class="update-note">
+          当前为源码安装，请使用 Git 更新并执行依赖安装与构建。
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button
+          class="text-button secondary"
+          data-preview="发行说明与下载为静态占位，不会打开外部网站。"
+        >
+          发行说明与下载 <svg><use href="#link" /></svg></button
+        ><button id="check-update" class="button primary">
+          <svg><use href="#refresh" /></svg>主动检查更新
+        </button>
+      </div>
+    </dialog>
+    <div id="preview-notice" class="preview-notice" role="status" hidden></div>
+    <script src="preview.js"></script>
+  </body>
+</html>
