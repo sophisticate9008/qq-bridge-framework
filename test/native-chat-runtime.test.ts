@@ -3126,8 +3126,9 @@ test('stale assistant deployment rejects tool admission with its exact reason an
   fake.rawFinal()
 })
 
-for (const kind of ['private', 'group'] as const) test(`failed ${kind} assistant work notifies its owner once without another model turn or replay`, async context => {
-  const fake = await fixture(context, { workChannel: true })
+for (const kind of ['private', 'group'] as const) for (const outcome of ['confirmed', 'unknown-send', 'parent-failed', 'expired'] as const)
+test(`failed ${kind} assistant work is narrated in its original model session (${outcome})`, async context => {
+  const fake = await fixture(context, { workChannel: true, unknownSend: outcome === 'unknown-send' })
   await fake.configure()
   const conversationId = kind === 'private' ? 'private:123' : 'group:456'
   const path = '/api/chat/tool-permissions', initial = await invoke(fake.routes(), 'GET', path)
@@ -3146,16 +3147,60 @@ for (const kind of ['private', 'group'] as const) test(`failed ${kind} assistant
   await until(() => fake.runtime().executions()!.forConversation(conversationId) === null)
   const [id, work] = [...fake.works][0]!
   fake.works.set(id, { ...work, state: 'unknown', result: null, error: 'WORK_RESULT_UNKNOWN' })
-  await until(() => fake.sends.some(value => JSON.stringify(value).includes('未收到可核验的最终结果')))
+  await until(() => fake.rpc.filter(row => row.method === 'session/prompt').length === 2)
+  const narration = fake.rpc.filter(row => row.method === 'session/prompt')[1]!.request
+  assert.equal(narration.sessionId, sessionId, 'failure facts return to the existing persona and context')
+  const facts = JSON.stringify(narration.content)
+  assert.match(facts, /host-observed-work-failure/)
+  assert.match(facts, /Inspect the file/)
+  assert.match(facts, /当前人设/)
+  assert.match(facts, /automaticallyRetried/)
+  assert.doesNotMatch(facts, /WORK_RESULT_UNKNOWN/)
+  assert.equal(fake.sends.length, 0, 'no raw framework notice is sent before model narration')
+  if (outcome === 'confirmed') {
+    const feedbackRequestId = String(narration.requestId)
+    fake.toolCalls.push({ ticket: 'failure-forbidden-task', leaseId: lease.leaseId, call: { id: 'failure-forbidden-task', name: 'qbf_work_start',
+      input: { task: 'must not retry or start work', context: '' }, sessionId, requestId: feedbackRequestId, generation: 1,
+      userMessageId: `user-${feedbackRequestId}`, turn: 2, expiresAt: Date.now() + 10000 } })
+    await until(() => fake.toolResults.has('failure-forbidden-task'))
+    assert.equal(fake.toolResults.get('failure-forbidden-task')?.status, 'rejected', 'narration cannot start or replay work')
+    assert.equal(fake.works.size, 1)
+  }
+  const actualNow = Date.now
+  const clock = outcome === 'expired' ? context.mock.method(Date, 'now', () => actualNow() + 100000) : null
+  if (outcome === 'parent-failed') fake.agentEvent('turn/end', { turn: 2,
+    reason: { kind: 'failed', error: { message: 'private-parent-provider-failure' } } })
+  else {
+    fake.agentEvent('assistant/message', { turn: 2, step: 0, message: { id: 'failure-persona-final', role: 'assistant',
+      content: [{ type: 'text', text: '刚才检查文件那件事卡住啦，还没拿到结果呢。' }] } })
+    fake.agentEvent('turn/end', { turn: 2, reason: { kind: 'completed' } })
+  }
+  await until(() => fake.runtime().executions()!.forConversation(conversationId) === null)
+  let noticeStatus: unknown = null
+  await until(() => {
+    const reader = createSqliteStore({ filename: join(fake.directory, 'native-chat.sqlite') })
+    try {
+      noticeStatus = reader.list('native-work.failure-notices').map(row => isRecord(row.value) ? row.value.status : null)[0]
+      return ['confirmed', 'rejected', 'unknown'].includes(String(noticeStatus))
+    } finally { reader.close() }
+  })
+  assert.equal(noticeStatus, outcome === 'confirmed' ? 'confirmed' : outcome === 'unknown-send' ? 'unknown' : 'rejected')
+  clock?.mock.restore()
+  const shouldSend = outcome === 'confirmed' || outcome === 'unknown-send'
+  assert.equal(fake.sends.length, shouldSend ? 1 : 0)
+  if (shouldSend) {
+    assert.match(JSON.stringify(fake.sends[0]), /刚才检查文件那件事卡住啦/)
+    assert.equal(String(fake.sends[0]![kind === 'group' ? 'group_id' : 'user_id']), kind === 'group' ? '456' : '123')
+    if (kind === 'group') assert.match(JSON.stringify(fake.sends[0]), /"type":"at","data":\{"qq":"123"/)
+  }
   assert.equal(fake.runtime().readWork(id)?.status, 'unknown')
-  const notice = fake.sends.filter(value => JSON.stringify(value).includes('未收到可核验的最终结果'))
-  assert.equal(notice.length, 1)
-  assert.equal(String(notice[0]![kind === 'group' ? 'group_id' : 'user_id']), kind === 'group' ? '456' : '123')
-  if (kind === 'group') assert.match(JSON.stringify(notice[0]), /"type":"at","data":\{"qq":"123"/)
-  assert.equal(fake.rpc.filter(row => row.method === 'session/prompt').length, 1)
+  assert.equal(fake.runtime().readWork(id)?.delivery, 'not-requested')
+  assert.equal(fake.rpc.filter(row => row.method === 'session/prompt').length, 2)
   assert.equal(fake.rpc.filter(row => row.method === 'bridgePlugin/startWork').length, 1)
+  assert.doesNotMatch(JSON.stringify(fake.sends), /WORK_RESULT_UNKNOWN|private-parent-provider-failure|原任务记录已保留/)
   await fake.restart()
-  assert.equal(fake.sends.filter(value => JSON.stringify(value).includes('未收到可核验的最终结果')).length, 1)
+  assert.equal(fake.sends.length, shouldSend ? 1 : 0)
+  assert.equal(fake.runtime().host()!.sessions.get(conversationId)?.sessionId, sessionId)
 })
 
 test('changing the configured owner blocks a pending failure notice to the former owner', async context => {
@@ -3183,6 +3228,7 @@ test('changing the configured owner blocks a pending failure notice to the forme
       .some(row => isRecord(row) && typeof row.value === 'string' && ['rejected', 'unknown'].includes(String(objectForNotice(row.value).status))) }
     finally { database.close() }
   })
-  assert.equal(fake.sends.some(value => JSON.stringify(value).includes('未收到可核验的最终结果')), false)
+  assert.equal(fake.sends.length, 0)
+  assert.equal(fake.rpc.filter(row => row.method === 'session/prompt').length, 1)
   function objectForNotice(text: string): Record<string, unknown> { const parsed: unknown = JSON.parse(text); assert(isRecord(parsed)); return parsed }
 })

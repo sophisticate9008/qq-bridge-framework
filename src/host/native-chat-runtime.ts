@@ -1751,7 +1751,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             && host?.replies.get(conversationId)?.status !== 'waiting',
           onFault: code => { lastError = code; activity.record('error', null, undefined, {}, code) } })
         workFailures = createNativeWorkFailureNotifier({ store, signal: controller.signal,
-          ...createNativeWorkFailureDelivery({ host, store, persona: outgoingPersona, owner: () => active?.access.owner ?? null,
+          ...createNativeWorkFailureDelivery({ host, store,
+            present: (notice, signal) => workFeedback ? workFeedback.failure(notice, signal) : Promise.resolve({ status: 'rejected' }),
+            owner: () => active?.access.owner ?? null,
             guard: (conversationId, signal) => guard(conversationId, signal, true, 'delivery') }),
           onFault: code => activity.record('error', null, undefined, {}, code) })
         const runningResources: NativeRunningRunResources = { lifetime: controller, host, dsh, work, claims, executions,

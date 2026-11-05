@@ -20,15 +20,15 @@ function fixture(context: TestContext) {
 }
 const settled=async(f:ReturnType<typeof fixture>)=>awaitCondition(()=>f.store.list('native-work.failure-notices').some(r=>!['pending','sending'].includes(String(object(r.value).status))),{timeoutMs:2000,message:'Failure notice must settle'})
 
-test('unknown work notifies the original group owner once without model generation or rewriting work evidence',async context=>{
+test('unknown work produces one owner-bound failure notice with bounded facts and preserves work evidence',async context=>{
   const f=fixture(context),before=f.store.read('native-work.executions','work-1'),notifier=f.create()
   notifier.observe('work-1');notifier.observe('work-1');await settled(f)
   assert.equal(f.notices.length,1)
-  assert.deepEqual(f.notices[0]!.content[0],{type:'mention',userId:'123'})
+  assert.equal(f.notices[0]!.ownerId,'123')
+  assert.equal(f.notices[0]!.reason,'unknown')
+  assert.equal(f.notices[0]!.taskSummary,null)
   assert.equal(f.notices[0]!.work.conversationId,'group:456')
-  const body=JSON.stringify(f.notices[0]!.content)
-  assert.match(body,/执行中断/);assert.match(body,/不代表已完成/);assert.match(body,/没有自动重新提交/)
-  assert.doesNotMatch(body,/WORK_RESULT_UNKNOWN|token|https:/)
+  assert.equal('content' in f.notices[0]!,false,'failure facts cannot be sent as a canned QQ message')
   assert.deepEqual(f.store.read('native-work.executions','work-1'),before)
   await notifier.recover();await f.create().recover();assert.equal(f.notices.length,1)
 })
@@ -36,7 +36,7 @@ test('unknown work notifies the original group owner once without model generati
 test('private task failures and deadlines are clear and do not duplicate existing result delivery',async context=>{
   const f=fixture(context);f.put({status:'failed',conversationId:'private:123',lastError:'NATIVE_WORK_TIMEOUT_UNKNOWN'})
   const notifier=f.create();notifier.observe('work-1');await settled(f)
-  assert(f.notices[0]!.content.every(p=>p.type!=='mention'));assert.match(JSON.stringify(f.notices[0]!.content),/超过本次时间限制/)
+  assert.equal(f.notices[0]!.work.conversationId,'private:123');assert.equal(f.notices[0]!.reason,'timeout')
   f.put({runId:'run-2',status:'failed',delivery:'confirmed'});notifier.observe('work-1')
   assert.equal(f.store.list('native-work.failure-notices').length,1)
 })
@@ -71,4 +71,12 @@ test('an interrupted sending record is sealed unknown on recovery and never repl
   await notifier.recover();await settled(f)
   assert.equal(object(f.store.read('native-work.failure-notices',key)!.value).status,'unknown')
   assert.equal(f.notices.length,0)
+})
+
+test('task summaries are bounded data and never contain a prepared QQ reply',async context=>{
+  const f=fixture(context);f.put({taskSummary:'检查\n文件'+ '字'.repeat(200)})
+  const notifier=f.create();notifier.observe('work-1');await settled(f)
+  assert.equal(f.notices[0]!.taskSummary?.length,120)
+  assert.doesNotMatch(f.notices[0]!.taskSummary!,/\n/)
+  assert.equal('content' in f.notices[0]!,false)
 })

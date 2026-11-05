@@ -215,21 +215,32 @@ export function createNativeAgentCoordinator(options: {
                 const value = feedback ? object(feedback.value) : null
                 const workFeedback = value?.schema === 1 && value.conversationId === binding.conversationId
                   && value.parentSessionId === binding.sessionId && value.generation === binding.generation
-                const workRow = workFeedback && value?.final === false && typeof value.workId === 'string'
+                const workRow = workFeedback && (value?.final === false || typeof value?.failureNoticeId === 'string') && typeof value.workId === 'string'
                   ? store.read('native-work.executions', value.workId) : null
                 const currentWork = workRow ? object(workRow.value) : null
                 const staleProgress = workFeedback && value?.final === false && (!currentWork
                   || currentWork.conversationId !== binding.conversationId || currentWork.parentSessionId !== binding.sessionId
                   || currentWork.generation !== binding.generation || !['starting', 'running'].includes(String(currentWork.status)))
+                const failureNotice = workFeedback && typeof value?.failureNoticeId === 'string'
+                  ? object(store.read('native-work.failure-notices', value.failureNoticeId.slice('work-failure:'.length))?.value) : null
+                const staleFailure = failureNotice !== null && (!currentWork || failureNotice.status !== 'sending'
+                  || value?.status !== 'submitting' || typeof value.deadlineAt !== 'number' || value.deadlineAt <= Date.now()
+                  || currentWork.conversationId !== binding.conversationId || currentWork.parentSessionId !== binding.sessionId
+                  || currentWork.generation !== binding.generation || currentWork.childId !== value.childId
+                  || currentWork.ownerId !== value.ownerId || value.ownerId !== runtime.configuration?.access.owner
+                  || (currentWork.runId ?? value.workId) !== value.runId || currentWork.result !== null
+                  || currentWork.delivery !== 'not-requested' || !['failed', 'unknown'].includes(String(currentWork.status)))
                 const decision = parseNativeReplyDecision(event.content ?? [])
                 const presentation = readAgentPresentation(store, execution.requestId, binding)?.value
                 const hostPresentation = presentation !== undefined && presentation.delivery === null
                   && presentation.deadlineAt > Date.now() && ['submitting', 'accepted'].includes(presentation.submission)
-                if ((!workFeedback && !hostPresentation) || decision || staleProgress) {
-                  settleSilent(execution, decision ?? (staleProgress ? { state: 'silent', reason: 'no-useful-addition' } : null))
+                if ((!workFeedback && !hostPresentation) || decision || staleProgress || staleFailure) {
+                  settleSilent(execution, decision ?? (staleProgress || staleFailure ? { state: 'silent', reason: 'no-useful-addition' } : null))
                   runtime.host?.releaseDeliveryRequest(execution.requestId)
                   return
                 }
+                if (failureNotice && binding.conversationId.startsWith('group:') && typeof value?.ownerId === 'string')
+                  event = { ...event, content: [{ type: 'mention', userId: value.ownerId }, ...(event.content ?? [])] }
               }
               if (event.type === 'failed') {
                 const pending = matchingReply(binding, execution.requestId)

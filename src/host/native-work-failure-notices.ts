@@ -1,4 +1,4 @@
-import type { DeliveryReceipt, MessageContent, PersonaScope } from '../core/types.ts'
+import type { DeliveryReceipt } from '../core/types.ts'
 import type { NativeWorkView } from '../contracts/native-work.ts'
 import type { createBridgeHost } from './bridge.ts'
 import type { DurableStore } from './types.ts'
@@ -12,19 +12,9 @@ export interface WorkFailureNotice {
   readonly work: NativeWorkView
   readonly ownerId: string
   readonly runId: string
-  readonly content: readonly MessageContent[]
+  readonly taskSummary: string | null
+  readonly reason: 'timeout' | 'interrupted' | 'failed' | 'unknown'
 }
-function text(work: NativeWorkView, summary: unknown): string {
-  const reason = /TIMEOUT|DEADLINE/.test(work.lastError ?? '') ? '助手执行超过本次时间限制。'
-    : /INTERRUPTED|STOP_UNKNOWN/.test(work.lastError ?? '') ? '助手执行被中断，最终结果尚未确认。'
-    : work.status === 'failed' ? '助手任务未能完成。' : '助手执行中断，未收到可核验的最终结果。'
-  const progress = work.progress?.at(-1)?.text.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300)
-  const title = typeof summary === 'string' && summary.trim() ? `「${summary.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120)}」` : work.id.slice(0, 8)
-  return `助手任务 ${title} 已中断。\n${reason}`
-    + (progress ? `\n最后记录的进展（不代表已完成）：${progress}` : '')
-    + '\n原任务记录已保留，没有自动重新提交任务；已执行操作是否完成需按原记录核对。'
-}
-
 /** Failure notices have their own durable send evidence; they never turn unknown work into success or retry it. */
 export function createNativeWorkFailureNotifier(options: {
   readonly store: DurableStore
@@ -63,10 +53,11 @@ export function createNativeWorkFailureNotifier(options: {
     let receipt: DeliveryReceipt = { status: 'unknown' }
     let code: string | null = null
     try {
-      receipt = await withDeadline({ signal: options.signal, timeoutMs: 30000, code: 'WORK_FAILURE_NOTICE_UNKNOWN',
+      receipt = await withDeadline({ signal: options.signal, timeoutMs: 120000, code: 'WORK_FAILURE_NOTICE_UNKNOWN',
         run: signal => options.deliver({ id: `work-failure:${key}`, work, ownerId: String(saved.ownerId), runId: String(saved.runId),
-          content: [...(work.conversationId.startsWith('group:') ? [{ type: 'mention' as const, userId: String(saved.ownerId) }] : []),
-            { type: 'text', text: text(work, original.taskSummary) }] }, signal) })
+          taskSummary: typeof original.taskSummary === 'string' ? original.taskSummary.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120) : null,
+          reason: /TIMEOUT|DEADLINE/.test(work.lastError ?? '') ? 'timeout'
+            : /INTERRUPTED|STOP_UNKNOWN/.test(work.lastError ?? '') ? 'interrupted' : work.status === 'failed' ? 'failed' : 'unknown' }, signal) })
     } catch (error) { code = errorCode(error, 'WORK_FAILURE_NOTICE_UNKNOWN'); options.onFault?.(code) }
     options.store.write(namespace, key, json({ ...saved, status: receipt.status, receipt, errorCode: code, observedAt: Date.now() }), { expectedRevision: sending.revision })
   }
@@ -114,11 +105,11 @@ export function createNativeWorkFailureNotifier(options: {
   })
 }
 
-/** A fixed framework notice can still be delivered when the model channel has failed. */
+/** Validate the original delegation before asking its parent agent to narrate failure facts. */
 export function createNativeWorkFailureDelivery(options: {
   readonly host: ReturnType<typeof createBridgeHost>
   readonly store: DurableStore
-  readonly persona: PersonaScope
+  readonly present: (notice: WorkFailureNotice, signal: AbortSignal) => Promise<DeliveryReceipt>
   readonly owner: () => string | null
   readonly guard: (conversationId: string, signal: AbortSignal) => Promise<void>
 }) {
@@ -132,22 +123,11 @@ export function createNativeWorkFailureDelivery(options: {
   }
   return { current,
     async deliver(notice: WorkFailureNotice, signal: AbortSignal): Promise<DeliveryReceipt> {
-      const { work, ownerId, id, runId } = notice
+      const { work, ownerId, runId } = notice
       await options.guard(work.conversationId, signal)
+      signal.throwIfAborted()
       assert(current(work, ownerId, runId), 'WORK_PARENT_UNAVAILABLE', 'The original work owner or conversation changed.')
-      options.host.policy.grant({ ...(options.host.accountScope ? { accountScope: options.host.accountScope } : {}), id,
-        featureId: 'native-work-failure', conversationId: work.conversationId, capabilities: ['messaging.send'],
-        maxUses: { 'messaging.send': 1 }, expiresAt: Date.now() + 30000 })
-      try {
-        signal.throwIfAborted()
-        assert(current(work, ownerId, runId), 'WORK_PARENT_UNAVAILABLE', 'The original work owner or conversation changed.')
-        const reservation = options.host.policy.reserve({ ...(options.host.accountScope ? { accountScope: options.host.accountScope } : {}),
-          featureId: 'native-work-failure', conversationId: work.conversationId, capability: 'messaging.send' })
-        options.host.policy.begin(reservation)
-        return await options.host.outbox.send({ conversationId: work.conversationId, content: notice.content, idempotencyKey: id, signal,
-          scope: { ...(options.host.accountScope ? { accountScope: options.host.accountScope } : {}), persona: options.persona,
-            sessionId: work.parentSessionId, generation: work.generation } })
-      } finally { options.host.policy.revoke(id) }
+      return options.present(notice, signal)
     }
   }
 }
