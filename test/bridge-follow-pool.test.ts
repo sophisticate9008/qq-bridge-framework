@@ -127,19 +127,25 @@ test('follow pool pins a pending submit even when the idle predicate says true',
   assert.deepEqual(fake.disposed, ['session-one'])
 })
 
-test('aborted FIFO admission never creates after the earlier creation releases the admission lock', async context => {
-  const pending = deferred<{ sessionId: string }>()
-  const fake = fixture(context, { createSession: async () => pending.promise })
-  const first = fake.receive('one')
-  await until(() => fake.created.length === 1)
+test('aborted FIFO admission never creates after an earlier retirement releases the slot lock', async context => {
+  const pending = deferred<void>()
+  let retiring = false
+  const fake = fixture(context, { maxSessions: 1, isIdle: () => true, async follow(request) {
+    return async () => {
+      if (request.sessionId === 'session-one') { retiring = true; await pending.promise }
+    }
+  } })
+  assert.equal((await fake.receive('one')).status, 'accepted')
+  const replacement = fake.receive('two')
+  await until(() => retiring)
   const controller = new AbortController()
-  const second = fake.receive('two', 'input', controller.signal)
+  const cancelled = fake.receive('three', 'input', controller.signal)
   await nextTurn()
   controller.abort()
-  pending.resolve({ sessionId: 'session-one' })
-  assert.equal((await first).status, 'accepted')
-  assert.notEqual((await second).status, 'accepted')
+  pending.resolve()
+  assert.equal((await replacement).status, 'accepted')
+  assert.notEqual((await cancelled).status, 'accepted')
   await nextTurn()
-  assert.deepEqual(fake.created, ['one'])
-  assert.equal(fake.host.sessions.get('two'), null)
+  assert.deepEqual(fake.created, ['one', 'two'])
+  assert.equal(fake.host.sessions.get('three'), null)
 })
