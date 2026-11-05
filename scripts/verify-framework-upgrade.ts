@@ -14,7 +14,7 @@ export async function verifyFrameworkUpgrade(candidate: string): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), 'qbf-previous-release-'));
   const run = promisify(execFile), prefix = `qq-bridge-framework-${previous}`;
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:/Windows', 'System32/tar.exe') : 'tar';
-  const env = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }; delete env.QQ_BRIDGE_FRAMEWORK_CONFIG;
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }; delete env.QQ_BRIDGE_FRAMEWORK_CONFIG;
   try {
     const base = `https://github.com/sophisticate9008/qq-bridge-framework/releases/download/v${previous}`;
     const sums = await fetch(`${base}/SHA256SUMS`, { signal: AbortSignal.timeout(60_000) }); assert(sums.ok);

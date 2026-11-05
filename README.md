@@ -14,19 +14,19 @@ AI许愿生成的，目前自用
 
 需要 **Node.js 24.12.0 或更新版本**、npm、已登录 QQ 的 OneBot v11 协议端，以及与桥接插件兼容的独立 DSH 实例。Windows x64 使用 ZIP 与双击启动脚本；Linux x64／ARM64 使用全量 TAR 包。原生 CI 环境为 Windows Server 2022 与 Ubuntu 24.04，涵盖安装、WebUI、原生排版和重启；Windows 另验证模拟聊天链路。见 [Windows 使用说明](docs/WINDOWS.md)与[平台验证记录](docs/VALIDATION.md)。
 
-从 [v1.11.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.11.0) 下载对应完整包：
+从 [v1.12.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.12.0) 下载对应完整包：
 
-- Windows x64：`qq-bridge-framework-1.11.0-windows-x64.zip`，解压后双击 `start-windows.cmd`，首次自动安装生产依赖并初始化。
-- Linux x64／ARM64：`qq-bridge-framework-1.11.0.tar.gz`，按下面命令启动。
+- Windows x64：`qq-bridge-framework-1.12.0-windows-x64.zip`，解压后双击 `start-windows.cmd`，首次自动安装生产依赖并初始化。
+- Linux x64／ARM64：`qq-bridge-framework-1.12.0.tar.gz`，按下面命令启动。
 
 两种包均包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包，附件由 `SHA256SUMS` 校验。
 
 ```sh
-tar -xzf qq-bridge-framework-1.11.0.tar.gz
-cd qq-bridge-framework-1.11.0
+tar -xzf qq-bridge-framework-1.12.0.tar.gz
+cd qq-bridge-framework-1.12.0
 npm ci --omit=dev
 npm run cli -- init
-npm start
+npm run cli -- serve
 ```
 
 框架包使用已构建产物启动，无需 Git 和本地构建。Node.js 与目标平台依赖由运行机器提供，QQ 协议端与 DSH 独立安装。SDK 供扩展开发，DSH 桥接插件安装到 DSH；两者也随框架包保存在 `components/`。
@@ -34,6 +34,8 @@ npm start
 打开 `http://127.0.0.1:3210`，完成管理令牌初始化。依次配置 QQ 与 DSH 连接、模型服务、人设和聊天方案、主人及会话白名单，最后应用并启用聊天。
 
 首次安装请完整阅读 [安装教程](docs/INSTALL.md)，其中包含外部依赖、端口、QQ 收发连接和 DSH 桥接插件的准备步骤。初始化只创建框架配置，不安装协议端或 DSH；允许会话列表初始为空。
+
+Docker 用户可下载同版本 `docker-amd64` 或 `docker-arm64` 镜像归档，按 [Docker 安装](docs/DOCKER.md) 使用持久卷启动。完整包支持 [WebUI 与命令行更新](docs/UPDATING.md)，保留配置、会话和私人扩展。
 
 ## 当前功能
 
@@ -55,7 +57,7 @@ npm start
 
 安装、注册、就绪与授权分别显示。实际能力以所选模型、协议端、DSH 插件和已加载扩展为准。使用示例和限制见 [使用教程](docs/USAGE.md)。
 
-当前版本为 **v1.11.0**（框架、SDK 与 DSH 桥接插件统一为 `1.11.0`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
+当前版本为 **v1.12.0**（框架、SDK 与 DSH 桥接插件统一为 `1.12.0`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
 
 ## 文档
 
@@ -63,6 +65,8 @@ npm start
 
 | 需要做什么 | 文档 |
 | --- | --- |
+| 安全升级、回滚与兼容承诺 | [更新流程](docs/UPDATING.md) |
+| Docker 安装与数据卷 | [Docker](docs/DOCKER.md) |
 | 从零安装、准备依赖和首次连接 | [安装教程](docs/INSTALL.md) |
 | 聊天、媒体、助手、权限与日常设置 | [使用教程](docs/USAGE.md) |
 | 唤醒、未读过期、引用补读与聊天策略维护 | [聊天策略维护](docs/CHAT_STRATEGY.md) |
