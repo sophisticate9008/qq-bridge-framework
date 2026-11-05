@@ -495,19 +495,22 @@ test('DSH bridge stream resumes persisted progress, reassembles large events and
       data: bytes.subarray(offset, offset + 192 * 1024).toString('base64'),
     })
   }
+  let epoch = 'epoch'
+  let reopening = false
   const fake = await fixture(context, {
     rpc(request, response) {
       if (request.method !== 'bridgePlugin/describe') return false
       response.end(JSON.stringify({ type: 'server-response', rpcId: request.rpcId, result: { ok: true, value: {
         protocol: 'qq-bridge-framework.dsh-bridge/1', pluginVersion: '99.0.0', sdkVersion: 'future-build',
-        issuerEpoch: 'epoch', authentication: 'dsh-owner-peer', durableReceipts: false,
+        issuerEpoch: epoch, authentication: 'dsh-owner-peer', durableReceipts: false,
         claimMeaning: 'inbox-claimed-not-completed', externalToolAuthorizationVerified: false,
         retention: { maxReceipts: 4096, maxAgeMs: 300000, maxPage: 128 }, sessionEventsProtocol: protocol,
         methods: ['bridgePlugin/followSessionEvents'],
       } } })); return true
     },
-    snapshot: { type: 'snapshot', protocol, issuerEpoch: 'epoch', header: { id: 'session-1' }, cursor: 3, headCursor: 5, records: [] },
+    snapshot: () => ({ type: 'snapshot', protocol, issuerEpoch: epoch, header: { id: 'session-1' }, cursor: reopening ? 5 : 3, headCursor: 5, records: [] }),
     opened(socket, id) {
+      if (reopening) { send(socket, id, { type: 'ready', cursor: 5 }); return }
       chunks(socket, id, { seq: 4, time: 1, type: 'assistant/message', data: { turn: 1,
         message: { role: 'assistant', content: [{ type: 'text', text: 'Private historical reply.' }] } } }, true)
       chunks(socket, id, { seq: 5, time: 1, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }, true)
@@ -526,6 +529,13 @@ test('DSH bridge stream resumes persisted progress, reassembles large events and
   assert.equal(JSON.stringify(events).includes('Private historical reply'), false)
   assert.equal(fake.requests.filter(request => request.method === 'session/prompt').length, 0)
   await stop()
+  epoch = 'restarted-generation'
+  reopening = true
+  const resumed = await client.follow({ sessionId: 'session-1', signal: signal(), onEvent() { assert.fail('No missing events') } })
+  assert.equal(fake.requests.filter(request => request.method === 'bridgePlugin/describe').length, 2)
+  const resumedInput = fake.streams[1]!.input as { payload: { args: { request: { issuerEpoch: string; after: number } } } }
+  assert.deepEqual(resumedInput.payload.args.request, { sessionId: 'session-1', issuerEpoch: epoch, after: 5 })
+  await resumed()
   // The generic transport preserves a large event byte-for-byte under the bounded chunk carrier.
   const big = 'x'.repeat(1_200_000)
   let received = ''

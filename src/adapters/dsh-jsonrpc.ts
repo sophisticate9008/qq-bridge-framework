@@ -147,7 +147,9 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
       description.sessionEventsProtocol === 'qq-bridge-framework.session-events/1'
         && description.methods?.includes('bridgePlugin/followSessionEvents') ? { issuerEpoch: description.issuerEpoch } : null)
     const pending = streamDescription
-    void pending.catch(() => { if (streamDescription === pending) streamDescription = undefined })
+    // Coalesce concurrent openings, then re-read the live generation on a later reconnect.
+    const clear = () => { if (streamDescription === pending) streamDescription = undefined }
+    void pending.then(clear, clear)
     signal.throwIfAborted()
     return pending
   }
