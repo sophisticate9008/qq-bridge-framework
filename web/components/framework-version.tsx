@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useSidebar } from './ui/sidebar.tsx';
 import { parseFrameworkReleaseStatus, type FrameworkReleaseStatus } from '../../src/contracts/framework-release.ts';
 import { parseFrameworkUpdateState, type FrameworkUpdateState } from '../../src/contracts/framework-update.ts';
 import { asRecord, errorMessage, type ApiClient } from '../lib/api.ts';
 import { Button } from './ui/button.tsx';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog.tsx';
 
-export function FrameworkVersion({ api, connected }: { readonly api: ApiClient; readonly connected: boolean }) {
+// Keep requests and update state mounted even when the mobile navigation is closed.
+export function FrameworkVersion({ api, connected, triggerContainer }: { readonly api: ApiClient; readonly connected: boolean; readonly triggerContainer: HTMLElement | null }) {
+  const { setOpenMobile } = useSidebar();
   const [status, setStatus] = useState<FrameworkReleaseStatus | null>(null);
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [updateAvailable, setUpdateAvailable] = useState(false), [update, setUpdate] = useState<FrameworkUpdateState | null>(null);
@@ -62,9 +66,9 @@ export function FrameworkVersion({ api, connected }: { readonly api: ApiClient; 
     } catch (failure) { setError(errorMessage(failure)); }
     finally { setBusy(false); }
   }
-  return <><Button variant="ghost" size="sm" disabled={!connected} onClick={() => setOpen(true)} aria-label="框架版本与更新" className="text-xs tabular-nums">
+  return <>{triggerContainer && createPortal(<Button variant="ghost" size="sm" disabled={!connected} onClick={() => { setOpenMobile(false); setOpen(true); }} aria-label="框架版本与更新" className="h-5 justify-start px-0 text-xs text-muted-foreground tabular-nums">
     {status ? `v${status.currentVersion}` : '版本'}{status?.state === 'available' && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
-  </Button><Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>框架版本与更新</DialogTitle><DialogDescription>查看运行版本和 GitHub 正式发行版本。</DialogDescription></DialogHeader>
+  </Button>, triggerContainer)}<Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>框架版本与更新</DialogTitle><DialogDescription>查看运行版本和 GitHub 正式发行版本。</DialogDescription></DialogHeader>
     <div className="stack text-sm"><p>当前版本：{status ? `v${status.currentVersion}` : '待读取'}</p>
       <p>最新发行：{status?.latestVersion ? `v${status.latestVersion}` : '尚未获取'}</p>
       {status?.state === 'current' && <p>当前已是最新正式版本。</p>}
