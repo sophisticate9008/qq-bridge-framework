@@ -6,6 +6,8 @@ import { parseUsageRecent, parseUsageSeries, type UsageRecent, type UsageSeries 
 
 interface SelectionData {
   readonly scope: string;
+  readonly api: ApiClient;
+  readonly selectionCount: number;
   readonly summary: UsageSnapshot;
   readonly series: UsageSeries;
   readonly recent: UsageRecent;
@@ -36,12 +38,13 @@ export function useUsageSelectionData(api: ApiClient, connected: boolean, keys: 
         if (summary.conversations.some(item => !item.ledgerKey || !query.split(',').includes(item.ledgerKey))) {
           throw new Error('服务未正确应用会话筛选，请更新框架后重试');
         }
-        setData({ scope, summary, series, recent });
+        setData({ scope, api, selectionCount: query.split(',').length, summary, series, recent });
       }).catch((reason: unknown) => {
         if (!controller.signal.aborted) setError({ scope, message: errorMessage(reason) });
       }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     }, 150);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [api, connected, hours, query, scope, source, refresh]);
-  return { data: data?.scope === scope ? data : null, loading, error: error?.scope === scope ? error.message : '' };
+  const previous = connected && data?.api === api ? data : null;
+  return { data: previous?.scope === scope ? previous : null, previous, loading, error: error?.scope === scope ? error.message : '' };
 }

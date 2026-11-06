@@ -68,7 +68,7 @@ export function UsageChart({ series, metric, selectedIndex, detailedCounts = fal
             <BucketCounts bucket={bucket} detailedCounts={detailedCounts} />
           </ChartTooltipContent> : null;
         }} />
-        <Bar dataKey="value" name={metric === 'cost' ? '估算费用' : 'Token'} isAnimationActive={false} radius={[3, 3, 0, 0]} maxBarSize={12} activeBar={{ fillOpacity: 1, stroke: 'var(--primary)', strokeWidth: 1, strokeLinejoin: 'round', strokeMiterlimit: 1 }} onClick={(_entry, index) => onSelect(index)}>
+        <Bar dataKey="value" name={metric === 'cost' ? '估算费用' : 'Token'} isAnimationActive="auto" animationDuration={320} animationEasing="ease-out" radius={[3, 3, 0, 0]} maxBarSize={12} activeBar={{ fillOpacity: 1, stroke: 'var(--primary)', strokeWidth: 1, strokeLinejoin: 'round', strokeMiterlimit: 1 }} onClick={(_entry, index) => onSelect(index)}>
           {chartData.map((bucket, index) => <Cell key={bucket.t} data-usage-bucket-index={index} fill={tierColors[bucket.tier]} fillOpacity={selectedIndex === index ? 1 : 0.8} />)}
         </Bar>
       </BarChart>

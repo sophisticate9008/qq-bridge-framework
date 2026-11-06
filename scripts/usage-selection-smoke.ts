@@ -20,7 +20,45 @@ export async function verifyUsageSelection(page: Page): Promise<void> {
     }, { count, formatted });
   }
   await expected(0, 511000);
+  await page.waitForTimeout(400);
+  const geometry = async () => page.evaluate(() => {
+    const table = document.querySelector('[data-usage-conversations-scroll]');
+    const stats = document.querySelector('[data-usage-statistics]');
+    if (!table || !stats) throw new Error('missing_usage_regions');
+    return { top: table.getBoundingClientRect().top + scrollY, height: stats.getBoundingClientRect().height };
+  });
+  const before = await geometry();
+  await page.locator('#usage-chart').evaluate(element => { element.dataset.retainedChart = 'yes'; });
+  await page.locator('#usage-chart .recharts-surface').evaluate(element => { element.setAttribute('data-retained-surface', 'yes'); });
+  await page.route('**/isolated-native-api/api/chat/usage?**', async route => {
+    if (route.request().url().includes('ledgerKeys=')) await new Promise(resolve => setTimeout(resolve, 650));
+    await route.continue();
+  });
   await rows.nth(0).locator('input').check();
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('[data-usage-metric="total-tokens"] > strong').innerText(), '511k');
+  assert.equal(await page.locator('[data-usage-window-total]').innerText(), '511k token');
+  assert.match(await page.locator('[data-usage-scope]').innerText(), /正在刷新至已选 1 个会话账本.*暂显示全部会话/);
+  const during = await geometry();
+  assert(Math.abs(before.top - during.top) < 1, JSON.stringify({ before, during }));
+  assert(Math.abs(before.height - during.height) < 1, JSON.stringify({ before, during }));
+  assert.equal(await page.locator('#usage-chart').getAttribute('data-retained-chart'), 'yes');
+  assert.equal(await page.locator('#usage-chart .recharts-surface').getAttribute('data-retained-surface'), 'yes');
+  const barFrames = await page.evaluate(async () => {
+    const frames: string[] = [];
+    for (let index = 0; index < 80; index++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      frames.push([...document.querySelectorAll('#usage-chart .recharts-bar-rectangle path')].map(path => path.getAttribute('d')).join('|'));
+    }
+    return frames;
+  });
+  assert(barFrames.every(frame => frame.length > 0), 'Bars must stay mounted while changing scope');
+  assert(new Set(barFrames).size > 2, 'Bar geometry must interpolate through intermediate frames');
+  await expected(1, 10060);
+  const after = await geometry();
+  assert(Math.abs(before.top - after.top) < 1, JSON.stringify({ before, after }));
+  assert.equal(await page.locator('#usage-chart .recharts-surface').getAttribute('data-retained-surface'), 'yes');
+  await page.unrouteAll({ behavior: 'wait' });
   await expected(1, 10060);
   assert.equal(await page.locator('[data-usage-metric="cache-hit-rate"] > strong').innerText(), '0.4%');
   await page.getByRole('tab', { name: '调用记录', exact: true }).click();
@@ -112,14 +150,16 @@ export async function verifyUsageSelection(page: Page): Promise<void> {
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await expected(0, 511000);
-  // A failed selected read stays unavailable rather than showing the all-session total.
+  // Failed selected reads retain the previous chart, explicitly labelled with its original scope.
   await page.route('**/isolated-native-api/api/chat/usage?**', async route => {
     if (route.request().url().includes('ledgerKeys=')) await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'fixture_unavailable' }) });
     else await route.continue();
   });
   await rows.first().locator('input').check();
   await page.getByText(/所选统计读取失败/).waitFor();
-  assert.equal(await page.locator('[data-usage-metric="total-tokens"]').count(), 0);
+  assert.equal(await page.locator('[data-usage-metric="total-tokens"] > strong').innerText(), '511k');
+  assert.equal(await page.locator('[data-usage-scope]').getAttribute('data-stale'), 'true');
+  assert.match(await page.locator('[data-usage-scope]').innerText(), /暂显示全部会话/);
   await page.unrouteAll({ behavior: 'wait' });
   const failedIndex = Number(await rows.first().getAttribute('data-virtual-index'));
   await page.route('**/isolated-native-api/api/chat/usage?**', async route => {

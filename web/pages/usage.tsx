@@ -1,3 +1,4 @@
+import { UsageStatisticsFrame } from '../components/usage-statistics-frame.tsx';
 import { useLedgerSelection } from '../lib/ledger-selection.ts';
 import { useUsageSelectionData } from '../lib/usage-selection-data.ts';
 import { ReadOnlyDetails, TechnicalDetails } from '../components/read-only-details.tsx';
@@ -176,8 +177,6 @@ function NativeCoverageSummary({ usage, detailedCounts }: { readonly usage: Usag
 
 export function UsagePage(props: PageProps) {
   const { api, connected, connect } = props;
-  const summaryHeight = useRef(0);
-  const chartHeight = useRef(0);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [allSeries, setSeries] = useState<UsageSeries | null>(null);
   const [turns, setTurns] = useState<UsageConversationDetails | null>(null);
@@ -434,12 +433,19 @@ export function UsagePage(props: PageProps) {
     disabled: ledgerWriting || resetOpen || deleteTargets !== null });
   const scoped = useUsageSelectionData(api, connected, checkedLedgerKeys, rangeHours, usage, selectionRefresh);
   const filtering = checkedLedgerKeys.size > 0;
-  const overview = filtering ? scoped.data?.summary ?? null : usage;
-  const series = filtering ? scoped.data?.series ?? null : allSeries;
-  const recent = filtering ? scoped.data?.recent ?? null : allRecent;
+  const displayed = filtering ? scoped.data ?? scoped.previous : null;
+  const overview = displayed?.summary ?? usage;
+  const series = displayed?.series ?? allSeries;
+  const recent = displayed?.recent ?? allRecent;
+  const scopeStale = filtering && scoped.data === null;
   const chartError = filtering ? scoped.error : seriesError;
   const chartLoading = filtering ? scoped.loading || !scoped.data && !scoped.error : seriesLoading;
   const scopeLabel = filtering ? `已选 ${checkedLedgerKeys.size} 个会话账本` : '全部会话';
+  const displayedScope = displayed ? `已选 ${displayed.selectionCount} 个会话账本` : '全部会话';
+  const scopeStatus = filtering && (scoped.loading || scopeStale && !scoped.error)
+    ? `正在刷新至${scopeLabel} · 暂显示${displayedScope}（${series?.hours ?? rangeHours} 小时走势）`
+    : scopeStale ? `刷新失败 · 暂显示${displayedScope}，请重试`
+      : '总览、走势与调用记录同步筛选；总览为累计值，走势按所选时间范围。';
   const selectedDeletable = deletableVisible.filter(conversation => checkedLedgerKeys.has(conversation.ledgerKey));
 
   const scopeKey = [...checkedLedgerKeys].sort().join(',');
@@ -684,19 +690,20 @@ export function UsagePage(props: PageProps) {
   return <div className="page-stack gap-2" data-page="usage">
     <PageHeading title="用量与费用" description="查看当前账本、用量走势和入账费用。" />
     <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs text-muted-foreground">{usage ? `生成于 ${formatTimestamp(usage.generatedAt)}` : '正在读取账本'}</span><label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="usage-detailed-counts"><Switch id="usage-detailed-counts" size="sm" checked={detailedCounts} onCheckedChange={setDetailedCounts} /><span>详细数值</span></label><label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground" htmlFor="usage-auto-refresh"><span>自动刷新</span><select id="usage-auto-refresh" className="h-[27px] rounded border bg-background px-2 text-xs text-foreground" value={automaticValue} onChange={event => setAutoRefreshMs(event.target.value === 'off' ? null : Number(event.target.value))} disabled={runtimeUnavailable}><option value="off">关闭</option><option value="3000">3 秒</option><option value="10000">10 秒</option><option value="30000">30 秒</option></select></label><Button id="usage-refresh" variant="outline" onClick={() => void runRefresh('manual')} disabled={summaryLoading || seriesLoading || recentLoading || ledgerWriting}><RefreshCw className={summaryLoading || seriesLoading || recentLoading ? 'size-3.5 animate-spin' : 'size-3.5'} />刷新</Button><UsagePricingManager {...props} onSaved={() => { void runRefresh("manual"); }} /><Button id="usage-reset-open" variant="outline" onClick={openReset} disabled={!usage?.revision || usage.resetAvailable === false || summaryLoading || deleteTargets !== null || ledgerWriting}><Trash2 className="size-3.5" />清空账本</Button></div>
-    {refreshMessage && <p className="text-xs text-muted-foreground" role="status">{refreshMessage}</p>}
+    <p className="min-h-4 text-xs text-muted-foreground" role="status">{refreshMessage || '\u00a0'}</p>
 
     {summaryLoading && !usage ? <Section id="usage-summary" title={usageSectionLabels.summary} className={compactSectionClass}><LoadingBlock>正在读取用量账本</LoadingBlock></Section>
       : summaryError && !usage ? <Section id="usage-unavailable" title="用量暂不可用" actions={<Button variant="outline" onClick={() => void runRefresh('manual')}>重试</Button>} className={compactSectionClass}><EmptyState locked title={runtimeUnavailable ? '尚未连接聊天服务' : '暂时无法显示账本'} description={summaryError} /></Section>
       : usage && <>
-        <div className="flex flex-wrap items-center gap-2 text-xs" data-usage-scope role="status">
-          <strong>统计范围：{scopeLabel}</strong><span className="text-muted-foreground">总览、走势与调用记录同步筛选；总览为累计值，走势按所选时间范围。</span>
-          {filtering && <Button size="sm" variant="ghost" disabled={ledgerWriting || resetOpen || deleteTargets !== null} onClick={() => setCheckedLedgerKeys(new Set())}>查看全部</Button>}
-          {filtering && scoped.loading && <span>正在刷新所选统计…</span>}
+        <div className="flex min-w-0 items-center gap-2 text-xs" data-usage-scope data-stale={scopeStale || undefined} role="status">
+          <strong className="shrink-0">统计范围：{displayedScope}</strong>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground" title={scopeStatus}>{scopeStatus}</span>
+          <Button size="sm" variant="ghost" className="shrink-0" disabled={!filtering || ledgerWriting || resetOpen || deleteTargets !== null} onClick={() => setCheckedLedgerKeys(new Set())}>查看全部</Button>
         </div>
-        {filtering && scoped.error && <p role="alert" className="text-xs text-destructive">所选统计读取失败：{scoped.error}。{overview ? '保留同一选择的上次数据。' : '请点击刷新重试。'}</p>}
+        {filtering && scoped.error && <p role="alert" className="text-xs text-destructive">所选统计读取失败：{scoped.error}。暂显示{displayedScope}的上次数据，请点击刷新重试。</p>}
+        <UsageStatisticsFrame busy={filtering && (scoped.loading || scopeStale && !scoped.error)}>
         {overview ? <>
-        <div id="usage-summary" ref={node => { if (node) summaryHeight.current = node.getBoundingClientRect().height; }} className="grid gap-2">
+        <div id="usage-summary" className="grid gap-2">
           {summaryError && <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs leading-5" role="alert">刷新失败，继续显示上次数据：{summaryError}</p>}
           {(overview.coverage?.partial || overview.limited) && <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs leading-5" role="alert">{overview.coverage?.partial ? '扫描达到上限，当前统计仅为部分结果。' : '会话列表已截断，未显示全部会话。'}</p>}
           {incompleteNativeTotals && <p className="text-xs text-muted-foreground" role="status">显示已记录小计；缺失用量或费用未计入，详情中可查看缺失项。</p>}
@@ -709,15 +716,16 @@ export function UsagePage(props: PageProps) {
 
         </div>
 
-        </> : <div style={{ minHeight: summaryHeight.current }}><LoadingBlock>{scoped.error ? '所选会话统计暂不可用' : '正在读取所选会话统计'}</LoadingBlock></div>}
+        </> : <LoadingBlock>正在读取统计</LoadingBlock>}
         <div className="split">
         <Section id="usage-series" title={usageSectionLabels.chart} actions={<div className="flex flex-wrap justify-end gap-1.5"><select aria-label="走势时间范围" className="h-[27px] rounded border bg-background px-2 text-xs" value={rangeHours} onChange={event => selectRange(Number(event.target.value))}>{rangeOptions.map(option => <option key={option.hours} value={option.hours}>{option.label}</option>)}</select><select aria-label="走势纵轴" className="h-[27px] rounded border bg-background px-2 text-xs" value={chartMetric} onChange={event => setChartMetric(event.target.value === 'tokens' ? 'tokens' : 'cost')}><option value="cost">费用</option><option value="tokens">Token</option></select></div>} className={compactSectionClass}>
-          {chartLoading && !series ? <div style={{ minHeight: chartHeight.current }}><LoadingBlock>正在读取走势</LoadingBlock></div>
+          {chartLoading && !series ? <LoadingBlock>正在读取走势</LoadingBlock>
             : chartError && !series ? <BlockUnavailable title="走势暂时不可用" description={chartError} />
-              : series && <div ref={node => { if (node) chartHeight.current = node.getBoundingClientRect().height; }} className="grid gap-3">{chartError && <p className="text-xs text-amber-700 dark:text-amber-300" role="alert">走势刷新失败，继续显示上次数据：{chartError}</p>}<div className="flex flex-wrap items-end justify-between gap-2"><div><span className="text-xs text-muted-foreground">窗口内合计</span><strong data-usage-window-total className="mt-0.5 block text-lg font-semibold tabular-nums">{chartMetric === 'cost' ? formatActivityCost(series.totals.cost, series.currency, series.symbol) : `${formatCount(series.totals.tokens)} token`}</strong>{series.native && <KnownCosts costs={series.knownCosts} />}</div><p className="text-xs text-muted-foreground">每桶 {formatCount(series.bucketMs / 60_000)} 分钟 · {formatCount(series.totals.turns)} 轮 · {formatCount(series.totals.steps)} 步</p></div><UsageChart series={series} metric={chartMetric} selectedIndex={selectedBucket} onSelect={setSelectedBucket} detailedCounts={detailedCounts} /><ReadOnlyDetails title="走势统计口径" label="统计口径"><div className="grid gap-2 border-t px-3 py-3 text-xs leading-5 text-muted-foreground"><p>{series.busiest ? `估算费用 ${formatActivityCost(series.busiest.cost, series.currency, series.symbol)}，${formatCount(series.busiest.tokens)} token。` : series.native ? '所选窗口没有可确认的最忙桶；未知数据未绘制为零。' : '所选窗口内没有产生正用量，纵轴保持真实 0 刻度。'}</p>{series.offChartCost !== null && series.offChartCost > 0 || series.offChartTokens !== null && series.offChartTokens > 0 ? <p>另有 {formatActivityCost(series.offChartCost, series.currency, series.symbol)}、约 {formatCount(series.offChartTokens)} token 属于图外累计历史；它们只有累计值，没有可画入时间桶的逐时明细。</p> : <p>{series.native && (series.offChartCost === null || series.offChartTokens === null) ? '图外累计历史包含未知用量或费用，不能确认其为零。' : '当前累计账本没有需要单列说明的图外历史。'}</p>}{series.countedSamples === 0 && <p>窗口内没有可追溯采样；这可能表示没有调用，也可能表示逐轮采样已被容量上限淘汰，不能据此推断累计总量为零。</p>}</div></ReadOnlyDetails></div>}
+              : series && <div className="grid gap-3">{chartError && <p className="text-xs text-amber-700 dark:text-amber-300" role="alert">走势刷新失败，继续显示上次数据：{chartError}</p>}<div className="flex flex-wrap items-end justify-between gap-2"><div><span className="text-xs text-muted-foreground">窗口内合计</span><strong data-usage-window-total className="mt-0.5 block text-lg font-semibold tabular-nums">{chartMetric === 'cost' ? formatActivityCost(series.totals.cost, series.currency, series.symbol) : `${formatCount(series.totals.tokens)} token`}</strong>{series.native && <KnownCosts costs={series.knownCosts} />}</div><p className="text-xs text-muted-foreground">每桶 {formatCount(series.bucketMs / 60_000)} 分钟 · {formatCount(series.totals.turns)} 轮 · {formatCount(series.totals.steps)} 步</p></div><UsageChart series={series} metric={chartMetric} selectedIndex={selectedBucket} onSelect={setSelectedBucket} detailedCounts={detailedCounts} /><ReadOnlyDetails title="走势统计口径" label="统计口径"><div className="grid gap-2 border-t px-3 py-3 text-xs leading-5 text-muted-foreground"><p>{series.busiest ? `估算费用 ${formatActivityCost(series.busiest.cost, series.currency, series.symbol)}，${formatCount(series.busiest.tokens)} token。` : series.native ? '所选窗口没有可确认的最忙桶；未知数据未绘制为零。' : '所选窗口内没有产生正用量，纵轴保持真实 0 刻度。'}</p>{series.offChartCost !== null && series.offChartCost > 0 || series.offChartTokens !== null && series.offChartTokens > 0 ? <p>另有 {formatActivityCost(series.offChartCost, series.currency, series.symbol)}、约 {formatCount(series.offChartTokens)} token 属于图外累计历史；它们只有累计值，没有可画入时间桶的逐时明细。</p> : <p>{series.native && (series.offChartCost === null || series.offChartTokens === null) ? '图外累计历史包含未知用量或费用，不能确认其为零。' : '当前累计账本没有需要单列说明的图外历史。'}</p>}{series.countedSamples === 0 && <p>窗口内没有可追溯采样；这可能表示没有调用，也可能表示逐轮采样已被容量上限淘汰，不能据此推断累计总量为零。</p>}</div></ReadOnlyDetails></div>}
         </Section>
         <UsageModelCosts recent={recent} currency={overview?.currency ?? usage.currency} loading={filtering ? scoped.loading : recentLoading} error={filtering ? scoped.error : recentError} />
         </div>
+        </UsageStatisticsFrame>
 
         <Section title="账本明细" actions={summaryDetails} className="[&>.panel-body]:p-0">
         <Tabs value={usageView} onValueChange={value => setUsageView(String(value))} className="gap-2">
