@@ -1,21 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Popover } from '@base-ui/react/popover';
+import { ArrowUpRight, Check, CircleHelp, ExternalLink, RefreshCw, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useSidebar } from './ui/sidebar.tsx';
 import { parseFrameworkReleaseStatus, type FrameworkReleaseStatus } from '../../src/contracts/framework-release.ts';
 import { parseFrameworkUpdateState, type FrameworkUpdateState } from '../../src/contracts/framework-update.ts';
 import { asRecord, errorMessage, type ApiClient } from '../lib/api.ts';
 import { Button } from './ui/button.tsx';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog.tsx';
 
 // Keep requests and update state mounted even when the mobile navigation is closed.
 export function FrameworkVersion({ api, connected, triggerContainer }: { readonly api: ApiClient; readonly connected: boolean; readonly triggerContainer: HTMLElement | null }) {
-  const { setOpenMobile } = useSidebar();
+  const { isMobile, openMobile, state: sidebarState } = useSidebar();
+  const triggerId = useId();
   const [status, setStatus] = useState<FrameworkReleaseStatus | null>(null);
   const [checkFailed, setCheckFailed] = useState(false);
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [updateAvailable, setUpdateAvailable] = useState(false), [update, setUpdate] = useState<FrameworkUpdateState | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const requestedId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!connected || !triggerContainer || (isMobile ? !openMobile : sidebarState === 'collapsed')) setOpen(false);
+  }, [connected, triggerContainer, isMobile, openMobile, sidebarState]);
   useEffect(() => {
     if (!connected) return;
     const controller = new AbortController();
@@ -74,25 +79,46 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
     : checkFailed || status?.state === 'unavailable' ? '检查失败，更新状态未知；点击查看并重试'
       : !status ? '正在读取版本' : status.state === 'available' ? `有新版本 v${status.latestVersion}`
         : status.state === 'ahead' ? '暂无更新，当前运行版本高于最新正式发行版本' : '暂无更新，当前已是最新正式版本';
-  return <>{triggerContainer && createPortal(<Button variant="ghost" size="sm" disabled={!connected} onClick={() => { setOpenMobile(false); setOpen(true); }} aria-label="框架版本与更新" aria-describedby="framework-version-state" title={indicatorLabel} className="h-5 justify-start px-0 text-xs text-muted-foreground tabular-nums">
-    {status ? `v${status.currentVersion}` : '版本'}<span id="framework-version-state" role="img" aria-label={indicatorLabel} data-version-indicator={indicator} className={`ml-1 size-2 shrink-0 rounded-full bg-current ${indicator === 'available' ? 'text-amber-400' : indicator === 'current' ? 'text-green-500' : 'text-muted-foreground/50'}`} style={{ boxShadow: indicator === 'unknown' ? undefined : '0 0 3px currentColor, 0 0 9px currentColor' }} />
-  </Button>, triggerContainer)}<Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>框架版本与更新</DialogTitle><DialogDescription>查看运行版本和 GitHub 正式发行版本。</DialogDescription></DialogHeader>
-    <div className="stack text-sm"><p>当前版本：{status ? `v${status.currentVersion}` : '待读取'}</p>
-      <p>最新发行：{status?.latestVersion ? `v${status.latestVersion}` : '尚未获取'}</p>
-      {status?.state === 'current' && <p>当前已是最新正式版本。</p>}
-      {status?.state === 'ahead' && <p>当前运行版本高于最新正式发行版本。</p>}
-      {status?.state === 'unavailable' && <p role="status">暂时无法检查更新。已显示的发行版本为上次成功检查结果。</p>}
-      {status?.majorUpgrade && <p>此更新跨越主版本，请先阅读迁移说明并备份数据。</p>}
-      <p className="text-muted-foreground">{status?.installation === 'docker' ? 'Docker 使用新镜像重新创建容器，继续挂载原数据卷。'
-        : status?.installation === 'source' ? '当前为源码安装，请使用 Git 更新并执行依赖安装与构建。'
-        : '完整发行包支持覆盖程序文件并保留 runtime、private 及自定义文件。更新前停止框架并备份数据。'}</p>
-      {error && <p role="alert">{error}</p>}
-      {update && <p role="status">更新 v{update.version}：{updateLabels[update.state]}</p>}
-      {status?.installation === 'archive' && <p className="text-muted-foreground">{updateAvailable
-        ? '点击更新后会下载并校验新包，短暂停止框架后替换程序；配置、会话和私人扩展保留，启动失败自动回滚程序。'
-        : '使用 npm run cli -- serve 启动完整发行包后可在此更新；也可停止框架后执行 npm run cli -- update /解压后的新包目录。'}</p>}
-      <div className="flex gap-2"><Button disabled={busy} onClick={() => void check()}>{busy ? '正在检查…' : '主动检查更新'}</Button>
-        {updateAvailable && status?.state === 'available' && !status.majorUpgrade && <Button disabled={updating} onClick={() => void install()}>{updating ? '更新处理中' : '更新框架'}</Button>}
-        {status && <a className="inline-flex items-center underline" href={status.releaseUrl} target="_blank" rel="noreferrer">查看发行说明与下载</a>}</div>
-    </div></DialogContent></Dialog></>;
+  const StateIcon = indicator === 'available' ? ArrowUpRight : indicator === 'current' ? Check : CircleHelp;
+  return <Popover.Root open={open} onOpenChange={setOpen} triggerId={triggerId} modal={false}>
+    {triggerContainer && createPortal(<Popover.Trigger id={triggerId} render={<Button variant="ghost" size="sm" />} disabled={!connected} aria-label="框架版本与更新" aria-describedby="framework-version-state" title={indicatorLabel} className="h-5 gap-1.5 rounded-md bg-muted/70 px-1.5 text-xs text-muted-foreground tabular-nums hover:bg-muted">
+      {status ? `v${status.currentVersion}` : '版本'}<span id="framework-version-state" role="img" aria-label={indicatorLabel} data-version-indicator={indicator} className={`size-2 shrink-0 rounded-full bg-current ${indicator === 'available' ? 'text-amber-400' : indicator === 'current' ? 'text-green-500' : 'text-muted-foreground/50'}`} style={{ boxShadow: indicator === 'unknown' ? undefined : '0 0 3px currentColor, 0 0 9px currentColor' }} />
+    </Popover.Trigger>, triggerContainer)}
+    <Popover.Portal container={isMobile ? triggerContainer : undefined}>
+      <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="z-[80]">
+        <Popover.Popup data-framework-version-popover className="w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-xl border bg-popover text-popover-foreground shadow-xl outline-none">
+          <Popover.Title className="sr-only">框架版本与更新</Popover.Title>
+          <Popover.Description className="sr-only">查看运行版本和 GitHub 正式发行版本。</Popover.Description>
+          <div className="flex items-center justify-between border-b px-4 py-2.5">
+            <span className="text-xs text-muted-foreground">当前版本</span>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" disabled={busy} onClick={() => void check()} aria-label="主动检查更新" title="主动检查更新"><RefreshCw className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} /></Button>
+              <Popover.Close render={<Button variant="ghost" size="icon" />} aria-label="关闭"><X className="size-3.5" /></Popover.Close>
+            </div>
+          </div>
+          <div className="grid justify-items-center gap-2 px-4 py-4 text-center">
+            <div className="flex items-center gap-2"><strong className="text-xl font-semibold tabular-nums">{status ? `v${status.currentVersion}` : '待读取'}</strong><span className={`flex size-5 items-center justify-center rounded-full ${indicator === 'available' ? 'bg-amber-500/10 text-amber-500' : indicator === 'current' ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground'}`}><StateIcon className="size-3" /></span></div>
+            <p className="text-xs leading-5 text-muted-foreground" role="status">{indicatorLabel}</p>
+            {status?.latestVersion && status.latestVersion !== status.currentVersion && <p className="text-xs text-muted-foreground">最新发行：v{status.latestVersion}</p>}
+            {error && <p className="text-xs leading-5 text-destructive" role="alert">{error}</p>}
+            {status?.majorUpgrade && <p className="text-xs leading-5 text-amber-600 dark:text-amber-400">此更新跨越主版本，请先阅读迁移说明并备份数据。</p>}
+            {update && <p className="text-xs leading-5" role="status">更新 v{update.version}：{updateLabels[update.state]}</p>}
+            {updateAvailable && status?.state === 'available' && !status.majorUpgrade && <Button disabled={updating} onClick={() => void install()}>{updating ? '更新处理中' : '更新框架'}</Button>}
+            {status && <a className="mt-1 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href={status.releaseUrl} target="_blank" rel="noreferrer" aria-label="查看发行说明与下载"><ExternalLink className="size-3.5" />查看发布</a>}
+          </div>
+          <details className="border-t px-4 py-3 text-xs text-muted-foreground">
+            <summary className="cursor-pointer">更新方式</summary>
+            <div className="mt-2 grid gap-2 leading-5">
+              <p>{status?.installation === 'docker' ? 'Docker 使用新镜像重新创建容器，继续挂载原数据卷。'
+                : status?.installation === 'source' ? '当前为源码安装，请使用 Git 更新并执行依赖安装与构建。'
+                  : '完整发行包支持覆盖程序文件并保留 runtime、private 及自定义文件。更新前停止框架并备份数据。'}</p>
+              {status?.installation === 'archive' && <p>{updateAvailable
+                ? '点击更新后会下载并校验新包，短暂停止框架后替换程序；配置、会话和私人扩展保留，启动失败自动回滚程序。'
+                : '使用 npm run cli -- serve 启动完整发行包后可在此更新；也可停止框架后执行 npm run cli -- update /解压后的新包目录。'}</p>}
+            </div>
+          </details>
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
 }

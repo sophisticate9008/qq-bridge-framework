@@ -5,7 +5,7 @@ import { AccountWorkspaceContext } from './lib/account-workspace.tsx';
 import type { NativeAccountView } from '../src/contracts/native-accounts.ts';
 import { clearRetainedDrafts, retainedDraftCount, retainedDraftScopes, subscribeRetainedDrafts } from './lib/retained-drafts.ts';
 import { clearReadResources } from './lib/resource-reader.ts';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type MouseEvent } from 'react';
 import { LoaderCircle, LogOut, Monitor, Moon, Sun, Sparkles, Waves } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Button } from './components/ui/button.tsx';
@@ -27,9 +27,18 @@ import { FrameworkVersion } from './components/framework-version.tsx';
 import { pageComponents } from './lib/page-components.ts';
 import { pageIcons } from './lib/page-icons.ts';
 
-function NavigationBrand({ navigate }: { navigate(page: PageId): void }) {
+function NavigationBrand({ navigate, setVersionAnchor }: { navigate(page: PageId): void; setVersionAnchor(element: HTMLDivElement | null): void }) {
   const { setOpenMobile } = useSidebar();
-  return <a href="#overview" onClick={event => { event.preventDefault(); navigate('overview'); setOpenMobile(false); }} className="flex items-center gap-2 overflow-hidden"><span className="flex size-7 shrink-0 group-data-[collapsible=icon]:size-6 items-center justify-center rounded-md bg-accent text-accent-foreground"><Sparkles className="size-4" /></span><strong className="text-base font-semibold text-foreground group-data-[collapsible=icon]:hidden">配置工作台</strong></a>;
+  function visitOverview(event: MouseEvent<HTMLAnchorElement>): void {
+    event.preventDefault(); navigate('overview'); setOpenMobile(false);
+  }
+  return <div className="flex min-w-0 items-center gap-2.5">
+    <a href="#overview" onClick={visitOverview} aria-label="配置工作台首页" className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground shadow-sm ring-1 ring-border/50 group-data-[collapsible=icon]:size-6"><Sparkles className="size-5 group-data-[collapsible=icon]:size-4" /></a>
+    <div className="grid min-w-0 justify-items-start gap-0.5 group-data-[collapsible=icon]:hidden">
+      <a href="#overview" onClick={visitOverview} className="max-w-full truncate"><strong className="text-base font-semibold text-foreground">配置工作台</strong></a>
+      <div ref={setVersionAnchor} data-framework-version-slot className="flex min-h-5 items-center" />
+    </div>
+  </div>;
 }
 
 function NavigationButtons({ route, navigate }: { route: PageId; navigate(page: PageId): void }) {
@@ -390,7 +399,7 @@ export function Console() {
   const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
 
   return <AccountWorkspaceContext.Provider value={{ globalApi, selected: selectedAccount, select: selectAccount }}><SidebarProvider style={{ '--sidebar-width': '12rem', '--sidebar-width-icon': '2.75rem' } as CSSProperties}>
-    <Sidebar collapsible="icon" className="border-sidebar-border"><SidebarHeader className="px-3 py-4 group-data-[collapsible=icon]:px-2"><NavigationBrand navigate={navigate} /><div ref={setVersionAnchor} data-framework-version-slot className="ml-9 group-data-[collapsible=icon]:hidden" /></SidebarHeader><SidebarContent><SidebarGroup className="px-2 pt-0 group-data-[collapsible=icon]:px-1.5"><SidebarGroupContent><SidebarMenu className="gap-1"><NavigationButtons route={route} navigate={navigate} /></SidebarMenu></SidebarGroupContent></SidebarGroup></SidebarContent></Sidebar>
+    <Sidebar collapsible="icon" className="border-sidebar-border"><SidebarHeader className="px-3 py-4 group-data-[collapsible=icon]:px-2"><NavigationBrand navigate={navigate} setVersionAnchor={setVersionAnchor} /></SidebarHeader><SidebarContent><SidebarGroup className="px-2 pt-0 group-data-[collapsible=icon]:px-1.5"><SidebarGroupContent><SidebarMenu className="gap-1"><NavigationButtons route={route} navigate={navigate} /></SidebarMenu></SidebarGroupContent></SidebarGroup></SidebarContent></Sidebar>
     <FrameworkVersion api={globalApi} connected={connected} triggerContainer={versionAnchor} />
     <SidebarInset className="min-w-0 bg-background"><header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b bg-card px-3 sm:px-4"><div className="flex min-w-0 flex-1 items-center gap-2"><SidebarTrigger aria-label="切换侧栏" className="size-[27px] text-muted-foreground" /><strong className="truncate text-sm font-medium">{current.label}{selectedAccount ? ` · ${selectedAccount.label}` : ''}</strong></div><div className="flex shrink-0 items-center gap-1.5 sm:gap-2"><WorkspaceSearch api={api} connected={connected} currentPage={route} visibleEntries={pageEntries} onSelect={chooseSearchTarget} /><div id="page-navigation-toolbar" className="flex shrink-0 items-center" /><span className="hidden items-center gap-2 text-xs text-muted-foreground lg:flex"><span className={connected ? 'size-1.5 rounded-full bg-[var(--success)]' : 'size-1.5 rounded-full bg-muted-foreground'} />{connected ? '已连接' : '未连接'}</span><label className="relative flex size-[27px] items-center justify-center gap-1.5 rounded-md text-muted-foreground focus-within:ring-2 focus-within:ring-ring sm:w-auto sm:border-l sm:pl-3"><ThemeIcon className="size-4" /><select aria-label="显示模式" value={theme} onChange={event => setTheme(event.target.value as Theme)} className="absolute inset-0 h-[27px] w-full bg-transparent text-sm text-foreground opacity-0 outline-none sm:static sm:w-24 sm:opacity-100"><option value="system">跟随系统</option><option value="light">日间模式</option><option value="dark">夜间模式</option></select></label>{connected ? <Button variant="ghost" size="icon" aria-label="断开连接" title="退出并撤销访问会话" disabled={disconnecting} onClick={disconnect}>{disconnecting ? <LoaderCircle className="size-4 animate-spin" /> : <LogOut className="size-4" />}</Button> : <Button size="sm" variant="outline" onClick={() => setConnectionOpen(true)}>连接</Button>}</div></header>
       <div className="mx-auto w-full max-w-[1540px] flex-1 px-3 py-2.5 sm:px-4" id="main-content"><SubpageNavigation route={route} navigate={navigate} /><PageNavigator toolbarTargetId="page-navigation-toolbar" key={`${route}:${selectedAccount?.id ?? 'legacy'}`} target={searchTarget?.page === route ? searchTarget : null} onIndexChange={updatePageIndex} onTargetHandled={clearSearchTarget}><Suspense fallback={<p role="status">正在载入页面…</p>}><ActivePage {...props} /></Suspense></PageNavigator></div>
