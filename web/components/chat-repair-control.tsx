@@ -5,6 +5,7 @@ import { requestChatRepair, useChatRepair } from '../lib/chat-repair.ts';
 import { chatRuntimeReason, parseChatRuntimeStatus } from '../lib/chat-runtime.ts';
 import { useReadResource } from '../lib/use-read-resource.ts';
 import { Button } from './ui/button.tsx';
+import { ReadOnlyDetails } from './read-only-details.tsx';
 
 const labels: Readonly<Record<ChatRepairOperation['phase'], string>> = {
   checking: '检查已保存的设置', stopping: '恢复受管组件', 'starting-services': '重新连接框架与 DSH',
@@ -32,7 +33,7 @@ const reasons: Readonly<Record<string, string>> = {
   chat_repair_writer_still_running: '仍有配置写入未结束，本次未覆盖文件；稍后可再次修复。',
   chat_repair_failed: '修复未完成，会话记录保留；可以再次修复。',
 };
-export function ChatRepairControl({ api, connected, compact = false }: { readonly api: ApiClient; readonly connected: boolean; readonly compact?: boolean }) {
+export function ChatRepairControl({ api, connected, compact = false, summary = false }: { readonly api: ApiClient; readonly connected: boolean; readonly compact?: boolean; readonly summary?: boolean }) {
   const repair = useChatRepair(api, connected);
   const runtime = useReadResource(api, '/api/chat/runtime', connected, parseChatRuntimeStatus, { intervalMs: 5_000 });
   const automatic = useReadResource(api, '/api/chat/automatic-recovery', connected, value => {
@@ -44,12 +45,17 @@ export function ChatRepairControl({ api, connected, compact = false }: { readonl
     : operation?.state === 'completed' ? runtime.snapshot?.state === 'running' && runtime.snapshot.chatReady && !runtime.error
       ? '最近一次修复已完成；当前聊天链路就绪。' : '最近一次修复已完成；当前状态请查看聊天诊断。'
       : operation?.state === 'failed' ? '修复未完成，可处理原因后再次点击。' : '自动恢复受管服务并启动聊天。';
-  return <div className={compact ? 'stack' : 'strip stack'} data-chat-repair>
+  const automaticDescription = automatic.snapshot ? automatic.snapshot.enabled
+    ? '自动恢复已启用：持续故障达到 90 秒后尝试，每小时最多三次；主动停止和待应用配置会暂停恢复。'
+    : '此部署已关闭自动恢复。' : '自动恢复状态暂未确认。';
+  const explanation = '会短暂重启框架、DSH 及受管依赖，应用已保存设置并保留会话历史；协议端保持独立。未保存草稿不参与修复。';
+  return <div className={compact || summary ? 'stack' : 'strip stack'} data-chat-repair>
     <div className="row"><Button size="sm" variant="outline" disabled={!connected || pending || repair.state.snapshot?.available !== true} onClick={() => void requestChatRepair(api)}>
       {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Wrench className="size-3.5" />}{pending ? '正在恢复聊天' : '一键恢复聊天'}
-    </Button><span className="small" role="status">{message}</span></div>
-    {automatic.snapshot && <p className="small muted">{automatic.snapshot.enabled ? '自动恢复已启用：持续故障达到 90 秒后尝试，每小时最多三次；主动停止和待应用配置会暂停恢复。' : '此部署已关闭自动恢复。'}</p>}
-    {!compact && <p className="small muted">会短暂重启框架、DSH 及受管依赖，应用已保存设置并保留会话历史；协议端保持独立。未保存草稿不参与修复。</p>}
+    </Button>{summary ? <><span className="small muted">{automatic.error || !automatic.snapshot ? '自动恢复状态待确认' : automatic.snapshot.enabled ? '自动恢复已启用' : '自动恢复已关闭'}</span><ReadOnlyDetails title="聊天恢复说明" label="恢复说明"><div className="stack"><p>{explanation}</p><p>{automaticDescription}</p><p role="status">{message}</p></div></ReadOnlyDetails></> : <span className="small" role="status">{message}</span>}</div>
+    {summary && (pending || operation?.state === 'failed') && <p className="small" role="status">{message}</p>}
+    {!summary && automatic.snapshot && <p className="small muted">{automaticDescription}</p>}
+    {!summary && !compact && <p className="small muted">{explanation}</p>}
     {pending && repair.error && <p className="small" role="status">受管服务正在恢复，页面会自动重新连接并读取同一修复记录。</p>}
     {!pending && operation?.state === 'failed' && <p className="small" role="alert">{operation.reasons.map(code => reasons[code] ?? chatRuntimeReason(code).text).join(' ')}</p>}
     {!pending && repair.state.snapshot?.available === false && <p className="small">当前部署尚未配置受管服务入口，请在部署设置中接入本机服务管理器。</p>}

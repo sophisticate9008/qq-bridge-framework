@@ -179,6 +179,7 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   </>;
   const checks = <>
     {chainChecks}
+    <p className="small muted">链路检查不调用模型；模型请求与实际送达以各会话的执行记录为准。</p>
     <dl className="info"><dt>QQ 消息</dt><dd>{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '尚未确认'}</dd><dt>DSH 服务</dt><dd><StatusPill tone={dshHealth.tone}>{dshHealth.label}</StatusPill></dd><dt>聊天处理</dt><dd>{resource.error ? '读取失败' : !status ? '尚未确认' : health?.healthy ? '已就绪' : running ? '等待链路恢复' : status.state === 'stopped' ? '已停止' : status.state === 'error' ? '启动或运行失败' : '正在处理'}</dd></dl>
     <p className="small muted">{dshHealth.description}</p>
     {visibleReasons.length > 0 && <ul className="stack">{visibleReasons.map(reason => {
@@ -201,8 +202,8 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
   return <section id="chat-runtime" className="panel entity">
     <div className="row"><span className="avatar" aria-hidden="true">▷</span><div className="grow"><h2 className="panel-title">聊天运行</h2><p className="muted small">已授权的 QQ 会话</p></div><StatusPill tone={statusTone}>{statusLabel}</StatusPill></div>
     <div className="meta"><span>QQ 消息：{resource.error ? '读取失败' : status ? status.protocolConnected ? '已连接' : '未连接' : '待确认'}</span><span>DSH 服务：{dshHealth.label}</span></div>
-    {chainChecks}
-    <div className={`strip ${uncertain || applicationState.blocked || resource.error ? 'warn' : ''}`} role="status">{!status ? loading ? '正在读取聊天运行状态。' : '暂时无法确认聊天运行状态，请刷新读取。' : active ? '正在更新聊天运行状态，请等待原操作。' : dirty ? '连接草稿尚未保存；请保存后再启动聊天。' : uncertain || applicationState.blocked ? '启停结果尚未确认，可使用下方一键恢复聊天。' : status?.configurationChanged ? '有已保存设置等待应用，请查看详情中的具体运行条件。' : running ? health?.healthy ? '聊天链路检查通过；模型请求与实际送达以各会话的执行记录为准。' : interrupted.length > 0 ? '请按上方异常环节处理；恢复连接保留原会话，不重发旧请求。' : '框架进程正在运行，聊天链路仍待核对。' : status.state === 'error' ? '聊天运行需要处理，请查看详情。' : '聊天已停止；可检查条件后明确启动。'}</div>
+    {interrupted.length > 0 && <div className="stack" data-chat-health-alerts>{interrupted.map(layer => <p key={layer.id} className="small" data-chat-health-guidance={layer.id}><strong>{chatHealthNames[layer.id]}：</strong>{chatHealthGuidance(layer)}</p>)}</div>}
+    <div className={`strip ${uncertain || applicationState.blocked || resource.error || chain.error || interrupted.length > 0 ? 'warn' : ''}`} role="status">{!status ? loading ? '正在读取聊天运行状态。' : '暂时无法确认聊天运行状态，请刷新读取。' : active ? '正在更新聊天运行状态，请等待原操作。' : dirty ? '连接草稿尚未保存；请保存后再启动聊天。' : uncertain || applicationState.blocked ? '启停结果尚未确认，可使用下方一键恢复聊天。' : status?.configurationChanged ? '有已保存设置等待应用，请查看详情中的具体运行条件。' : chain.error ? '聊天链路诊断暂不可用，请刷新状态。' : running ? health?.healthy ? '聊天链路检查通过，详细检查结果可在详情中查看。' : interrupted.length > 0 ? '请按上方异常环节处理；恢复连接保留原会话，不重发旧请求。' : '框架进程正在运行，聊天链路仍待核对。' : status.state === 'error' ? '聊天运行需要处理，请查看详情。' : '聊天已停止；可检查条件后明确启动。'}</div>
     <div className="actions">
       <SettingsWindow title={running ? '停止聊天' : '启动与检查聊天'} label={running ? '停止聊天' : '启动聊天'} description="检查真实运行状态后执行；停止保留历史，启动沿当前配置继续。">{controlBody}</SettingsWindow>
       {refreshControl}
@@ -210,7 +211,7 @@ export function ChatRuntimeControls({ api, connected, dirty, navigate, onRunning
       <FrameworkRestartControl api={api} />
       <ReadOnlyDetails title="聊天运行详情" description="运行条件、当前诊断与原操作证据。"><div className="stack">{checks}<TechnicalDetails fields={[{ label: '运行状态', value: statusLabel }, { label: '最近错误', value: status?.lastError ? chatRuntimeLastError(status.lastError, status) : '无' }, { label: '应用阶段', value: applicationState.phase ? chatApplicationPhaseLabels[applicationState.phase] : '无' }, { label: '操作编号', value: applicationState.operationId }, { label: '配置更新', value: status?.configurationChanged ?? '未知' }]} />{recovery}{connectionPanel}</div></ReadOnlyDetails>
     </div>
-    <ChatRepairControl api={api} connected={connected} />
+    <ChatRepairControl api={api} connected={connected} summary />
     {notice && <p role="status" className="small muted">{notice}</p>}
     {error && <p role="alert" className="text-xs leading-5 text-destructive">{error}</p>}
     {observationError && <p role="status" className="small muted">暂时无法读取应用操作，后台阶段不会重复执行，请刷新状态。</p>}
