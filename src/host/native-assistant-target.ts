@@ -41,12 +41,17 @@ interface Applied {
 interface Journal { readonly schema: 1; readonly pending: Pending | null; readonly applied: Applied | null }
 const fallback: Journal = Object.freeze({ schema: 1, pending: null, applied: null })
 const legacyInstructions = '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。'
-const instructions = legacyInstructions
+const previousInstructions = legacyInstructions
   + '后台工作没有固定执行总时限；持续推进直到完成、用户要求停止或出现真实阻碍。适时给出简短的实际进展，阶段性回复会交回原聊天会话转述，不必为等待转述停止工作。'
   + '涉及新增长期能力、重复处理同类文件或用户要求插件时，优先考虑通过框架 SDK 做成可注册、可复用的框架扩展。这是开发偏好，不是每个任务的硬性要求；一次性处理、接入成本明显过高或当前接口难以实现时，可以使用现有库或临时脚本，并说明取舍。'
   + '开发前先查当前安装目录的 README.md、docs/EXTENDING.md、docs/SERVICE_CONVENTIONS.md 与 examples/reloadable-plugin；本机私人扩展放在 private/extensions/<标识>/，运行数据放在 runtime/。完整安装包提供文档和公开源码；缺少文档时参考 https://github.com/sophisticate9008/qq-bridge-framework 并核对已安装版本。'
   + '采用 @qq-bridge-framework/sdk 的公开导出，由可信 bootstrap 的 create() 返回 packages，填写 NativePackageManifest 的稳定标识、版本、displayName、description 和 toolNames，再在 install() 注册实际工具或服务并管理生命周期。复用现有配置、存储与权限机制，保留用户数据，避免依赖内部源码路径。'
   + '交付时区分源码已写、依赖已安装、扩展已登记、运行已加载和调用已验证；以实际状态确认控制台可见及后续会话可调用。安装 Python/npm 库或写临时脚本只能说明本次工具已可用，不能称为框架插件已接入。'
+
+const instructions = previousInstructions
+  + '先分析当前任务中的能力边界、已有工具和实际复用价值，只将值得跨任务复用的最小能力做成插件；专属于当前文件、作品、目标设备或输出约定的处理逻辑，优先放在 runtime/ 下的任务脚本中调用这些能力。不要因为某段代码理论上能复用，就把每个步骤或整项具体需求抽成通用插件，也不要为插件化扩大当前任务范围。'
+  + '例如处理乐谱 PDF 并转换为电子琴键位：可考虑只把 PDF 读取、文字与坐标提取、页面渲染做成一个可复用 PDF 插件；针对该乐谱的识别修正、键位映射和成品编排仍可放在 runtime/ 任务代码中。已有合适能力时优先复用，临时处理足够时也可直接完成任务。'
+  + '主人明确指定哪些能力要做插件时，以明确要求为准。例如“做个 PDF 解析插件，然后把乐谱转换成电子琴键位”，应交付 PDF 插件并用它完成转换，不自行把乐谱识别、键位转换等都升级成插件；如果主人明确要求键位转换插件，则按要求实现该能力。'
 
 const assistantPresetPlugins: readonly JsonObject[] = Object.freeze([
   Object.freeze({ id: 'qbf-assistant-fs', name: '@deepseek-ai/dsh-tool-fs' }),
@@ -168,7 +173,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     // Ownership comes from the verified journal for this exact target, not a preset name prefix.
     // The old journal already binds provider/model/target/connection/settings/instructions. It may
     // authorize an in-place tools upgrade only when all those exact legacy inputs still match.
-    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
+    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, previousInstructions), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
     const plan = configuration.catalog.plans.find(candidate => candidate.id === configuration.catalog.activePlanId)
     const persona = configuration.personas.find(candidate => candidate.id === plan?.personaId)
     if (!plan || !persona || plan.provider !== applied.provider || plan.model !== applied.model) return []
@@ -337,7 +342,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
       const document = await readJournal()
       if (document.value.pending?.state !== 'verified' || !document.value.applied) return false
       const current = await selected(signal)
-      if (![current.configurationRevision, configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
+      if (![current.configurationRevision, configurationRevision(current.configuration, false, previousInstructions), configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
       const live = await verified(current)
       return live.reasons.length === 1 && live.reasons[0] === 'pending_reload'
     },
