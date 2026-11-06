@@ -62,6 +62,10 @@ const descriptions = {
   submit_timeout: ['warning', 'timeout', '模型提交阶段未在期限内完成，请查看会话诊断；未自动重复提交。'],
   deadline: ['warning', 'timeout', '本轮处理期限已到，未自动重复提交。'],
   accepted: ['info', 'processed', '模型已接收本轮请求，正在等待回复。'],
+  work_progress_accepted: ['info', 'processed', '后台助手进度已交给主会话，正在判断是否转述。'],
+  work_result_accepted: ['info', 'processed', '后台助手结果已交给主会话，正在整理回复。'],
+  work_failure_accepted: ['info', 'processed', '后台助手异常已交给主会话，正在整理说明。'],
+  notification_accepted: ['info', 'processed', '宿主通知已交给主会话，正在整理回复。'],
   tool_projection_failed: ['error', 'error', '框架工具挂载失败，本轮尚未提交给模型。'],
   rejected: ['warning', 'processed', '消息未获准处理，请核对接入策略及会话状态。'],
   submit_not_started: ['warning', 'processed', '回复监听未能就绪，本轮尚未提交给模型。'],
@@ -140,6 +144,8 @@ export function createNativeActivity({ now = Date.now }: { readonly now?: () => 
 }
 
 const activityMapping: Record<keyof typeof descriptions, readonly [string,string]> = {
+    work_progress_accepted:['message','accepted'],work_result_accepted:['message','accepted'],
+    work_failure_accepted:['message','accepted'],notification_accepted:['message','accepted'],
     correlation_restored:['connection','connected'],
     html_queued:['message','queued'],html_failed:['message','rejected'],
     markdown_queued:['message','queued'],markdown_failed:['message','rejected'],

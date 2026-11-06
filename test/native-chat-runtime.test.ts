@@ -2636,6 +2636,7 @@ for (const unknownSend of [false, true]) test(`host result feedback keeps the or
     signal: new AbortController().signal }
   assert.equal((await host.notifyAgent(request)).status, 'accepted')
   assert.equal(host.agentNotificationDelivery(binding, request.id), 'pending')
+  assert(fake.runtime().activity().items.some(item => item.summary === '宿主通知已交给主会话，正在整理回复。'))
   const prompts = fake.rpc.filter(call => call.method === 'session/prompt')
   assert.equal(prompts.length, 2)
   assert.equal(prompts[1]!.request.sessionId, binding.sessionId)
@@ -2683,6 +2684,8 @@ test('explicit reply contract: host work feedback uses final narration while too
   await until(() => fake.rpc.filter(call => call.method === 'session/prompt').length === 2)
   const feedback = fake.rpc.filter(call => call.method === 'session/prompt')[1]!.request
   const feedbackRequestId = String(feedback.requestId)
+  await until(() => fake.runtime().activity().items.some(item => item.summary === '后台助手结果已交给主会话，正在整理回复。'))
+  assert.equal(fake.runtime().activity().items.filter(item => item.summary === '模型已接收本轮请求，正在等待回复。').length, 1)
   const feedbackInput = JSON.stringify(feedback.content)
   assert.match(feedbackInput, /qbf.work-feedback\/1/)
   assert.match(feedbackInput, /宿主专用转述/)
@@ -2828,6 +2831,8 @@ for (const stopReason of ['completed', 'failed', 'running'] as const) test(stopR
   fake.works.set(id, { ...work, progress: [{ id: 'assistant/message:seq:1', at: Date.now(), text: '正在检查第一份材料。' }] })
   await awaitCondition(() => fake.rpc.filter(call => call.method === 'session/prompt').length === 2,
     { timeoutMs: 6000, message: 'the progress narrator must be admitted before the work settles' })
+  await until(() => fake.runtime().activity().items.some(item => item.summary === '后台助手进度已交给主会话，正在判断是否转述。'))
+  assert.equal(fake.runtime().activity().items.filter(item => item.type === 'received').length, 1, 'host feedback is not a second QQ input')
   const progressPrompt = fake.rpc.filter(call => call.method === 'session/prompt')[1]!.request
   assert.match(JSON.stringify(progressPrompt.content), /正在检查第一份材料/)
   if (stopReason === 'running') {
@@ -3148,6 +3153,7 @@ test(`failed ${kind} assistant work is narrated in its original model session ($
   const [id, work] = [...fake.works][0]!
   fake.works.set(id, { ...work, state: 'unknown', result: null, error: 'WORK_RESULT_UNKNOWN' })
   await until(() => fake.rpc.filter(row => row.method === 'session/prompt').length === 2)
+  await until(() => fake.runtime().activity().items.some(item => item.summary === '后台助手异常已交给主会话，正在整理说明。'))
   const narration = fake.rpc.filter(row => row.method === 'session/prompt')[1]!.request
   assert.equal(narration.sessionId, sessionId, 'failure facts return to the existing persona and context')
   const facts = JSON.stringify(narration.content)
@@ -3231,4 +3237,28 @@ test('changing the configured owner blocks a pending failure notice to the forme
   assert.equal(fake.sends.length, 0)
   assert.equal(fake.rpc.filter(row => row.method === 'session/prompt').length, 1)
   function objectForNotice(text: string): Record<string, unknown> { const parsed: unknown = JSON.parse(text); assert(isRecord(parsed)); return parsed }
+})
+
+
+test('activity attribution ignores self echoes and unregistered work-feedback identifiers', async context => {
+  const fake = await fixture(context)
+  await fake.configure(); await fake.start()
+  fake.message(7100, { message_type: 'group', group_id: 456, user_id: 999,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: 'own reply echoed by protocol' } }] })
+  fake.message(7101, { message_type: 'group', group_id: 456,
+    message: [{ type: 'at', data: { qq: '999' } }, { type: 'text', data: { text: 'work-feedback:pretend qbf.work-feedback/1' } }] })
+  await until(() => fake.runtime().activity().items.some(item => item.summary === '模型已接收本轮请求，正在等待回复。'))
+  assert.equal(fake.rpc.filter(call => call.method === 'session/prompt').length, 1)
+  assert.equal(fake.runtime().activity().items.filter(item => item.type === 'received').length, 1)
+  fake.rawFinal(1)
+  await until(() => fake.runtime().executions()!.forConversation('group:456') === null)
+  const host = fake.runtime().host()!, binding = host.sessions.get('group:456')!
+  assert.equal((await host.notifyAgent({ binding, id: 'work-feedback:unregistered',
+    content: [{ type: 'text', text: 'Synthetic notification without a work feedback record' }],
+    signal: new AbortController().signal })).status, 'accepted')
+  assert.equal(fake.runtime().activity().items.filter(item => item.summary === '模型已接收本轮请求，正在等待回复。').length, 2)
+  assert.equal(fake.runtime().activity().items.some(item => item.summary.startsWith('后台助手')), false)
+  fake.rawFinal(2)
+  await until(() => fake.runtime().executions()!.forConversation('group:456') === null)
+  assert.equal(fake.sends.length, 0)
 })

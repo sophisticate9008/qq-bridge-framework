@@ -66,6 +66,24 @@ export function createNativeAgentCoordinator(options: {
     return pending?.sessionId === binding.sessionId && pending.generation === binding.generation
       && digest([binding.conversationId, pending.requestId, 'prompt']) === requestId ? pending : null
   }
+  function acceptedActivity(binding: SessionBinding, requestId: string) {
+    try {
+      const pending = matchingReply(binding, requestId)
+      const row = pending?.requestId.startsWith('work-feedback:')
+        ? store.read('native-work.feedback', pending.requestId) : null
+      const feedback = row ? object(row.value) : null
+      if (feedback?.schema === 1 && feedback.conversationId === binding.conversationId
+        && feedback.parentSessionId === binding.sessionId && feedback.generation === binding.generation
+        && feedback.status === 'submitting' && typeof feedback.final === 'boolean') {
+        return typeof feedback.failureNoticeId === 'string' ? 'work_failure_accepted'
+          : feedback.final ? 'work_result_accepted' : 'work_progress_accepted'
+      }
+      return readAgentPresentation(store, requestId, binding) ? 'notification_accepted' : 'accepted'
+    } catch {
+      // Activity attribution is diagnostic and must not block an admitted execution.
+      return 'accepted'
+    }
+  }
   function settleSilent(execution: NativeExecutionRecord, decision: ReturnType<typeof parseNativeReplyDecision> = null) {
     const binding = execution.binding
     const pending = matchingReply(binding, execution.requestId)
@@ -158,12 +176,15 @@ export function createNativeAgentCoordinator(options: {
             observeExecution(execution)
             if (execution.status !== 'prepared') return { status: 'unknown' }
             runtime.claims.attach(execution, baseline)
+            // Capture the trusted origin before a fast response can settle the pending notification.
+            const acceptedEvent = acceptedActivity(binding, request.requestId)
             const result = await runtime.executions.submit(execution.id, ({ signal }) => {
               runtime.messageSources?.retain({ requestId: request.requestId, sessionId: request.sessionId, generation: binding.generation })
               return sourceAgent.submit({ ...request, signal: AbortSignal.any([signal, request.signal]) })
             })
             observeExecution(result)
-            if (result.externalStatus === 'accepted') activity.record('accepted', binding.conversationId)
+            if (result.externalStatus === 'accepted') activity.record(acceptedEvent, binding.conversationId,
+              undefined, { requestId: request.requestId, executionId: execution.id })
             if (result.status !== 'running') runtime.messageSources?.releaseExecution({ requestId: request.requestId,
               sessionId: request.sessionId, generation: binding.generation })
             await checkpoint('agent.submitted', { conversationId: binding.conversationId, sessionId: request.sessionId,
