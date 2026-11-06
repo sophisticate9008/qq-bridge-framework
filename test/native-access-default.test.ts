@@ -141,7 +141,8 @@ for (const cancelOnTimeout of [true, false]) test(`default whitelist timeout can
     const fixture = await createNativeCapabilityRuntimeFixture(context, { evidenceRoot: process.env.NATIVE_ACCESS_EVIDENCE })
     await fresh(fixture)
     const execution = object((await fixture.api('/api/chat/execution')).policy)
-    await fixture.save('execution', { policy: { ...execution, turnTimeoutMs: 1200, cancelTimeoutMs: 300,
+    // Exercise the short turn deadline without racing local transport against a 300 ms I/O budget.
+    await fixture.save('execution', { policy: { ...execution, turnTimeoutMs: 1200, cancelTimeoutMs: 5000,
       noticeTimeoutMs: 300, noticeEnabled: false, cancelOnTimeout } })
     await deploy(fixture)
     assert(grants(fixture).every(grant => Object.hasOwn(object(grant.maxUses), 'agent.cancel') === cancelOnTimeout))
