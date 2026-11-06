@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 
 const upstream = resolve('.cache/blitz-source');
 const target = `${process.platform}-${process.arch}`;
-const output = resolve('runtime/html-renderer', target);
+const output = resolve('private/maintenance/html-renderer', target);
 await mkdir(join(output, 'licenses'), { recursive: true });
 const binary = process.platform === 'win32' ? 'qbf-html-renderer.exe' : 'qbf-html-renderer';
 const original = process.platform === 'win32' ? 'qbf-html-probe.exe' : 'qbf-html-probe';

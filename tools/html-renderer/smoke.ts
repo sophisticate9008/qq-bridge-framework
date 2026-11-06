@@ -5,13 +5,13 @@ import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { htmlRendererBuildHash } from '../../scripts/html-renderer-component.ts';
 const target = `${process.platform}-${process.arch}`;
-const directory = resolve('runtime/html-renderer',target);
+const directory = resolve('private/maintenance/html-renderer',target);
 const metadata = JSON.parse(await readFile(join(directory,'component.json'),'utf8')) as {buildHash:string;target:string;binary:string;sha256:string};
 assert.equal(metadata.target,target);
 assert.equal(metadata.buildHash,await htmlRendererBuildHash(process.cwd()));
 const binary=join(directory,process.platform==='win32'?'qbf-html-renderer.exe':'qbf-html-renderer');
 assert.equal(createHash('sha256').update(await readFile(binary)).digest('hex'),metadata.sha256);
-const output=resolve('runtime/html-renderer-smoke');
+const output=resolve('private/maintenance/html-renderer-smoke');
 await mkdir(output,{recursive:true});
 const font=resolve('assets/fonts/wqy-microhei.ttc');
 function render(name:string,html:string): Buffer {

@@ -26,7 +26,7 @@ const binary = resolve(executable);
 // The default Blitz document registers this internal font itself. Our probe supplies
 // its own FontContext, so explicitly provide it to preserve normal list markers.
 const bulletFont = process.argv[3] ? resolve(process.argv[3]) : undefined;
-const output = resolve('runtime/research/markdown-render-comparison');
+const output = resolve('private/maintenance/research/markdown-render-comparison');
 await mkdir(output, { recursive: true });
 const fontPaths = ['wqy-microhei.ttc', 'NotoSansMath-Regular.ttf', 'NotoSansSymbols2-Regular.ttf', 'NotoSans-Regular.ttf']
   .map((name) => resolve('assets/fonts', name));

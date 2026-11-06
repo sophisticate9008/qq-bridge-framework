@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 
 const upstream = resolve('.cache/blitz-source');
-const output = resolve('runtime/blitz-probe');
+const output = resolve('private/maintenance/blitz-probe');
 const executable = process.platform === 'win32' ? 'qbf-html-probe.exe' : 'qbf-html-probe';
 const binary = resolve(upstream, 'target/production/examples', executable);
 const packaged = resolve(output, 'package');

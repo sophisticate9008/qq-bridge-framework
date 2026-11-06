@@ -27,7 +27,7 @@ manifest = manifest.replace(/\n\[features\][\s\S]*?\n\[dev-dependencies\][\s\S]*
 if (manifest === original || manifest.includes('log-times =')) throw new Error('Unexpected upstream manifest');
 await writeFile(manifestPath, manifest);
 await copyFile(new URL('./main.rs', import.meta.url), resolve(upstream, 'examples/qbf-html-probe.rs'));
-const output = resolve('runtime/blitz-probe');
+const output = resolve('private/maintenance/blitz-probe');
 await mkdir(output, { recursive: true });
 const css = `html,body{margin:0;padding:0}body{font-family:"WenQuanYi Micro Hei";font-size:26px;color:#152139;background:#edf2fa}.card{margin:24px;padding:28px;background:#fff;border-radius:20px}h1{color:#7134c4;font-size:40px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.tile{padding:20px;border-radius:12px;background:#e4f5f0;color:#08765a}.blue{background:#e9edff;color:#384dc2}table{width:100%;border-collapse:collapse}td,th{padding:12px;border:1px solid #c9d4e7}pre{padding:20px;background:#182237;color:#adf1cf;white-space:pre-wrap}p{line-height:1.6}`;
 const wrap = (body: string): string => `<!doctype html><html><head><meta charset="utf-8"><style>${css}pre,code{font-family:"WenQuanYi Micro Hei Mono"}</style></head><body>${body}</body></html>`;

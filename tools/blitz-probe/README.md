@@ -4,7 +4,7 @@
 
 `HTML 渲染组件编译调研` Actions 在 Linux x64、Linux ARM64 和 Windows x64 原生 runner 上编译固定提交的 CPU 渲染组件，并运行公开的中文彩色布局和超过 4000 像素的长文档。只保存三天保留的 Actions artifact，不创建标签或 Release。
 
-源仓库只保存封装与构建脚本；上游源码放在忽略的 `.cache/blitz-source`，编译结果、样图与报告放在忽略的 `runtime/blitz-probe`。不上传编译缓存、依赖目录、会话或本机配置。
+源仓库只保存封装与构建脚本；上游源码放在忽略的 `.cache/blitz-source`，编译结果、样图与报告放在忽略的 `private/maintenance/blitz-probe`。不上传编译缓存、依赖目录、会话或本机配置。
 
 产物报告分别列出优化后可执行文件字节数、中文字体字节数、包含字体的压缩包字节数和实际渲染耗时。压缩包包括用于本轮测量的中文字体，因此其大小与渲染器单体不同；正式集成可以复用框架已有字体。
 
@@ -48,7 +48,7 @@ Linux `ldd` 仅列出系统加载器、libc、libm 和 libgcc_s，不需要桌�
 
 Takumi 本身也是 Rust 核心，本项目使用 `@takumi-rs/core` 的预编译 Node 原生绑定，通过 npm 安装匹配平台的包，用户不需要自行编译。本机 Linux ARM64 上三个 `@takumi-rs` 包安装后合计约 7.15 MiB，其中原生组件约 6.71 MiB、Node 绑定及 HTML 辅助库合计约 0.44 MiB；不含共用字体、MathJax 等。Blitz 当前 ARM64 可执行文件为 14.51 MiB。两者均为安装后体积，不能拿它们与压缩包体积直接比较。
 
-`compare-markdown.ts` 从当前 Markdown worker 的实际源码提取文档准备函数到忽略的 `runtime/research/markdown-render-comparison`，复用既有解析、转义、任务列表、高亮和数学排版规则，避免另维护一套解析器。探针将内部公式图像替换为等尺寸的静态内联 SVG，再向两个引擎提供同一份 HTML/CSS 与四份框架字体。遇到 worker 源码结构变化时明确失败，不修改运行时源码。
+`compare-markdown.ts` 从当前 Markdown worker 的实际源码提取文档准备函数到忽略的 `private/maintenance/research/markdown-render-comparison`，复用既有解析、转义、任务列表、高亮和数学排版规则，避免另维护一套解析器。探针将内部公式图像替换为等尺寸的静态内联 SVG，再向两个引擎提供同一份 HTML/CSS 与四份框架字体。遇到 worker 源码结构变化时明确失败，不修改运行时源码。
 
 运行方式：
 
