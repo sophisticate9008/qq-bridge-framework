@@ -294,8 +294,8 @@
 [data-usage-statistics] .metric { height:160px; grid-template-rows:16px 64px minmax(0,1fr); }
 [data-usage-statistics] .metric > strong,
 [data-usage-statistics] .metric > p { min-height:0; overflow:auto; overflow-wrap:anywhere; scrollbar-gutter:stable; }
-#usage-series > .panel-body { height:450px; }
-#usage-series .usage-series-content { display:grid; height:100%; min-height:0; gap:8px; grid-template-rows:72px minmax(0,1fr) 27px; }
+#usage-series > .panel-body { height:415px; }
+#usage-series .usage-series-content { display:grid; height:100%; min-height:0; gap:8px; grid-template-rows:72px minmax(0,1fr); }
 #usage-series .usage-series-totals { min-height:0; overflow:auto; scrollbar-gutter:stable; }
 #usage-chart { gap:8px; grid-template-rows:40px 206px 20px minmax(20px,1fr); }
 #usage-chart > p, #usage-chart > div { min-height:0; }
