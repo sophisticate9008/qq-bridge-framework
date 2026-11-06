@@ -84,7 +84,7 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
     {triggerContainer && createPortal(<Popover.Trigger id={triggerId} render={<Button variant="ghost" size="sm" />} disabled={!connected} aria-label="框架版本与更新" aria-describedby="framework-version-state" title={indicatorLabel} className="h-5 gap-1.5 rounded-md bg-muted/70 px-1.5 text-xs text-muted-foreground tabular-nums hover:bg-muted">
       {status ? `v${status.currentVersion}` : '版本'}
       <span id="framework-version-state" className="sr-only">{indicatorLabel}</span>
-      {indicator !== 'current' && <span aria-hidden="true" data-version-indicator={indicator} className={`size-2 shrink-0 rounded-full bg-current ${indicator === 'available' ? 'text-amber-400' : 'text-muted-foreground/50'}`} style={{ boxShadow: indicator === 'available' ? '0 0 3px currentColor, 0 0 9px currentColor' : undefined }} />}
+      {indicator !== 'current' && <span aria-hidden="true" data-version-indicator={indicator} className={`size-1.5 shrink-0 rounded-full bg-current ${indicator === 'available' ? 'text-amber-400' : 'text-muted-foreground/50'}`} />}
     </Popover.Trigger>, triggerContainer)}
     <Popover.Portal container={isMobile ? triggerContainer : undefined}>
       <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="z-[80]">
