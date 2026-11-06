@@ -70,7 +70,7 @@ jobs:
       - name: 初始化私有浏览器测试目录
         run: install -d -m 700 .cache .cache/testing
       - name: 缓存 Chromium 下载
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: |
             .cache/testing/browsers

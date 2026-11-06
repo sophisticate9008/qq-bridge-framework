@@ -48,7 +48,7 @@ jobs:
       - name: 复用已验证的组件缓存
         id: cache
         if: ${{ !inputs.force_rebuild }}
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: private/maintenance/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
           key: html-renderer-v1-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.component.outputs.hash }}
@@ -89,7 +89,7 @@ jobs:
         run: node tools/html-renderer/smoke.ts
       - name: 保存已验证的组件缓存
         if: ${{ !inputs.force_rebuild && steps.cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: private/maintenance/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
           key: html-renderer-v1-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.component.outputs.hash }}
