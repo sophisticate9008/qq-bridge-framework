@@ -47,7 +47,7 @@ export async function rollbackFrameworkUpdate(target: string, id: string): Promi
   await assertFrameworkProcessStopped(root);
   const lock = join(root, '.framework-update.lock');
   if (await exists(lock) && (await readFile(lock, 'utf8')) !== id) throw new Error('update_lock_conflict');
-  const directory = await safePath(root, `runtime/framework-updates/${id}`);
+  const directory = await safePath(root, `data/framework-updates/${id}`);
   const value: unknown = JSON.parse(await readFile(await safePath(directory, 'journal.json'), 'utf8'));
   if (!isRecord(value) || value.schema !== 1 || value.id !== id || !releaseVersion(value.from) || !releaseVersion(value.to)
     || !['applying', 'applied', 'rolled-back'].includes(String(value.state)) || !Array.isArray(value.entries) || value.entries.length > 40_002) throw new Error('update_journal_invalid');
@@ -96,7 +96,7 @@ export async function applyFrameworkUpdate(options: { readonly source: string; r
   const paths = [...new Set([...distribution.files.map(file => file.path), ...old?.files.map(file => file.path) ?? [], 'distribution.json',
     ...(options.dependencies ? ['node_modules'] : [])])];
   const id = randomUUID();
-  const directory = await safePath(target, `runtime/framework-updates/${id}`);
+  const directory = await safePath(target, `data/framework-updates/${id}`);
   // Complete preflight before taking ownership of any public file.
   const entries: UpdateEntry[] = [];
   for (const path of paths) {

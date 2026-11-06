@@ -15,7 +15,7 @@ npm start
 
 接着配置外部 OneBot 与 DSH，选择模型方案和人设，填写主人与允许范围，再核对应用结果并启用聊天。本机 DSH 默认自动发现；远程和手动参数属于高级接入。详见 [DSH](DSH.md) 与 [控制台](UI.md)。
 
-管理配置路径优先级为 `--config`、`QQ_BRIDGE_FRAMEWORK_CONFIG`、`runtime/admin/config.json`。复用已有网关可在初始化时显式传 `--gateway-config <文件>`；仅在信任并需要该程序时传 `--service-manager <程序>`，不会自动猜测运维脚本。
+管理配置路径优先级为 `--config`、`QQ_BRIDGE_FRAMEWORK_CONFIG`、`data/admin/config.json`。复用已有网关可在初始化时显式传 `--gateway-config <文件>`；仅在信任并需要该程序时传 `--service-manager <程序>`，不会自动猜测运维脚本。
 
 ## 常用命令
 
@@ -44,13 +44,21 @@ npm start
 
 “会话回复监听中断”表示至少一个会话监听 DSH 事件的连接结束，可能由连接关闭、心跳超时或事件校验失败触发。QQ 的 OneBot 收发和 DSH 鉴权接口可以同时正常。框架按有界退避重新建立已有监听，也可使用“重新连接聊天”；持续失败时可重启框架。旧请求不会自动重发，未确认的执行结果需到会话详情核对。监听恢复后当前告警消失，保留的最近错误显示为历史记录；无需仅凭这条记录重启 DSH、协议端或清空会话。
 
-配置优先级为显式 `--config`、`QQ_BRIDGE_FRAMEWORK_CONFIG`；本机已登记安装默认使用 `runtime/live/framework-admin.json`，其余使用当前目录的 `runtime/admin/config.json`。旧的两个 CLI 命令已统一为 `qbf-cli`，已有部署需同步全局链接、boot 与管理配置中的 `serviceManager`，保留原配置和会话。
+配置优先级为显式 `--config`、`QQ_BRIDGE_FRAMEWORK_CONFIG`；本机已登记安装默认使用 `data/live/framework-admin.json`，其余新安装使用当前目录的 `data/admin/config.json`。自定义配置通过 `--config` 或环境变量明确指定。旧的两个 CLI 命令已统一为 `qbf-cli`，已有部署需同步全局链接、boot 与管理配置中的 `serviceManager`，保留原配置和会话。
 
 ## 本机 boot 接入
 
-本机 `boot` 通过本框架的 `qbf-cli service start` 启动框架网关、宿主及明确登记的本机受管服务。入口为 `ops/qbf-cli`，实现为 `scripts/service-manager.ts`，服务清单位于私有的 `runtime/live/services.json`。默认受管范围仅为 `framework-admin` 与 `framework-gateway`；本机 DSH 等额外服务须以 `managed: true` 明确委托，外部协议端与独立应用由各自的入口管理。`qbf-cli protocol napcat|snowluma` 仅适用于明确托管协议进程的部署。连接远程 DSH 或 OneBot 只建立通信，不管理远程进程。框架宿主沿用已选择的部署入口和私有配置，按已保存的运行意图恢复原生聊天。
+本机 `boot` 通过本框架的 `qbf-cli service start` 启动框架网关、宿主及明确登记的本机受管服务。入口为 `ops/qbf-cli`，实现为 `scripts/service-manager.ts`，服务清单位于私有的 `data/live/services.json`。默认受管范围仅为 `framework-admin` 与 `framework-gateway`；本机 DSH 等额外服务须以 `managed: true` 明确委托，外部协议端与独立应用由各自的入口管理。`qbf-cli protocol napcat|snowluma` 仅适用于明确托管协议进程的部署。连接远程 DSH 或 OneBot 只建立通信，不管理远程进程。框架宿主沿用已选择的部署入口和私有配置，按已保存的运行意图恢复原生聊天。
 
 `qbf-cli restart framework-admin` 单独重启框架；`boot logs qbf-cli`、`boot logs framework-admin` 和 `qbf-cli logs` 均查看框架日志。`boot logs qqbridge` 保留为日志别名。`qbf-cli service status` 展示当前选中的服务，`qbf-cli service doctor` 只读核对配置的健康检查与 QQ 在线状态。启动或停止失败时返回非零退出码，停止未完成时不继续重启。服务安装目录可以独立配置，运维命令不调用其他项目的启动脚本。配置格式、安装与常用命令见 [服务运维](SERVICE_MANAGER.md)。
+
+## 程序、数据与任务目录
+
+目录职责、兼容方式和迁移步骤见 [目录与迁移](DIRECTORIES.md)。固定源码放在 `src/`、`scripts/`，构建产物放在 `dist/`；源码安装的正式程序副本位于 `runtime/deployments/<部署编号>/`。配置、会话和业务状态使用 `data/`，助手任务脚本及成果使用 `workspace/<任务名>/`，开发维护资料使用 `private/maintenance/`，可重建缓存使用 `.cache/`。
+
+源码安装可使用 `node scripts/launch-admin.ts --config /绝对路径/framework-admin.json`。启动器从配置同目录读取私有 `admin-deployment.json`，核对配置归属与入口 SHA-256 后启动选中的程序。schema 1 与原有绝对入口继续兼容；可选 `previousEntry` 记录需要保留的回滚入口。
+
+`qbf-cli maintenance` 保留当前程序、显式回滚入口、最近的较旧程序以及运行或配置仍引用的目录。包含持久数据或任务目录的程序副本保守保留。没有部署选择的普通安装跳过程序回收。模拟记录按独立保留规则处理，工作区不会因为任务结束自动删除。
 
 ## 需要区分的默认值
 
@@ -107,7 +115,7 @@ npm run test:sdk
 
 浏览器工具按需安装到 `.cache/testing/`，普通安装、构建、启动和单元测试不需要 Playwright。需要预装时执行 `npm run cli -- install --browser`；系统库不足时可加 `--with-deps`。`--skip-browser-download` 只安装工具包。`npm run cli -- uninstall --browser` 只清理该目录中具有有效安装标记的浏览器工具，不清业务数据、证据或其他缓存。
 
-`.cache/` 整体由 Git 忽略，用于可重建的开发工具与缓存：`.cache/testing/` 保存独立测试依赖与 Chromium，`.cache/vite/` 保存控制台及浏览器夹具的 Vite 缓存。测试截图、诊断报告、模拟记录、部署快照和业务数据仍归 `runtime/`；公共源码检查跳过缓存和私人目录。
+`.cache/` 整体由 Git 忽略，用于可重建的开发工具与缓存：`.cache/testing/` 保存独立测试依赖与 Chromium，`.cache/vite/` 保存控制台及浏览器夹具的 Vite 缓存。测试截图、诊断报告和模拟记录归 `private/maintenance/`，部署副本归 `runtime/`，持久业务数据归 `data/`；公共源码检查跳过缓存和私人目录。
 
 旧版本的工具位于 `runtime/testing/`。迁移时先结束使用该目录的浏览器测试进程，在新目录尚不存在时将完整工具目录移动到 `.cache/testing/`，然后执行 `npm run cli -- install --browser --skip-browser-download` 更新其中的 TypeScript 路径。也可在新位置重新安装；CLI 不自动移动或删除旧目录。无需重启框架、DSH 或 QQ 服务。
 

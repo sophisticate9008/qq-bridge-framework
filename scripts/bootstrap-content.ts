@@ -8,7 +8,7 @@ import { assert, isRecord, snapshot } from '../src/core/values.ts'
 import { digest } from '../src/host/data.ts'
 
 const loadedRoots = new Map<string, string>()
-const excludedDirectories = new Set(['runtime', 'node_modules', '.git', '.cache', '.codex'])
+const excludedDirectories = new Set(['runtime', 'data', 'workspace', 'node_modules', '.git', '.cache', '.codex'])
 function excludedFile(name: string) { return /^\.env(?:\.|$)/i.test(name) || /(?:^|[._-])(?:credentials?|secrets?|tokens?)(?:\.|$)/i.test(name)
   || /\.(?:pem|key|p12|pfx|sqlite|db)(?:$|-(?:wal|shm|journal)$)/i.test(name) || /(?:id_rsa|id_ed25519|hosts\.yml)$/i.test(name) }
 function localPath(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 512

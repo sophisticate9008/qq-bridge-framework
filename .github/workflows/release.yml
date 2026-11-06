@@ -29,8 +29,8 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: html-renderer-*
-          path: runtime/html-renderer-components
-      - run: node scripts/install-html-renderer.ts runtime/html-renderer-components --all
+          path: private/maintenance/html-renderer-components
+      - run: node scripts/install-html-renderer.ts private/maintenance/html-renderer-components --all
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix packages/dsh-bridge-plugin --ignore-scripts --no-audit --no-fund
       - run: npm run build
@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: framework-packages
-          path: runtime/releases/
+          path: private/maintenance/releases/
           if-no-files-found: error
           retention-days: 7
   native:
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: framework-packages
-          path: runtime/releases
+          path: private/maintenance/releases
       - name: 验证同批正式附件
         run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
       - name: 保存小型平台验收报告
@@ -113,7 +113,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: framework-packages
-          path: runtime/releases
+          path: private/maintenance/releases
       - name: 实际启动、原生排版、停止与持久卷复用
         run: node scripts/verify-docker.ts
       - name: 导出已验证镜像
@@ -121,12 +121,12 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
-          mkdir -p runtime/docker-images
-          docker save "qq-bridge-framework:$version" | gzip > "runtime/docker-images/qq-bridge-framework-$version-docker-${{ matrix.arch }}.tar.gz"
+          mkdir -p private/maintenance/docker-images
+          docker save "qq-bridge-framework:$version" | gzip > "private/maintenance/docker-images/qq-bridge-framework-$version-docker-${{ matrix.arch }}.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: docker-image-${{ matrix.arch }}
-          path: runtime/docker-images/*.tar.gz
+          path: private/maintenance/docker-images/*.tar.gz
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
@@ -150,25 +150,25 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: framework-packages
-          path: runtime/releases
+          path: private/maintenance/releases
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: docker-image-*
-          path: runtime/docker-images
+          path: private/maintenance/docker-images
           merge-multiple: true
       - name: 添加镜像校验和
         shell: bash
         run: |
           set -euo pipefail
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
-          cp runtime/docker-images/*.tar.gz "runtime/releases/v$version/"
-          cd "runtime/releases/v$version"
+          cp private/maintenance/docker-images/*.tar.gz "private/maintenance/releases/v$version/"
+          cd "private/maintenance/releases/v$version"
           sha256sum *-docker-*.tar.gz >> SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: release-packages
-          path: runtime/releases
+          path: private/maintenance/releases
           retention-days: 7
           compression-level: 0
           if-no-files-found: error

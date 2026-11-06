@@ -7,7 +7,7 @@ import { createNativeCapabilityRuntimeFixture, capabilityUntil, capabilityObject
 const cleanups: Array<() => void | Promise<void>> = [];
 let browser: Browser | undefined;
 const fixture = await createNativeCapabilityRuntimeFixture({ after: cleanup => cleanups.push(cleanup) });
-const output = new URL('../runtime/native-chat-ui-smoke/', import.meta.url);
+const output = new URL('../private/maintenance/native-chat-ui-smoke/', import.meta.url);
 try {
   await fixture.login();
   await fixture.configure(false);

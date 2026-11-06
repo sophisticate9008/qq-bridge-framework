@@ -15,7 +15,7 @@ export interface FrameworkDistribution {
 export function isDistributionPath(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 512
     && !/[\\:\x00-\x1f\x7f]/.test(value)
-    && value.split('/').every(part => part && !['.', '..', '.git', 'private', 'runtime', 'node_modules', '.cache'].includes(part)
+    && value.split('/').every(part => part && !['.', '..', '.git', 'private', 'runtime', 'data', 'workspace', 'node_modules', '.cache'].includes(part)
       && !/[. ]$/.test(part) && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))
     && !/(?:^|\/)\.env(?:\.|$)/.test(value) && !/\.(?:sqlite(?:-wal|-shm)?|zstd|jsonl)$/.test(value)
     && !value.startsWith('.framework-') && value !== 'distribution.json';

@@ -11,7 +11,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page, t
 
 import { AdminRequestError, createAdminServer, type AdminRoute } from '../src/admin/server.ts';
 
-const outputDirectory = new URL('../runtime/activity-smoke/', import.meta.url);
+const outputDirectory = new URL('../private/maintenance/activity-smoke/', import.meta.url);
 const builtApplication = new URL('../dist/admin-web/app.js', import.meta.url);
 const administratorToken = 'activity-smoke-administrator-token-1234567890';
 const sessionsPath = '/api/chat/sessions';
@@ -542,7 +542,7 @@ async function run(): Promise<void> {
       xssExecuted: false,
     };
     await writePrivateJson(new URL(`result-${runId}.json`, outputDirectory).pathname, result);
-    console.log(`Activity smoke passed. Results: runtime/activity-smoke/result-${runId}.json`);
+    console.log(`Activity smoke passed. Results: private/maintenance/activity-smoke/result-${runId}.json`);
   } catch (error: unknown) {
     if (page !== undefined && !page.isClosed()) {
       await screenshot(page, 'failure').catch(() => undefined);

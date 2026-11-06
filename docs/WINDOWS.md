@@ -6,11 +6,11 @@ Windows 使用预构建 ZIP、控制台启动脚本和浏览器中的现有 WebU
 
 ## 安装与启动
 
-1. 从 [v1.12.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.12.0) 下载 `qq-bridge-framework-1.12.0-windows-x64.zip` 与 `SHA256SUMS`。
+1. 从 [v1.13.0 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.13.0) 下载 `qq-bridge-framework-1.13.0-windows-x64.zip` 与 `SHA256SUMS`。
 2. 用 PowerShell `Get-FileHash <压缩包> -Algorithm SHA256` 核对校验文件中的对应项，解压到自己可写的本地 NTFS 文件夹。
 3. 双击根目录 `start-windows.cmd`。首次启动联网安装锁定的生产依赖，创建配置，然后启动管理端；后续启动复用依赖与原配置。
 4. 保持控制台窗口打开，在浏览器打开日志给出的本机地址（默认 `http://127.0.0.1:3210`），完成首次初始化和 QQ／DSH 连接设置。DSH 使用高级手动地址及鉴权；Linux 的进程自动发现与 screen 运维不适用于 Windows。
-5. 按 Ctrl+C 正常退出。再次运行同一脚本会保留配置和会话。升级前退出进程，备份并保留原 `runtime/`，将程序文件更新到同一目录。
+5. 按 Ctrl+C 正常退出。再次运行同一脚本会保留配置和会话。升级前退出进程，备份并保留 `data/`、`workspace/`、`private/` 及旧安装的 `runtime/`，将程序文件更新到同一目录。
 
 启动器的 `--install-dependencies` 参数只准备依赖，供 CI 分别验收首次安装与后续启动。也可在解压目录手动运行 `npm ci --omit=dev`、`npm run cli -- init`、`npm start`；已有配置不要重新初始化。无需托盘程序、Windows 服务、开机自启或额外桌面 GUI。启动器不自动登录 QQ，也不代替 DSH。
 

@@ -1,3 +1,4 @@
+import { resolveLivePath } from './runtime-configuration.ts';
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -73,7 +74,7 @@ export async function manageExtensions(root: string, argumentsList: readonly str
   let configuration: ReturnType<typeof loadGatewayAdminConfiguration>
   let token: string
   try {
-    configuration = loadGatewayAdminConfiguration(join(root, 'runtime/live/framework-admin.json'))
+    configuration = loadGatewayAdminConfiguration(resolveLivePath(root, 'framework-admin.json'))
     token = await readToken(configuration.tokenFile)
   } catch (error) {
     if (error instanceof ExtensionManagementError) throw error

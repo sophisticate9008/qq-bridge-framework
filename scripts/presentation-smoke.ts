@@ -18,7 +18,7 @@ import type { AgentAdapter } from '../src/host/types.ts';
 import { createMarkdownRenderer } from '../src/rendering/index.ts';
 import { createSqliteStore } from '../src/storage/sqlite.ts';
 
-const validationDirectory = fileURLToPath(new URL('../runtime/engineering/validation/006/', import.meta.url));
+const validationDirectory = fileURLToPath(new URL('../private/maintenance/engineering/validation/006/', import.meta.url));
 const assetDirectory = join(validationDirectory, 'presentation-assets');
 const conversationId = 'group:9001';
 const personaId = 'presentation-smoke';

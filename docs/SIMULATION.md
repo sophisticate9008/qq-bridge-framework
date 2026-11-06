@@ -28,7 +28,7 @@ node scripts/simulate-qq.ts --prepare-only
 node scripts/simulate-qq.ts
 ```
 
-默认从 `runtime/live/runtime` 读取本机配置，从 `runtime/live/services.json` 定位已经安装的 DSH。其他部署可使用 `--source-directory /实际/native配置目录 --services /实际/services.json`。主人账号直接取实际配置；未配置主人时拒绝启动。普通文本默认表示主人在模拟群中 @ 机器人。
+默认从 `data/live/runtime` 读取本机配置，从 `data/live/services.json` 定位已经安装的 DSH。其他部署可使用 `--source-directory /实际/native配置目录 --services /实际/services.json`。主人账号直接取实际配置；未配置主人时拒绝启动。普通文本默认表示主人在模拟群中 @ 机器人。
 
 复制方案时，仅将与已登记旧版内置完全一致的操作规则段落升级为当前内置说明；人设只替换两处旧版“被提到昵称就回嘴”的原句。自定义内容和其他字段原样保留，生产配置不变。纯函数 `upgradeBuiltinChatOperatingInstructions` 与 `upgradeBuiltinPersonaParticipation` 本身不读取或写入配置。
 
@@ -116,7 +116,7 @@ node scripts/simulate-qq.ts --provider deepseek-official --model deepseek-flash
 把上述消息写入私有 JSONL 文件，再运行：
 
 ```sh
-node scripts/simulate-qq.ts --batch runtime/simulation-cases.jsonl
+node scripts/simulate-qq.ts --batch private/maintenance/simulation-cases.jsonl
 ```
 
 也可使用 `--batch basic` 执行本轮自动准备的基础场景。准备文件包括由 sharp 生成的左右红蓝 PNG、带识别码的 UTF-8 文本，以及合法 WAV 测试音调；音调不是语音转写结果。基础场景覆盖主人/群友、群聊/私聊、合法引用和转发、连续补充、群与成员查询、媒体读取、表情输出和白名单拒绝。模型决定与工具执行均保留实际结果。
@@ -148,7 +148,7 @@ node scripts/simulate-qq.ts --batch runtime/simulation-cases.jsonl
 
 ## 隔离与证据
 
-每轮资料位于忽略提交的 `runtime/simulations/qq-*/`：
+每轮资料位于忽略提交的 `private/maintenance/simulations/qq-*/`：
 
 | 路径 | 内容 |
 |---|---|
@@ -163,7 +163,7 @@ node scripts/simulate-qq.ts --batch runtime/simulation-cases.jsonl
 
 OneBot 使用独占的本机 HTTP/WS 监听。所有消息、转发、图片和语音发送请求只在该端记录并返回本地回执；没有真实协议上游或发送代理。日志中的 `deliveredTo: local-capture` 指本地捕获，不代表 QQ 已送达。
 
-`runtime/simulations/index.json` 在本轮启动时原子发布 `latestRunId`，供只读活动入口定位最近一次模拟。源配置目录中的 `simulation-activity-index.json` 另存相同索引与绝对 `root` 指针，使管理服务从其他工作目录启动时仍能定位模拟活动及同来源模拟会话；它只记录定位信息，不修改模型配置。使用私有配置副本作为 `--source-directory` 时，活动归属于该副本，不自动出现在正式账号的页面；要在当前工作台“最近活动”的“全部／模拟”中查看本轮，应从工作台实际使用的配置来源目录启动模拟。此来源隔离也适用于多账号，不通过合并索引绕过归属校验。每轮 `activity.json` 保留 `native.activity()` 原始结构，外层提供 `schema:1`、`source:"simulation"`、`simulation:true`、`runId`、`sourceDirectory`、`updatedAt`；关闭前刷新最终活动状态。
+`private/maintenance/simulations/index.json` 在本轮启动时原子发布 `latestRunId`，供只读活动入口定位最近一次模拟。源配置目录中的 `simulation-activity-index.json` 另存相同索引与绝对 `root` 指针，使管理服务从其他工作目录启动时仍能定位模拟活动及同来源模拟会话；它只记录定位信息，不修改模型配置。使用私有配置副本作为 `--source-directory` 时，活动归属于该副本，不自动出现在正式账号的页面；要在当前工作台“最近活动”的“全部／模拟”中查看本轮，应从工作台实际使用的配置来源目录启动模拟。此来源隔离也适用于多账号，不通过合并索引绕过归属校验。每轮 `activity.json` 保留 `native.activity()` 原始结构，外层提供 `schema:1`、`source:"simulation"`、`simulation:true`、`runId`、`sourceDirectory`、`updatedAt`；关闭前刷新最终活动状态。
 
 DSH 只装配已经安装的官方 `dsh-base`、`dsh-web-app` 与当前工作树构建的框架 bridge 插件，不加载生产自定义 bundle、MCP、会话、运行意图或助手部署 journal。框架宿主扩展由 `--bootstrap` 显式选择，默认不加载生产选择。当前渠道与模型配置、凭据复制到权限受限的本轮目录，网页签名密钥重新生成。聊天与助手使用模拟专属命名空间，通过现有部署服务只更新模拟 profile；不修改生产 DSH 配置，不重启生产服务，不清理生产会话。
 

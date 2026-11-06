@@ -5,7 +5,7 @@ import { chromium, type Browser } from 'playwright';
 import { startDemo } from '../src/demo.ts';
 import { navigateConsolePage } from './browser-navigation-smoke.ts';
 
-const directory = new URL('../runtime/ui-smoke/', import.meta.url);
+const directory = new URL('../private/maintenance/ui-smoke/', import.meta.url);
 await mkdir(directory, { recursive: true });
 const token = randomBytes(32).toString('hex');
 const application = await startDemo({ token, port: 0 });

@@ -4,7 +4,7 @@ import { chmod, cp, lstat, mkdir, readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { assert, isRecord } from '../src/core/values.ts'
 
-const source = resolve(process.argv[2] ?? 'runtime/html-renderer-components')
+const source = resolve(process.argv[2] ?? 'private/maintenance/html-renderer-components')
 const expected = ['linux-x64', 'linux-arm64', 'win32-x64']
 const installed = new Set<string>()
 for (const name of await readdir(source)) {

@@ -28,8 +28,8 @@ gh run list --workflow html-renderer.yml --limit 5
 
 ```sh
 gh run view RUN_ID
-gh run download RUN_ID --pattern 'html-renderer-*' --dir runtime/html-renderer-components
-node scripts/install-html-renderer.ts runtime/html-renderer-components --all
+gh run download RUN_ID --pattern 'html-renderer-*' --dir private/maintenance/html-renderer-components
+node scripts/install-html-renderer.ts private/maintenance/html-renderer-components --all
 npm ci --ignore-scripts --no-audit --no-fund
 npm run build
 ```
@@ -46,7 +46,7 @@ gh workflow run html-renderer.yml --ref main -f force_rebuild=true
 
 ## 从 Release 附件恢复
 
-正式附件名称为 `qbf-html-renderer-<完整组件指纹>-<平台>.tgz`，并列入该 Release 的 `SHA256SUMS`。在 Release 页面选择对应文件，或使用 `gh release download` 下载三个平台的文件及校验表。先按校验表核对下载文件，分别解压到 `runtime/html-renderer-components/<平台>/`，再执行上述安装脚本。平台名为 `linux-x64`、`linux-arm64`、`win32-x64`。
+正式附件名称为 `qbf-html-renderer-<完整组件指纹>-<平台>.tgz`，并列入该 Release 的 `SHA256SUMS`。在 Release 页面选择对应文件，或使用 `gh release download` 下载三个平台的文件及校验表。先按校验表核对下载文件，分别解压到 `private/maintenance/html-renderer-components/<平台>/`，再执行上述安装脚本。平台名为 `linux-x64`、`linux-arm64`、`win32-x64`。
 
 每个归档含二进制、`component.json`、固定 `Cargo.lock`、`licenses/` 和 `verification.json`。安装器核对组件指纹、平台、协议和二进制校验值；错误或混用其他源码版本时拒绝安装。普通用户下载完整框架包即可，无需单独处理组件。
 
@@ -68,7 +68,7 @@ Windows Git Bash 在 Cargo 命令前设置 `export RUSTFLAGS='-C target-feature=
 ```sh
 node tools/html-renderer/package.ts
 node tools/html-renderer/smoke.ts
-node scripts/install-html-renderer.ts runtime/html-renderer
+node scripts/install-html-renderer.ts private/maintenance/html-renderer
 npm ci --ignore-scripts --no-audit --no-fund
 npm run build
 ```

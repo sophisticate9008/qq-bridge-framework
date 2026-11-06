@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const manifest: unknown = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 assert(isRecord(manifest) && typeof manifest.version === 'string' && /^\d+\.\d+\.\d+$/.test(manifest.version));
 const version = manifest.version;
-const destination = join(root, 'runtime', 'releases', `v${version}`);
+const destination = join(root, 'private', 'maintenance', 'releases', `v${version}`);
 await mkdir(destination, { recursive: true });
 const checksums: string[] = [];
 const components: string[] = [];

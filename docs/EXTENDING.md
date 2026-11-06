@@ -14,7 +14,7 @@
 
 后台助手的开发说明对长期复用能力采用框架插件优先的偏好：先阅读当前安装包的开发文档和 SDK 示例，接入实际包、工具与生命周期；一次性处理、成本明显过高或接口难以实现时可使用脚本，并说明取舍。交付分别报告源码、依赖安装、扩展登记、运行加载和实际调用的完成状态，安装第三方库不等于框架扩展已经可用。
 
-优先分析能力边界，只把有实际跨任务复用价值的最小能力做成插件，已有工具优先复用。特定文件、作品、目标设备与输出约定相关的代码可以留在 `runtime/` 的任务目录中调用插件，不因理论上可复用就把每个步骤抽成通用功能。例如乐谱 PDF 转电子琴键位，可以只沉淀 PDF 读取、文字与坐标提取、页面渲染能力，乐谱修正、键位映射和成品编排留在任务脚本中。主人明确指定的插件范围优先，例如要求“PDF 解析插件，然后转换乐谱”，就交付该插件并完成转换；明确要求键位转换插件时才按该要求扩展。
+优先分析能力边界，只把有实际跨任务复用价值的最小能力做成插件，已有工具优先复用。特定文件、作品、目标设备与输出约定相关的代码可以留在 `workspace/<任务名>/scripts/`中调用插件，不因理论上可复用就把每个步骤抽成通用功能。例如乐谱 PDF 转电子琴键位，可以只沉淀 PDF 读取、文字与坐标提取、页面渲染能力，乐谱修正、键位映射和成品编排留在任务脚本中。主人明确指定的插件范围优先，例如要求“PDF 解析插件，然后转换乐谱”，就交付该插件并完成转换；明确要求键位转换插件时才按该要求扩展。
 
 交给 Agent 编写插件时，至少约定：
 
@@ -77,7 +77,7 @@ ctx.effect(() => declareMcpToolRegistration('dsh-global', 'search', {
 
 可选的 `image-generation` v1 服务使用 `ImageGenerationService` 契约：接受提示词、稳定幂等键、主体选择和取消信号，返回原始图片字节、类型与 SHA-256，不隐式发送。服务实现由扩展提供；依赖它的业务插件无需复制 QQ 发送或会话鉴权链路。实现、素材和模型配置由安装者自行提供。
 
-本机私人、非通用扩展统一存放在 Git 忽略的 `private/extensions/<扩展标识>/`；专属文档、测试和素材随扩展保存，运行状态、会话和产物放在 `runtime/`。公开示例只演示通用框架接口，不包含安装者的私人业务实现。独立扩展接入已有可信 bootstrap，仍受原有身份、生命周期和 policy 约束。
+本机私人、非通用扩展统一存放在 Git 忽略的 `private/extensions/<扩展标识>/`；专属文档、测试和素材随扩展保存，运行状态与会话放在 `data/`，任务脚本、输入和产物放在 `workspace/<任务名>/`。公开示例只演示通用框架接口，不包含安装者的私人业务实现。独立扩展接入已有可信 bootstrap，仍受原有身份、生命周期和 policy 约束。
 
 ## 插件代码重载与配置即时更新
 
@@ -383,7 +383,7 @@ try {
 }
 ```
 
-完整覆盖标记为 `package-tree-and-dependency-locks-v1`：相对导入必须落在根目录内的已计入文件，外部运行时导入按准确 specifier 声明 npm lock v2/v3 的 version/integrity。树最多 256 个文件、总 8 MiB、单文件 1 MiB、深度 8；排除 runtime、node_modules、密钥与数据库等运行数据，拒绝链接、目录外导入和不可核验的动态加载。内容变更要求新进程加载。缺少 sidecar 的兼容入口标记为 `entry-only`，内置包为 `builtin-host-files`；这些范围不升级成完整依赖验证。指纹不是代码签名、授权或沙箱。规则与样本见 [bootstrap-content.ts](../scripts/bootstrap-content.ts)、[bootstrap-content.test.ts](../test/bootstrap-content.test.ts)。
+完整覆盖标记为 `package-tree-and-dependency-locks-v1`：相对导入必须落在根目录内的已计入文件，外部运行时导入按准确 specifier 声明 npm lock v2/v3 的 version/integrity。树最多 256 个文件、总 8 MiB、单文件 1 MiB、深度 8；排除 runtime、data、workspace、node_modules、密钥与数据库等运行数据，拒绝链接、目录外导入和不可核验的动态加载。内容变更要求新进程加载。缺少 sidecar 的兼容入口标记为 `entry-only`，内置包为 `builtin-host-files`；这些范围不升级成完整依赖验证。指纹不是代码签名、授权或沙箱。规则与样本见 [bootstrap-content.ts](../scripts/bootstrap-content.ts)、[bootstrap-content.test.ts](../test/bootstrap-content.test.ts)。
 
 状态元数据记录 packageVersion、stateSchemaVersion、contentFingerprint。`prepare()` 固定目标和 operationId；`applyPage()` 在 converter 前写 applying，再原子检查并更新该页。converter 保持键集合，只返回新 JSON 值，不执行网络或其他外部副作用。超时留下 unknown，晚回结果不提交；核对与明确后续动作见 [RECOVERY.md](RECOVERY.md)。旧 raw 状态必须显式 `prepareLegacyAdoption()`，其来源 schema 为 0，不能猜测为当前版本。完整迁移、冲突和旧键 TTL 验收见 [native-package-state.test.ts](../test/native-package-state.test.ts)。
 

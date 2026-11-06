@@ -15,16 +15,16 @@ export const BROWSER_DIAGNOSTIC_LIMITS = Object.freeze({
 const picture = /^[a-zA-Z0-9-]{1,160}\.png$/;
 const report = /^(?:(?:result|failure|report)(?:-[0-9TZ-]{1,64})?|terminal)\.json$/;
 const suites = [
-  { name: 'browser', directory: 'runtime/ui-smoke', png: picture, json: report },
-  { name: 'management', directory: 'runtime/management-smoke', png: picture, json: report },
-  { name: 'page-navigation', directory: 'runtime/page-navigation-smoke', png: picture, json: report },
-  { name: 'activity', directory: 'runtime/activity-smoke', png: picture, json: report },
-  { name: 'usage', directory: 'runtime/usage-smoke', png: picture, json: report },
-  { name: 'native-chat-ui', directory: 'runtime/native-chat-ui-smoke', png: picture, json: report },
-  { name: 'execution-journal', directory: 'runtime/execution-journal-smoke', png: picture, json: report },
-  { name: 'markdown', directory: 'runtime/engineering/validation/006',
+  { name: 'browser', directory: 'private/maintenance/ui-smoke', png: picture, json: report },
+  { name: 'management', directory: 'private/maintenance/management-smoke', png: picture, json: report },
+  { name: 'page-navigation', directory: 'private/maintenance/page-navigation-smoke', png: picture, json: report },
+  { name: 'activity', directory: 'private/maintenance/activity-smoke', png: picture, json: report },
+  { name: 'usage', directory: 'private/maintenance/usage-smoke', png: picture, json: report },
+  { name: 'native-chat-ui', directory: 'private/maintenance/native-chat-ui-smoke', png: picture, json: report },
+  { name: 'execution-journal', directory: 'private/maintenance/execution-journal-smoke', png: picture, json: report },
+  { name: 'markdown', directory: 'private/maintenance/engineering/validation/006',
     png: /^markdown-page-[0-9]{1,6}\.png$/, json: /^(?:markdown|presentation)-smoke\.json$/ },
-  { name: 'presentation', directory: 'runtime/engineering/validation/006/presentation-assets', png: picture, json: /$^/ }
+  { name: 'presentation', directory: 'private/maintenance/engineering/validation/006/presentation-assets', png: picture, json: /$^/ }
 ] as const;
 const pngHeader = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const errorNames = new Set(['Error', 'AssertionError', 'TimeoutError', 'TypeError', 'FrameworkError', 'RangeError', 'AbortError']);

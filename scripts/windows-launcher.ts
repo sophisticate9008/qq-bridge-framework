@@ -1,3 +1,4 @@
+import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -8,7 +9,7 @@ const installOnly = process.argv.length === 3 && process.argv[2] === '--install-
 if (process.argv.length > 2 && !installOnly) throw new Error('用法：windows-launcher [--install-dependencies]');
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const cli = join(root, 'dist/scripts/cli.js');
-const configuration = join(root, 'runtime/admin/config.json');
+const configuration = resolveRuntimeConfiguration(root, undefined, process.env, root);
 const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
 if (process.platform !== 'win32' || major < 24 || major === 24 && minor < 12)
   throw new Error('Windows 启动器需要 Node.js 24.12 或更新版本。');
@@ -48,10 +49,10 @@ try {
     await run([join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), 'ci', '--omit=dev', '--no-audit', '--no-fund']);
     if (!stopping) { const { writeFileSync } = await import('node:fs'); writeFileSync(marker, JSON.stringify({ key })); }
   }
-  if (!installOnly && !existsSync(configuration)) await run([cli, 'init']);
+  if (!installOnly && !existsSync(configuration)) await run([cli, 'init', '--config', configuration]);
   if (!installOnly && !stopping) {
     console.log('启动后请打开日志中的本机网页地址；按 Ctrl+C 正常退出。');
-    await run([cli, 'serve'], true);
+    await run([cli, 'serve', '--config', configuration], true);
   }
 } catch (error: unknown) {
   console.error(error instanceof Error ? error.message : '启动失败，请检查日志。');

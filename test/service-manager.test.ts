@@ -11,9 +11,10 @@ const extension = import.meta.url.endsWith('.js') ? 'js' : 'ts';
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'qbf-service-scope-'));
   mkdirSync(join(directory, 'scripts'));
-  mkdirSync(join(directory, 'runtime/live'), { recursive: true });
+  mkdirSync(join(directory, 'data/live'), { recursive: true });
   const entry = join(directory, `scripts/service-manager.${extension}`);
   copyFileSync(new URL(`../scripts/service-manager.${extension}`, import.meta.url), entry);
+  copyFileSync(new URL(`../scripts/runtime-configuration.${extension}`, import.meta.url), join(directory, `scripts/runtime-configuration.${extension}`));
   copyFileSync(new URL(`../scripts/service-processes.${extension}`, import.meta.url), join(directory, `scripts/service-processes.${extension}`));
   const service = (id: string, extra: Record<string, unknown> = {}) => ({
     command: process.execPath, args: [], cwd: directory, screen: `qbf-scope-${id}`,
@@ -31,7 +32,7 @@ function fixture() {
       external: service('external', { enabled: true }),
     },
   };
-  const save = () => writeFileSync(join(directory, 'runtime/live/services.json'), JSON.stringify(configuration), { mode: 0o600 });
+  const save = () => writeFileSync(join(directory, 'data/live/services.json'), JSON.stringify(configuration), { mode: 0o600 });
   const run = (...args: string[]) => spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', timeout: 15_000 });
   save();
   return { directory, configuration, save, run };

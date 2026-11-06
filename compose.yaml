@@ -1,15 +1,17 @@
 services:
   framework:
-    image: qq-bridge-framework:1.12.0
+    image: qq-bridge-framework:1.13.0
     restart: unless-stopped
     init: true
     ports:
       - "127.0.0.1:3210:3210"
     volumes:
-      - framework-runtime:/opt/qbf/runtime
+      - framework-data:/opt/qbf/data
+      - framework-workspace:/opt/qbf/workspace
       - framework-private:/opt/qbf/private
     extra_hosts:
       - "host.docker.internal:host-gateway"
 volumes:
-  framework-runtime:
+  framework-data:
+  framework-workspace:
   framework-private:

@@ -10,7 +10,7 @@ import { isRecord } from '../src/core/values.ts';
 
 export function assertFrameworkReleasePath(filename: string): void {
   assert(filename && !filename.startsWith('/') && !/[\\\x00-\x1f\x7f]/.test(filename)
-    && filename.split('/').every(part => part && !['.', '..', '.git', 'private', 'runtime', 'node_modules', '.cache'].includes(part))
+    && filename.split('/').every(part => part && !['.', '..', '.git', 'private', 'runtime', 'data', 'workspace', 'node_modules', '.cache'].includes(part))
     && !/(?:^|\/)\.env(?:\.|$)/.test(filename) && !/\.(?:sqlite(?:-wal|-shm)?|zstd|jsonl)$/.test(filename),
   `Private or invalid release path: ${filename}`);
 }
@@ -73,7 +73,8 @@ export async function packFrameworkRelease(options: {
         && component.resourcePolicy === 'no-network-no-files-no-scripts', 'Build the matching native HTML components before release');
       assert.equal(createHash('sha256').update(await readFile(join(path, String(component.binary)))).digest('hex'), component.sha256);
     }
-    for (const required of ['dist/scripts/cli.js', 'dist/src/admin/server.js', 'dist/admin-web/index.html',
+    for (const required of ['README.md', 'docs/DIRECTORIES.md', 'docs/EXTENDING.md', 'docs/SERVICE_CONVENTIONS.md',
+      'examples/reloadable-plugin/README.md', 'packages/framework-sdk/README.md', 'dist/scripts/cli.js', 'dist/src/admin/server.js', 'dist/admin-web/index.html',
       'dist/admin-web/app.js', 'dist/src/storage/windows-acl-worker.js', 'dist/assets/fonts/wqy-microhei.ttc',
       'dist/assets/fonts/NotoSansMath-Regular.ttf', 'dist/assets/fonts/NotoSansSymbols2-Regular.ttf',
       'dist/assets/fonts/NotoSans-Regular.ttf']) assert((await lstat(join(stage, required))).isFile());

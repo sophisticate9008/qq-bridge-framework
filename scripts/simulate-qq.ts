@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resolveLivePath } from './runtime-configuration.ts';
 import { appendFileSync, constants } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -34,8 +35,8 @@ import { simulatedMemberIndex, startSimulatedOneBot, type SimulatedAsset, type S
 const HELP = `本机 QQ 消息模拟（真实模型）
 node scripts/simulate-qq.ts [--source-directory <实际native配置目录>] [--services <服务清单>] [--provider <已有供应商id> --model <模型id>] [--bootstrap <可信本机TS文件>] [--batch <JSONL|basic|work|presentation|video>] [--prepare-only]
 
-默认从 runtime/live/runtime 与 runtime/live/services.json 读取现有配置。
-每次创建全新 runtime/simulations/qq-*/，使用独立DSH进程/鉴权/会话，OneBot发送仅写本地捕获。
+默认从 data/live/runtime 与 data/live/services.json 读取配置。
+每次创建全新 private/maintenance/simulations/qq-*/，使用独立DSH进程/鉴权/会话，OneBot发送仅写本地捕获。
 --prepare-only 只准备私有配置，不启动DSH、不发送模型请求。
 --bootstrap 显式加载可信扩展；默认不读取生产bootstrap选择，prepare-only不加载扩展代码。
 --provider 与 --model 必须成对，仅覆盖本轮复制后的启用方案，保留思考档位与上下文设置。
@@ -46,7 +47,7 @@ node scripts/simulate-qq.ts [--source-directory <实际native配置目录>] [--s
 export interface SimulationArguments { source: string; services: string; provider?: string; model?: string; bootstrap?: string; batch?: string; prepareOnly: boolean }
 export function parseSimulationArguments(values: readonly string[]): SimulationArguments | null {
   if (values.length === 1 && ['-h', '--help'].includes(values[0]!)) { console.log(HELP); return null }
-  const parsed: SimulationArguments = { source: resolve('runtime/live/runtime'), services: resolve('runtime/live/services.json'), prepareOnly: false }
+  const parsed: SimulationArguments = { source: resolveLivePath(process.cwd(), 'runtime'), services: resolveLivePath(process.cwd(), 'services.json'), prepareOnly: false }
   const seen = new Set<string>()
   for (let index = 0; index < values.length; index++) {
     const key = values[index]!
@@ -354,8 +355,8 @@ export async function simulateQq(values = process.argv.slice(2)) {
   const selfId = '900000000001'
   const memberId = ownerId === '900000000002' ? '900000000005' : '900000000002'
   const groupId = '900000000003'
-  await mkdir(resolve('runtime/simulations'), { recursive: true, mode: 0o700 })
-  const directory = await mkdtemp(resolve('runtime/simulations/qq-'))
+  await mkdir(resolve('private/maintenance/simulations'), { recursive: true, mode: 0o700 })
+  const directory = await mkdtemp(resolve('private/maintenance/simulations/qq-'))
   const nativeDirectory = join(directory, 'native')
   await mkdir(nativeDirectory, { mode: 0o700 })
   await copyConfiguration(args.source, nativeDirectory, modelOverride)

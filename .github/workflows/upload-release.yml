@@ -36,11 +36,11 @@ jobs:
           name: release-packages
           run-id: ${{ inputs.artifact_run }}
           github-token: ${{ github.token }}
-          path: runtime/cloud-release
+          path: private/maintenance/cloud-release
       - name: 核验同提交 CI、标签、归档来源和校验后上传草稿
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           ARTIFACT_RUN: ${{ inputs.artifact_run }}
-        run: node scripts/upload-release-assets.ts "$RELEASE_TAG" "$SOURCE_COMMIT" "$ARTIFACT_RUN" "runtime/cloud-release/$RELEASE_TAG"
+        run: node scripts/upload-release-assets.ts "$RELEASE_TAG" "$SOURCE_COMMIT" "$ARTIFACT_RUN" "private/maintenance/cloud-release/$RELEASE_TAG"

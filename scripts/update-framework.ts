@@ -14,6 +14,7 @@ import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
 
 async function assertStopped(root: string): Promise<void> {
   for (const filename of new Set([resolveRuntimeConfiguration(root, undefined, process.env, root),
+    join(root, 'data/admin/config.json'), join(root, 'data/live/framework-admin.json'),
     join(root, 'runtime/admin/config.json'), join(root, 'runtime/live/framework-admin.json')])) {
     if (!existsSync(filename)) continue;
     const config = loadGatewayAdminConfiguration(filename);

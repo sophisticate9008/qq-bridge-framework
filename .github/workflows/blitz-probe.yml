@@ -60,12 +60,12 @@ jobs:
       - name: 编译优化后的无窗口渲染程序
         run: |
           set -o pipefail
-          cargo build --manifest-path .cache/blitz-source/Cargo.toml --profile production --example qbf-html-probe 2>&1 | tee runtime/blitz-probe/build.log
+          cargo build --manifest-path .cache/blitz-source/Cargo.toml --profile production --example qbf-html-probe 2>&1 | tee private/maintenance/blitz-probe/build.log
       - name: 原生运行、长图完整性与体积测量
         run: node tools/blitz-probe/measure.ts
       - name: Linux 动态依赖
         if: runner.os == 'Linux'
-        run: ldd runtime/blitz-probe/package/qbf-html-probe | tee runtime/blitz-probe/dynamic-dependencies.txt
+        run: ldd private/maintenance/blitz-probe/package/qbf-html-probe | tee private/maintenance/blitz-probe/dynamic-dependencies.txt
       - name: Windows 动态依赖
         if: runner.os == 'Windows'
         shell: pwsh
@@ -73,7 +73,7 @@ jobs:
           $locator = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
           $dumpbin = & $locator -latest -products '*' -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe' | Select-Object -First 1
           if (-not $dumpbin) { throw 'MSVC dumpbin was not found' }
-          & $dumpbin /dependents runtime/blitz-probe/package/qbf-html-probe.exe | Tee-Object runtime/blitz-probe/dynamic-dependencies.txt
+          & $dumpbin /dependents private/maintenance/blitz-probe/package/qbf-html-probe.exe | Tee-Object private/maintenance/blitz-probe/dynamic-dependencies.txt
           if ($LASTEXITCODE -ne 0) { throw 'Dependency inspection failed' }
       - name: 保存组件、样图与小型报告
         if: always()
@@ -81,11 +81,11 @@ jobs:
         with:
           name: blitz-probe-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
-            runtime/blitz-probe/*.tar.gz
-            runtime/blitz-probe/*.json
-            runtime/blitz-probe/*.png
-            runtime/blitz-probe/*.log
-            runtime/blitz-probe/*.txt
-            runtime/blitz-probe/Cargo.lock
+            private/maintenance/blitz-probe/*.tar.gz
+            private/maintenance/blitz-probe/*.json
+            private/maintenance/blitz-probe/*.png
+            private/maintenance/blitz-probe/*.log
+            private/maintenance/blitz-probe/*.txt
+            private/maintenance/blitz-probe/Cargo.lock
           if-no-files-found: warn
           retention-days: 3

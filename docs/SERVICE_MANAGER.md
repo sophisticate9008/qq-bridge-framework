@@ -28,7 +28,7 @@
 
 `service status` 分别显示进程与端口；受管进程仍在但端口不监听时如实列出，不以“运行中”代替健康。`service doctor` 根据配置的 HTTP 或命令检查报告就绪、异常、未确认或未核验，并给出有界原因码；没有健康检查时不把端口开放当作已就绪。`--json` 仅适用于这两个只读命令。任一异常或未核验返回非零退出码，仍保留其他组件的结果。
 
-插件维护固定读取本项目 `runtime/live/framework-admin.json`，复用其中的管理地址和私有令牌文件；令牌只在内存中用于 HTTP 鉴权，不放入命令参数或输出。`extensions` 不需要另外填写地址、令牌或源码路径。重载只针对运行宿主中由 bootstrap 主动登记的插件；未接入管理器的旧插件不会自动获得重载能力。
+插件维护优先读取本项目 `data/live/framework-admin.json`，复用其中的管理地址和私有令牌文件；令牌只在内存中用于 HTTP 鉴权，不放入命令参数或输出。`extensions` 不需要另外填写地址、令牌或源码路径。重载只针对运行宿主中由 bootstrap 主动登记的插件；未接入管理器的旧插件不会自动获得重载能力。
 
 重载命令先查询当前 64 位内容指纹，再提交带期望指纹的请求。版本冲突、已有重载或旧实例仍在排空时明确失败。命令不自动重试写操作；连接中断或超时后运行 `qbf-cli extensions` 查询真实状态，再决定下一步。返回 `changed: false` 表示内容版本相同，`draining: true` 表示旧实例的任务或清理仍未结束。清理失败保留错误码，阻止继续堆积实例。
 
@@ -36,7 +36,7 @@
 
 ## 私有服务清单
 
-固定读取 `runtime/live/services.json`，文件须为当前用户所有的私有普通文件，建议权限 `0600`。下面展示额外委托本机 DSH 的字段结构；路径需要替换为实际安装位置，并补齐框架网关与管理服务。
+优先读取 `data/live/services.json`，文件须为当前用户所有的私有普通文件，建议权限 `0600`。下面展示额外委托本机 DSH 的字段结构；路径需要替换为实际安装位置，并补齐框架网关与管理服务。
 
 默认只管理清单中的 `framework-admin` 和 `framework-gateway`。DSH、OneBot 协议端及其他独立程序由各自的进程管理器维护；连接地址、自动发现、`group`、`enabled` 或已有 screen 会话均不代表框架拥有其启停权限。需要明确委托 CLI 管理某个本机服务时，才在该条目设置 `managed: true`；`managed: false` 也可排除框架组件。未托管条目的显式启停与内部 `run` 同样被拒绝，协议切换只操作受管协议条目。升级后，原来仅凭分组参与启停的额外服务需要明确登记；远程服务不会因填写连接地址而成为受管进程。本机私有清单不随仓库或发行包提供。
 
@@ -45,8 +45,8 @@
   "schema": 1,
   "activeProtocol": "napcat",
   "dshHome": "/srv/dsh/home",
-  "logDirectory": "/srv/qq-bridge-framework/runtime/logs",
-  "lockFile": "/srv/qq-bridge-framework/runtime/live/service-control.lock",
+  "logDirectory": "/srv/qq-bridge-framework/data/logs",
+  "lockFile": "/srv/qq-bridge-framework/data/live/service-control.lock",
   "order": ["dsh"],
   "services": {
     "dsh": {
@@ -77,12 +77,12 @@
 - 顶层 `accountCheck` 可配置只读 QQ 在线检查命令。`doctor` 报告其结果；整套 `start` 遇到待登录只提示，不把已启动的服务判成启动失败。
 - `service status` 与 `service doctor` 展示当前清单选择的受管服务。自定义服务通过 `optional` 登记，专用健康检查由扩展提供，并通过 `ready.kind: "command"` 接入。
 
-`scripts/service-health.ts dsh|qq [--json]` 提供 DSH 与 QQ 的鉴权健康检查，读取私有 `runtime/live/service-health.json`：
+`scripts/service-health.ts dsh|qq [--json]` 提供 DSH 与 QQ 的鉴权健康检查，读取私有 `data/live/service-health.json`：
 
 ```json
 {
   "schema": 1,
-  "nativeDirectory": "/srv/qq-bridge-framework/runtime/admin/runtime",
+  "nativeDirectory": "/srv/qq-bridge-framework/data/admin/runtime",
   "accountId": "需要核验的机器人账号"
 }
 ```
@@ -105,7 +105,7 @@ node scripts/install-service-manager.ts --admin-config /绝对路径/framework-a
 node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --admin-config /绝对路径/framework-admin.json
 ```
 
-安装器核对 `qbf-cli` 的启动、停止、状态和日志分发结构；先将 boot 配置为当前命令，再执行安装器。原管理配置与 boot 备份在 `runtime/ops-backups/`。已安装的协议端、DSH、凭据和会话不移动，原项目入口保留。
+安装器核对 `qbf-cli` 的启动、停止、状态和日志分发结构；先将 boot 配置为当前命令，再执行安装器。原管理配置与 boot 备份在 `private/maintenance/ops-backups/`。已安装的协议端、DSH、凭据和会话不移动，原项目入口保留。
 
 本机 `boot` 的其他系统服务保持原有管理方式。`boot logs qbf-cli` 与 `boot logs framework-admin` 查看框架日志。
 
@@ -116,8 +116,11 @@ node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --a
 | 内容 | 位置示例 |
 | --- | --- |
 | 框架代码、公开插件 | `/srv/qq-bridge-framework/`、其中的 `plugins/` |
-| 本机插件及私有配置 | `/srv/qq-bridge-framework/runtime/live/extensions/` |
-| 插件生成文件、工作目录、运行日志 | 框架的 `runtime/` 下，分别存放 |
+| 源码安装的运行程序快照 | `/srv/qq-bridge-framework/runtime/deployments/<部署编号>/` |
+| 本机私人插件源码 | `/srv/qq-bridge-framework/private/extensions/<插件标识>/` |
+| 本机插件运行配置 | `/srv/qq-bridge-framework/data/live/extensions/` |
+| 插件状态、运行日志 | 框架的 `data/` 下，分别存放 |
+| 助手任务脚本、输入和成果 | 框架的 `workspace/<任务名>/` 下 |
 | DSH 程序、配置、会话与附件 | `/srv/qq-services/dsh/runtime/`、`/srv/qq-services/dsh/home/` |
 | 协议端及其登录数据 | 独立安装目录；各协议端分别登记，可保留备用安装 |
 

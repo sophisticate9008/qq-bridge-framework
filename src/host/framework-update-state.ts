@@ -8,7 +8,7 @@ import { securePermissions } from '../storage/file-security.ts';
 
 export { parseFrameworkUpdateState, type FrameworkUpdateState } from '../contracts/framework-update.ts';
 import { parseFrameworkUpdateState, type FrameworkUpdateState } from '../contracts/framework-update.ts';
-export const frameworkUpdateDirectory = (root: string) => join(root, 'runtime/framework-update-control');
+export const frameworkUpdateDirectory = (root: string) => join(root, 'data/framework-update-control');
 export async function readFrameworkUpdateState(root: string): Promise<FrameworkUpdateState | null> {
   const document = await readPrivateJson(join(frameworkUpdateDirectory(root), 'current.json'), {
     maxBytes: 8192, exactMode: 0o600, requireSingleLink: true, fallback: { value: null },

@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { isRecord } from '../src/contracts/values.ts';
 
 // A real previous release is the upgrade fixture; never synthesize an older version by editing metadata.
-const previous = '1.11.0';
+const previous = '1.12.0';
 export async function verifyFrameworkUpgrade(candidate: string): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), 'qbf-previous-release-'));
   const run = promisify(execFile), prefix = `qq-bridge-framework-${previous}`;

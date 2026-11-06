@@ -48,10 +48,16 @@ const previousInstructions = legacyInstructions
   + '采用 @qq-bridge-framework/sdk 的公开导出，由可信 bootstrap 的 create() 返回 packages，填写 NativePackageManifest 的稳定标识、版本、displayName、description 和 toolNames，再在 install() 注册实际工具或服务并管理生命周期。复用现有配置、存储与权限机制，保留用户数据，避免依赖内部源码路径。'
   + '交付时区分源码已写、依赖已安装、扩展已登记、运行已加载和调用已验证；以实际状态确认控制台可见及后续会话可调用。安装 Python/npm 库或写临时脚本只能说明本次工具已可用，不能称为框架插件已接入。'
 
-const instructions = previousInstructions
+const previousBoundaryInstructions = previousInstructions
   + '先分析当前任务中的能力边界、已有工具和实际复用价值，只将值得跨任务复用的最小能力做成插件；专属于当前文件、作品、目标设备或输出约定的处理逻辑，优先放在 runtime/ 下的任务脚本中调用这些能力。不要因为某段代码理论上能复用，就把每个步骤或整项具体需求抽成通用插件，也不要为插件化扩大当前任务范围。'
   + '例如处理乐谱 PDF 并转换为电子琴键位：可考虑只把 PDF 读取、文字与坐标提取、页面渲染做成一个可复用 PDF 插件；针对该乐谱的识别修正、键位映射和成品编排仍可放在 runtime/ 任务代码中。已有合适能力时优先复用，临时处理足够时也可直接完成任务。'
   + '主人明确指定哪些能力要做插件时，以明确要求为准。例如“做个 PDF 解析插件，然后把乐谱转换成电子琴键位”，应交付 PDF 插件并用它完成转换，不自行把乐谱识别、键位转换等都升级成插件；如果主人明确要求键位转换插件，则按要求实现该能力。'
+
+const instructions = previousBoundaryInstructions
+  .replaceAll('运行数据放在 runtime/', '持久配置和业务状态放在 data/')
+  .replaceAll('runtime/ 下的任务脚本', 'workspace/<任务名>/scripts/ 下的任务脚本')
+  .replaceAll('runtime/ 任务代码', 'workspace/<任务名>/scripts/ 任务代码')
+  + '任务工作区使用 workspace/<任务名>/，其中 scripts/ 保存处理脚本，input/ 保存输入，output/ 保存成果，tmp/ 保存可丢弃中间文件；任务脚本和成果默认保留，不因任务结束删除。runtime/ 用于正式运行组件，不放临时开发脚本；维护脚本和验证报告放 private/maintenance/，可重建缓存放 .cache/。现有任务引用的旧路径继续使用，不擅自搬迁或清理。'
 
 const assistantPresetPlugins: readonly JsonObject[] = Object.freeze([
   Object.freeze({ id: 'qbf-assistant-fs', name: '@deepseek-ai/dsh-tool-fs' }),
@@ -173,7 +179,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     // Ownership comes from the verified journal for this exact target, not a preset name prefix.
     // The old journal already binds provider/model/target/connection/settings/instructions. It may
     // authorize an in-place tools upgrade only when all those exact legacy inputs still match.
-    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, previousInstructions), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
+    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, previousBoundaryInstructions), configurationRevision(configuration, false, previousInstructions), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
     const plan = configuration.catalog.plans.find(candidate => candidate.id === configuration.catalog.activePlanId)
     const persona = configuration.personas.find(candidate => candidate.id === plan?.personaId)
     if (!plan || !persona || plan.provider !== applied.provider || plan.model !== applied.model) return []
@@ -342,7 +348,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
       const document = await readJournal()
       if (document.value.pending?.state !== 'verified' || !document.value.applied) return false
       const current = await selected(signal)
-      if (![current.configurationRevision, configurationRevision(current.configuration, false, previousInstructions), configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
+      if (![current.configurationRevision, configurationRevision(current.configuration, false, previousBoundaryInstructions), configurationRevision(current.configuration, false, previousInstructions), configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
       const live = await verified(current)
       return live.reasons.length === 1 && live.reasons[0] === 'pending_reload'
     },

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resolveLivePath } from './runtime-configuration.ts';
 import { lstat, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,7 @@ async function main(): Promise<void> {
   if (!['dsh', 'qq'].includes(component ?? '') || extra.length > 1 || extra.length === 1 && extra[0] !== '--json') throw new Error('arguments');
   const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
   const root = basename(sourceRoot) === 'dist' ? dirname(sourceRoot) : sourceRoot;
-  const value: unknown = JSON.parse(await privateText(join(root, 'runtime/live/service-health.json')));
+  const value: unknown = JSON.parse(await privateText(resolveLivePath(root, 'service-health.json')));
   if (!isRecord(value) || value.schema !== 1 || typeof value.nativeDirectory !== 'string' || !isAbsolute(value.nativeDirectory)) throw new Error('configuration');
   const signal = AbortSignal.timeout(6_000);
   const configuration = await readNativeAdapterConfiguration(value.nativeDirectory);

@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+test('program launcher reads the selected config directory and rejects changed code or configuration', t => {
+  const root = mkdtempSync(join(tmpdir(), 'qbf-launch-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'data'));
+  mkdirSync(join(root, 'program'));
+  const config = join(root, 'data/config.json'), entry = join(root, 'program/entry.mjs');
+  const code = 'console.log(JSON.stringify({cwd:process.cwd(),args:process.argv.slice(2)}));';
+  writeFileSync(entry, code);
+  const selected = { schema: 1, configurationFilename: config, entry, sha256: createHash('sha256').update(code).digest('hex') };
+  const save = () => writeFileSync(join(root, 'data/admin-deployment.json'), JSON.stringify(selected), { mode: 0o600 });
+  const launcher = fileURLToPath(new URL('../scripts/launch-admin.' + (import.meta.url.endsWith('.js') ? 'js' : 'ts'), import.meta.url));
+  const run = () => spawnSync(process.execPath, [launcher, '--config', config], { encoding: 'utf8', timeout: 15000 });
+  save();
+  const valid = run(); assert.equal(valid.status, 0, valid.stderr);
+  assert.deepEqual(JSON.parse(valid.stdout), { cwd: join(root, 'program'), args: ['--config', config] });
+  writeFileSync(entry, code + '\n');
+  assert.equal(run().status, 1);
+  writeFileSync(entry, code);
+  selected.configurationFilename = join(root, 'other.json'); save();
+  assert.equal(run().status, 1);
+});

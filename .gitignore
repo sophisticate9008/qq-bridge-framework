@@ -6,6 +6,8 @@ dist/
 !.env.example
 state/
 runtime/
+/data/
+/workspace/
 /private/
 coverage/
 *.log

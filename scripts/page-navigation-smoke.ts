@@ -15,7 +15,7 @@ import { createDefaultAdapterConfiguration } from '../src/host/adapter-configura
 import { navigateConsolePage } from './browser-navigation-smoke.ts';
 import { pageRegistry, type PageId } from '../web/lib/page-registry.ts';
 
-const outputDirectory = new URL('../runtime/page-navigation-smoke/', import.meta.url);
+const outputDirectory = new URL('../private/maintenance/page-navigation-smoke/', import.meta.url);
 const builtApplication = new URL('../dist/admin-web/app.js', import.meta.url);
 const token = 'page-navigation-fixture-token-1234567890';
 const runId = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
@@ -430,7 +430,7 @@ async function run(): Promise<void> {
       pageErrors: 0,
       externalRequests: 0,
     });
-    console.log(`Page navigation smoke passed. Results: runtime/page-navigation-smoke/result-${runId}.json`);
+    console.log(`Page navigation smoke passed. Results: private/maintenance/page-navigation-smoke/result-${runId}.json`);
   } catch (error: unknown) {
     if (page !== undefined && !page.isClosed()) await screenshot(page, 'failure').catch(() => undefined);
     await writePrivateJson(new URL(`failure-${runId}.json`, outputDirectory).pathname, {

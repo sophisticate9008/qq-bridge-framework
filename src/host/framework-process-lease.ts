@@ -16,12 +16,12 @@ async function existing(filename: string) {
   } catch (error) { if (isRecord(error) && error.code === 'ENOENT') return null; throw error; }
 }
 export async function assertFrameworkProcessStopped(root: string): Promise<void> {
-  const lease = await existing(join(root, 'runtime/framework-runtime.lock'));
+  const lease = await existing(join(root, 'data/framework-runtime.lock'));
   if (lease && await chatRepairProcessAlive(lease.value)) throw new Error('update_runtime_still_running');
 }
 export async function acquireFrameworkProcessLease(root: string, kind: 'runtime' | 'supervisor'): Promise<() => Promise<void>> {
-  await ensurePrivateDirectory(join(root, 'runtime'));
-  const filename = join(root, `runtime/framework-${kind}.lock`);
+  await ensurePrivateDirectory(join(root, 'data'));
+  const filename = join(root, `data/framework-${kind}.lock`);
   const previous = await existing(filename);
   if (previous) {
     if (await chatRepairProcessAlive(previous.value)) throw new Error('framework_already_running');

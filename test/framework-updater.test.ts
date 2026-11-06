@@ -28,13 +28,13 @@ async function fixture() {
 test('overwrite removes only obsolete managed files, retains data/custom files, and rolls code back exactly', async () => {
   const setup = await fixture();
   try {
-    for (const path of ['runtime/session.db', 'private/extensions/custom.ts', 'custom-config.json']) {
+    for (const path of ['runtime/session.db', 'data/state.db', 'workspace/task/scripts/process.ts', 'workspace/task/output/result.txt', 'private/extensions/custom.ts', 'custom-config.json']) {
       await mkdir(dirname(join(setup.target, path)), { recursive: true }); await writeFile(join(setup.target, path), 'preserve');
     }
     const id = await applyFrameworkUpdate(setup);
     assert.equal((await verifyFrameworkDistribution(setup.target)).version, '1.12.0');
     await assert.rejects(readFile(join(setup.target, 'obsolete.txt')));
-    for (const path of ['runtime/session.db', 'private/extensions/custom.ts', 'custom-config.json']) assert.equal(await readFile(join(setup.target, path), 'utf8'), 'preserve');
+    for (const path of ['runtime/session.db', 'data/state.db', 'workspace/task/scripts/process.ts', 'workspace/task/output/result.txt', 'private/extensions/custom.ts', 'custom-config.json']) assert.equal(await readFile(join(setup.target, path), 'utf8'), 'preserve');
     await rollbackFrameworkUpdate(setup.target, id);
     assert.equal((await verifyFrameworkDistribution(setup.target)).version, '1.11.0');
     assert.equal(await readFile(join(setup.target, 'obsolete.txt'), 'utf8'), 'old');

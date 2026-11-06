@@ -5,7 +5,7 @@ import { chromium, type Browser } from 'playwright';
 
 import { createMarkdownRenderer } from '../src/rendering/index.ts';
 
-const directory = new URL('../runtime/engineering/validation/006/', import.meta.url);
+const directory = new URL('../private/maintenance/engineering/validation/006/', import.meta.url);
 await mkdir(directory, { recursive: true });
 
 const executablePath = process.env.MARKDOWN_CHROMIUM_EXECUTABLE ?? process.env.CHROMIUM_EXECUTABLE;
@@ -73,7 +73,7 @@ ${sections}`
     allNetworkRequestsAborted: true
   };
   await writeFile(new URL('markdown-smoke.json', directory), `${JSON.stringify(evidence, null, 2)}\n`);
-  console.log(`Markdown smoke passed: ${pages.length} PNG pages written to runtime/engineering/validation/006/.`);
+  console.log(`Markdown smoke passed: ${pages.length} PNG pages written to private/maintenance/engineering/validation/006/.`);
 } finally {
   await browser?.close();
 }

@@ -42,7 +42,7 @@ npm --prefix packages/dsh-bridge-plugin run build
 npm run release:pack
 ```
 
-两个组件的安装包与 `SHA256SUMS` 输出到 `runtime/releases/v<版本>/`，打包时核对文件白名单和版本。已发布历史版本仍由对应 GitHub Release 留存。
+两个组件的安装包与 `SHA256SUMS` 输出到 `private/maintenance/releases/v<版本>/`，打包时核对文件白名单和版本。已发布历史版本仍由对应 GitHub Release 留存。
 
 ## CLI 入口统一
 

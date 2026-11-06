@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resolveLivePath } from './runtime-configuration.ts';
 import { chmod, copyFile, lstat, mkdir, readFile, readlink, rename, symlink, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
-    console.log('安装 qbf-cli：node scripts/install-service-manager.ts [--bin-dir /usr/local/bin] [--admin-config /绝对路径/config.json] [--boot /绝对路径/service-boot.sh]\n先配置 runtime/live/services.json；--boot 核对 qbf-cli 的启动、停止、状态和日志分发。');
+    console.log('安装 qbf-cli：node scripts/install-service-manager.ts [--bin-dir /usr/local/bin] [--admin-config /绝对路径/config.json] [--boot /绝对路径/service-boot.sh]\n先配置 data/live/services.json；--boot 核对 qbf-cli 的启动、停止、状态和日志分发。');
     return;
   }
   const options = new Map<string, string>();
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
     options.set(name, value);
   }
   const binDirectory = options.get('--bin-dir') ?? '/usr/local/bin';
-  const adminPath = options.get('--admin-config') ?? join(root, 'runtime/live/framework-admin.json');
+  const adminPath = options.get('--admin-config') ?? resolveLivePath(root, 'framework-admin.json');
   const bootPath = options.get('--boot');
   const target = join(root, 'ops/qbf-cli');
   const cliTarget = join(root, 'scripts/cli.ts');
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
   const adminSource = await readFile(adminPath, 'utf8');
   const admin: unknown = JSON.parse(adminSource);
   if (!isRecord(admin) || typeof admin.tokenFile !== 'string') throw new InstallError('管理配置格式无效。');
-  const services: unknown = JSON.parse(await readFile(join(root, 'runtime/live/services.json'), 'utf8'));
+  const services: unknown = JSON.parse(await readFile(resolveLivePath(root, 'services.json'), 'utf8'));
   if (!isRecord(services) || services.schema !== 1 || !isRecord(services.services) || !isRecord(services.services.dsh)) throw new InstallError('请先配置本框架的服务清单。');
   const originalLink = await lstat(cli).catch(error => {
     if (isRecord(error) && error.code === 'ENOENT') return null;
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const backupDirectory = join(root, 'runtime/ops-backups', new Date().toISOString().replace(/[:.]/g, '-'));
+  const backupDirectory = join(root, 'private/maintenance/ops-backups', new Date().toISOString().replace(/[:.]/g, '-'));
   await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
   await copyFile(adminPath, join(backupDirectory, 'admin.json'));
   await chmod(join(backupDirectory, 'admin.json'), 0o600);
@@ -77,16 +78,16 @@ async function main(): Promise<void> {
   }
   if (process.getuid?.() === 0) {
     const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-    const logDirectory = join(root, 'runtime/logs');
+    const logDirectory = join(root, 'data/logs');
     await mkdir(logDirectory, { recursive: true, mode: 0o700 });
     await writeFile('/etc/cron.d/qq-bridge-framework-storage',
       `# Managed runtime retention; the service manager owns the operation lock.\n17 * * * * root ${quote(process.execPath)} ${quote(join(root, 'scripts/service-manager.ts'))} maintenance --apply >> ${quote(join(logDirectory, 'storage-maintenance.log'))} 2>&1\n`, { mode: 0o644 });
   }
   console.log('已安装 qbf-cli 并更新管理配置。' + (bootPath ? ' boot 已切换到本框架运维入口。' : ''));
-  console.log('已有进程保持运行；管理服务下次启动时读取新的维护入口。备份位于 runtime/ops-backups。');
+  console.log('已有进程保持运行；管理服务下次启动时读取新的维护入口。备份位于 private/maintenance/ops-backups。');
 }
 
 void main().catch(error => {
-  console.error(error instanceof InstallError ? error.message : '安装失败，请检查路径和权限；已有备份保留在 runtime/ops-backups。');
+  console.error(error instanceof InstallError ? error.message : '安装失败，请检查路径和权限；已有备份保留在 private/maintenance/ops-backups。');
   process.exitCode = 1;
 });

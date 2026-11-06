@@ -1,3 +1,4 @@
+import { resolveLivePath } from './runtime-configuration.ts';
 import { setPriority } from 'node:os';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
@@ -43,7 +44,7 @@ interface ServiceHealth { state: 'ready' | 'unavailable' | 'unknown' | 'unverifi
 const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
 const root = path.basename(sourceRoot) === 'dist' ? path.dirname(sourceRoot) : sourceRoot;
 const entry = fileURLToPath(import.meta.url);
-const configFile = path.join(root, 'runtime/live/services.json');
+const configFile = resolveLivePath(root, 'services.json');
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
 const loopback = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 const sleep = (milliseconds: number): Promise<void> => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -120,7 +121,7 @@ async function load(): Promise<Configuration> {
     } finally { await file.close(); }
   } catch (error) {
     if (error instanceof OperationError) throw error;
-    fail('无法读取私有服务配置 runtime/live/services.json。');
+    fail('无法读取私有服务配置 data/live/services.json。');
   }
 }
 

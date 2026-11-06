@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const source: unknown = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 assert(isRecord(source) && typeof source.version === 'string');
 const version = source.version, prefix = `qq-bridge-framework-${version}`;
-const artifact = join(root, 'runtime/releases', `v${version}`, `${prefix}.tar.gz`);
+const artifact = join(root, 'private/maintenance/releases', `v${version}`, `${prefix}.tar.gz`);
 // Git Bash's GNU tar treats a drive-letter path as a remote host. The Windows
 // system tar understands native absolute paths without changing archive checks.
 const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'tar.exe') : 'tar';
@@ -90,6 +90,7 @@ try {
   assert(isRecord(distribution) && distribution.version === version && Array.isArray(distribution.components));
   assert.equal(distribution.sourceModified, false);
   if (expectedSourceCommit) assert.equal(distribution.sourceCommit, expectedSourceCommit);
+  for (const document of ['README.md', 'docs/DIRECTORIES.md', 'docs/EXTENDING.md', 'docs/SERVICE_CONVENTIONS.md', 'examples/reloadable-plugin/README.md', 'packages/framework-sdk/README.md']) assert((await readFile(join(cwd, document), 'utf8')).length > 100);
   for (const item of distribution.components) {
     assert(isRecord(item) && typeof item.filename === 'string' && typeof item.sha256 === 'string');
     assert.equal(hash(await readFile(join(cwd, 'components', item.filename))), item.sha256);
@@ -131,7 +132,7 @@ try {
     assert(pages.length > 0);
     const metadata = await sharp(pages[0].png).metadata();
     assert.equal(metadata.format, 'png'); assert(metadata.width > 0);
-    const html = await createBuiltinHtmlRenderer({ directory: './runtime/html-install-check' }).render({ html: '<h1 style="color:#7134c4">HTML 安装验证</h1><p>中文与彩色排版。</p>' });
+    const html = await createBuiltinHtmlRenderer({ directory: './data/html-install-check' }).render({ html: '<h1 style="color:#7134c4">HTML 安装验证</h1><p>中文与彩色排版。</p>' });
     assert.equal(html.length, 1); assert.equal((await sharp(html[0].png).metadata()).format, 'png');
   `], { cwd, env, timeout: 45000, maxBuffer: 65536 });
   evidence.nativeRenderingAndFonts = true;
@@ -142,7 +143,7 @@ try {
   while (gatewayPort === adminPort) gatewayPort = await port();
   await run(process.execPath, [cli, 'init', '--port', String(adminPort)], { cwd, env, timeout: 90000 });
   evidence.initialized = true;
-  const configuration = join(cwd, 'runtime/admin/config.json');
+  const configuration = join(cwd, 'data/admin/config.json');
   const saved: unknown = JSON.parse(await readFile(configuration, 'utf8'));
   assert(isRecord(saved) && typeof saved.gatewayConfiguration === 'string' && typeof saved.tokenFile === 'string');
   const gatewayFile = resolve(dirname(configuration), saved.gatewayConfiguration);

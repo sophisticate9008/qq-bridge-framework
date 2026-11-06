@@ -444,7 +444,7 @@ test('configuration selection prefers explicit argument, then environment, then 
     join(directory, 'explicit.json'));
   assert.equal(resolveConfigurationFilename(undefined, { QQ_BRIDGE_FRAMEWORK_CONFIG: 'environment.json' }, directory),
     join(directory, 'environment.json'));
-  assert.equal(resolveConfigurationFilename(undefined, {}, directory), join(directory, 'runtime/admin/config.json'));
+  assert.equal(resolveConfigurationFilename(undefined, {}, directory), join(directory, 'data/admin/config.json'));
 });
 
 test('standalone init creates private safe defaults, defers the admin token and never partially overwrites', async context => {
@@ -459,7 +459,7 @@ test('standalone init creates private safe defaults, defers the admin token and 
 
   const output = capturedIo(directory);
   assert.equal(await runCli(['init'], output.io), 0);
-  const runtimeDirectory = join(directory, 'runtime');
+  const runtimeDirectory = join(directory, 'data');
   const adminDirectory = join(runtimeDirectory, 'admin');
   const gatewayDirectory = join(runtimeDirectory, 'gateway');
   const adminConfiguration = join(adminDirectory, 'config.json');
@@ -520,7 +520,7 @@ test('standalone init creates private safe defaults, defers the admin token and 
   assert.equal(await runCli(['init'], output.io), 1);
   for (const [filename, content] of beforeRetry) assert.equal(readFileSync(filename, 'utf8'), content);
 
-  const conflictingGatewayDirectory = join(conflictDirectory, 'runtime/gateway');
+  const conflictingGatewayDirectory = join(conflictDirectory, 'data/gateway');
   mkdirSync(conflictingGatewayDirectory, { recursive: true, mode: 0o700 });
   const conflictingToken = join(conflictingGatewayDirectory, 'gateway.token');
   privateFile(conflictingToken, 'existing-private-token\n');
@@ -528,7 +528,7 @@ test('standalone init creates private safe defaults, defers the admin token and 
   assert.equal(await runCli(['init'], conflictOutput.io), 1);
   assert.equal(readFileSync(conflictingToken, 'utf8'), 'existing-private-token\n');
   assert.equal(existsSync(join(conflictingGatewayDirectory, 'config.json')), false);
-  assert.equal(existsSync(join(conflictDirectory, 'runtime/admin/config.json')), false);
+  assert.equal(existsSync(join(conflictDirectory, 'data/admin/config.json')), false);
 });
 
 test('init creates a private admin configuration without a token and never overwrites it', async () => {
@@ -537,7 +537,7 @@ test('init creates a private admin configuration without a token and never overw
     const output = capturedIo(values.directory);
     const argumentsList = ['init', '--gateway-config', values.gatewayConfiguration, '--host', '127.0.0.1', '--port', '4321'];
     assert.equal(await runCli(argumentsList, output.io), 0);
-    const adminConfiguration = join(values.directory, 'runtime/admin/config.json');
+    const adminConfiguration = join(values.directory, 'data/admin/config.json');
     const before = readFileSync(adminConfiguration, 'utf8');
     assert.equal(statSync(adminConfiguration).mode & 0o077, 0);
     assert.equal(readFileSync(adminConfiguration, 'utf8').includes(ADMIN_SECRET), false);
@@ -570,7 +570,7 @@ test('init accepts only an explicit trusted service manager and never executes i
     assert.equal(await runCli([
       'init', '--gateway-config', values.gatewayConfiguration, '--service-manager', manager
     ], output.io), 0);
-    const admin = JSON.parse(readFileSync(join(values.directory, 'runtime/admin/config.json'), 'utf8')) as Record<string, unknown>;
+    const admin = JSON.parse(readFileSync(join(values.directory, 'data/admin/config.json'), 'utf8')) as Record<string, unknown>;
     assert.equal(admin.serviceManager, manager);
     assert.equal(existsSync(marker), false);
   } finally {
@@ -581,8 +581,8 @@ test('init accepts only an explicit trusted service manager and never executes i
 test('init rejects an existing admin deployment before preparing gateway files', async () => {
   const values = fixture();
   try {
-    const adminConfiguration = join(values.directory, 'runtime/admin/config.json');
-    mkdirSync(join(values.directory, 'runtime/admin'), { recursive: true, mode: 0o700 });
+    const adminConfiguration = join(values.directory, 'data/admin/config.json');
+    mkdirSync(join(values.directory, 'data/admin'), { recursive: true, mode: 0o700 });
     privateFile(adminConfiguration, '{"existing":true}\n');
     const output = capturedIo(values.directory);
     assert.equal(await runCli(['init'], output.io), 1);
@@ -603,7 +603,7 @@ test('init clearly rejects advanced gateway endpoints that would self-proxy', as
     const advancedOutput = capturedIo(advanced.directory);
     assert.equal(await runCli(['init', '--gateway-config', advanced.gatewayConfiguration], advancedOutput.io), 1);
     assert.match(advancedOutput.stderr.join('\n'), /自代理风险.*拒绝初始化/);
-    assert.equal(existsSync(join(advanced.directory, 'runtime/admin/config.json')), false);
+    assert.equal(existsSync(join(advanced.directory, 'data/admin/config.json')), false);
   } finally {
     rmSync(advanced.directory, { recursive: true, force: true });
   }

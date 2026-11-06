@@ -10,7 +10,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page, t
 
 import { AdminRequestError, createAdminServer, type AdminRoute } from '../src/admin/server.ts';
 
-const outputDirectory = new URL('../runtime/usage-smoke/', import.meta.url);
+const outputDirectory = new URL('../private/maintenance/usage-smoke/', import.meta.url);
 const builtApplication = new URL('../dist/admin-web/app.js', import.meta.url);
 const administratorToken = 'usage-smoke-administrator-token-1234567890';
 const usagePath = '/api/chat/usage';

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { acquireFrameworkProcessLease } from '../src/host/framework-process-lease.ts';
-import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
+import { resolveRuntimeConfiguration, resolveLivePath } from './runtime-configuration.ts';
 import { MAX_DISTRIBUTION_BYTES } from '../src/contracts/framework-distribution.ts';
 import { privatePermissions, securePermissions } from '../src/storage/file-security.ts';
 
@@ -120,7 +120,7 @@ const GENERAL_HELP = `QQ Bridge Framework 命令行
   qbf-cli uninstall --browser
   qbf-cli build
 
-配置优先级：--config > QQ_BRIDGE_FRAMEWORK_CONFIG > 已登记的本机配置 > 当前目录 runtime/admin/config.json
+配置优先级：--config > QQ_BRIDGE_FRAMEWORK_CONFIG > 已登记的本机配置 > 当前目录 data/admin/config.json
 qbf-cli 为统一入口；源码目录可用 npm run cli -- <命令>。start 为前台启动，service start 为本机后台服务启动。
 status 与不指定会话的 doctor 分别核对管理服务、网关、DSH、QQ、聊天及配置应用；某项读取失败仍显示其他项。
 doctor --conversation 读取所属会话的详细诊断；service status/doctor 可在管理服务不可用时独立检查各后台组件。
@@ -804,7 +804,7 @@ export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAU
     return 0;
   }
   const configurationFilename = () => {
-    const live = join(PROJECT_ROOT, 'runtime/live/framework-admin.json');
+    const live = resolveLivePath(PROJECT_ROOT, 'framework-admin.json');
     const explicit = parsed.config ?? (io === DEFAULT_IO && !io.env.QQ_BRIDGE_FRAMEWORK_CONFIG && existsSync(live) ? live : undefined);
     return resolveConfigurationFilename(explicit, io.env, io.cwd);
   };

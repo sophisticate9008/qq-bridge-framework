@@ -57,8 +57,8 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: html-renderer-*
-          path: runtime/html-renderer-components
-      - run: node scripts/install-html-renderer.ts runtime/html-renderer-components --all
+          path: private/maintenance/html-renderer-components
+      - run: node scripts/install-html-renderer.ts private/maintenance/html-renderer-components --all
       - run: npm ci --prefix packages/dsh-bridge-plugin --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - run: npm run build:sdk
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: windows-candidate-packages
-          path: runtime/releases/
+          path: private/maintenance/releases/
           if-no-files-found: error
           retention-days: 7
   install:
@@ -101,7 +101,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: windows-candidate-packages
-          path: runtime/releases
+          path: private/maintenance/releases
       - name: 安装与启动同一候选包
         run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
       - name: 保存验收报告

@@ -1,4 +1,5 @@
-import { lstat, readdir, readFile, readlink, realpath, rm, writeFile, rename } from 'node:fs/promises';
+import { resolveLivePath } from './runtime-configuration.ts';
+import { lstat, readdir, readFile, readlink, realpath, rm, writeFile, rename, mkdir } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { isRecord, assert } from '../src/core/values.ts';
 
@@ -52,7 +53,7 @@ export async function runRuntimeMaintenance(root: string, apply = false) {
   const cpu = process.cpuUsage();
   let active: string[] | undefined;
   const configuredPaths: string[] = [];
-  const live = join(runtime, 'live');
+  const live = resolveLivePath(root, '.');
   for (const name of await entries(live)) if (name.endsWith('.json')) {
     const path = join(live, name); const info = await lstat(path);
     if (info.isFile() && !info.isSymbolicLink() && info.size <= 1024 * 1024) configuredPaths.push(await readFile(path, 'utf8'));
@@ -78,35 +79,57 @@ export async function runRuntimeMaintenance(root: string, apply = false) {
     }
     result.removedTrees++; result.reclaimedBytes += bytes;
   }
-  // Only directories containing recognizable framework code are deployment snapshots.
-  const deployments = join(runtime, 'deployments');
-  const selection: unknown = JSON.parse(await readFile(join(live, 'admin-deployment.json'), 'utf8'));
-  assert(isRecord(selection) && typeof selection.entry === 'string' && selection.entry.startsWith(deployments + sep),
-    'MAINTENANCE_DEPLOYMENT_UNKNOWN', 'The current deployment must be known before recycling snapshots.');
-  const selectedName = selection.entry.slice(deployments.length + 1).split(sep)[0]!;
-  assert(await regularDirectory(join(deployments, selectedName)), 'MAINTENANCE_DEPLOYMENT_UNKNOWN', 'The current deployment is missing.');
-  const selectedAt = (await lstat(join(deployments, selectedName))).mtimeMs;
-  for (const name of await entries(deployments)) {
-    if (Date.now() - now > 15000) { result.deferred = true; break; }
-    const path = join(deployments, name);
-    if (name === selectedName || !await regularDirectory(path)) continue;
-    const info = await lstat(path);
-    // A newer directory may still be staging before the atomic deployment selector is switched.
-    if (info.mtimeMs > selectedAt && info.mtimeMs > now - 3600000) { result.protectedTrees++; continue; }
-    try {
-      const manifest: unknown = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
-      if (!isRecord(manifest) || !['qq-bridge-framework', 'qq-agent-framework'].includes(String(manifest.name))) continue;
-      if (!(await lstat(join(path, 'scripts/gateway-admin.ts'))).isFile()) continue;
-      // Deployments may include old test evidence, but never collect live user data here.
-      const embedded = join(path, 'runtime');
-      if (await regularDirectory(embedded) && (await readdir(embedded)).some(item => ['live', 'workspace', 'sessions', 'work-assets'].includes(item))) continue;
-      await removeTree(path);
-    } catch (error) { if (!missing(error)) throw error; }
+  // Runtime contains deployed program snapshots; persistent data is maintained separately.
+  // No selector means a direct/release installation, not permission to collect programs.
+  const roots = [join(runtime, 'deployments')];
+  const selectionSource = await readFile(join(live, 'admin-deployment.json'), 'utf8').catch(error => {
+    if (missing(error)) return null;
+    throw error;
+  });
+  if (selectionSource !== null) {
+    const selection: unknown = JSON.parse(selectionSource);
+    assert(isRecord(selection) && typeof selection.entry === 'string',
+      'MAINTENANCE_DEPLOYMENT_UNKNOWN', 'The current deployment must be known before recycling snapshots.');
+    const selectedRoot = roots.find(path => selection.entry === resolve(selection.entry as string)
+      && (selection.entry as string).startsWith(path + sep));
+    assert(selectedRoot, 'MAINTENANCE_DEPLOYMENT_UNKNOWN', 'The selected program must belong to a known deployment directory.');
+    const selectedPath = join(selectedRoot, selection.entry.slice(selectedRoot.length + 1).split(sep)[0]!);
+    assert(await regularDirectory(selectedPath), 'MAINTENANCE_DEPLOYMENT_UNKNOWN', 'The current deployment is missing.');
+    const selectedAt = (await lstat(selectedPath)).mtimeMs;
+    const candidates: { path: string; at: number }[] = [];
+    for (const deployments of roots) for (const name of await entries(deployments)) {
+      if (Date.now() - now > 15000) { result.deferred = true; break; }
+      const path = join(deployments, name);
+      if (path === selectedPath || !await regularDirectory(path)) continue;
+      try {
+        const manifest: unknown = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
+        if (!isRecord(manifest) || !['qq-bridge-framework', 'qq-agent-framework'].includes(String(manifest.name))) continue;
+        if (!(await lstat(join(path, 'scripts/gateway-admin.ts'))).isFile()) continue;
+        // Any embedded runtime/private content may be user data; never infer it is disposable.
+        let containsData = false;
+        for (const directory of ['runtime', 'private', 'data', 'workspace']) {
+          const info = await lstat(join(path, directory)).catch(error => { if (missing(error)) return null; throw error; });
+          if (info) containsData = true;
+        }
+        if (containsData) { result.protectedTrees++; continue; }
+        candidates.push({ path, at: (await lstat(path)).mtimeMs });
+      } catch (error) { if (!missing(error)) throw error; }
+    }
+    // Retain the explicit rollback selection, plus the newest older program as a fallback.
+    const rollback = candidates.filter(item => item.at <= selectedAt).sort((a, b) => b.at - a.at)[0]?.path;
+    for (const candidate of candidates) {
+      if (candidate.path === rollback
+        || (typeof selection.previousEntry === 'string' && selection.previousEntry.startsWith(candidate.path + sep))
+        || (candidate.at > selectedAt && candidate.at > now - 3600000)) {
+        result.protectedTrees++; continue;
+      }
+      await removeTree(candidate.path);
+    }
   }
   // Simulations are independent retained evidence: 30 days, with four newest runs protected.
-  const simulations = join(runtime, 'simulations');
+  const simulationRoots = [join(root, 'private/maintenance/simulations')];
   const runs: { path: string; at: number }[] = [];
-  for (const name of await entries(simulations)) {
+  for (const simulations of simulationRoots) for (const name of await entries(simulations)) {
     const path = join(simulations, name);
     if (!await regularDirectory(path)) continue;
     try {
@@ -124,9 +147,10 @@ export async function runRuntimeMaintenance(root: string, apply = false) {
   result.cpuMs = Math.round((usedCpu.user + usedCpu.system) / 1000);
   result.peakRssBytes = process.resourceUsage().maxRSS * 1024;
   if (apply) {
-    const temporary = join(runtime, 'storage-maintenance.next.json');
+    await mkdir(join(root, 'data'), { recursive: true, mode: 0o700 });
+    const temporary = join(root, 'data/storage-maintenance.next.json');
     await writeFile(temporary, JSON.stringify(result) + '\n', { mode: 0o600 });
-    await rename(temporary, join(runtime, 'storage-maintenance.json'));
+    await rename(temporary, join(root, 'data/storage-maintenance.json'));
   }
   return result;
 }

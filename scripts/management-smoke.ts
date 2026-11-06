@@ -33,7 +33,7 @@ import { createContextStore } from '../src/core/context.ts';
 import { createEngine } from '../src/core/engine.ts';
 import { createPolicy } from '../src/core/policy.ts';
 
-const outputDirectory = new URL('../runtime/management-smoke/', import.meta.url);
+const outputDirectory = new URL('../private/maintenance/management-smoke/', import.meta.url);
 const administratorToken = 'management-smoke-administrator-token-1234567890';
 const runId = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
 const xssText = '<img src="/management-smoke-xss" onerror="globalThis.__managementSmokeXss=true">';
@@ -685,7 +685,7 @@ async function run(): Promise<void> {
       pageErrors: 0,
       externalRequests: 0,
     });
-    console.log(`Management smoke passed. Results: runtime/management-smoke/result-${runId}.json`);
+    console.log(`Management smoke passed. Results: private/maintenance/management-smoke/result-${runId}.json`);
   } catch (error: unknown) {
     if (page !== undefined && !page.isClosed()) await screenshot(page, 'failure').catch(() => undefined);
     await writePrivateJson(new URL(`failure-${runId}.json`, outputDirectory).pathname, {

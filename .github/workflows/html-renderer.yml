@@ -50,7 +50,7 @@ jobs:
         if: ${{ !inputs.force_rebuild }}
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
-          path: runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
+          path: private/maintenance/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
           key: html-renderer-v1-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.component.outputs.hash }}
       - name: 缓存失效时从正式发行附件恢复
         if: ${{ !inputs.force_rebuild && steps.cache.outputs.cache-hit != 'true' }}
@@ -60,7 +60,7 @@ jobs:
       - name: 核对是否需要编译
         id: required
         run: |
-          if [ -f "runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}/component.json" ]; then
+          if [ -f "private/maintenance/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}/component.json" ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -91,11 +91,11 @@ jobs:
         if: ${{ !inputs.force_rebuild && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
-          path: runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
+          path: private/maintenance/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}
           key: html-renderer-v1-${{ matrix.platform }}-${{ matrix.arch }}-${{ steps.component.outputs.hash }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: html-renderer-${{ matrix.platform }}-${{ matrix.arch }}
-          path: runtime/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}/
+          path: private/maintenance/html-renderer/${{ matrix.platform }}-${{ matrix.arch }}/
           if-no-files-found: error
           retention-days: 7
