@@ -12,7 +12,7 @@ export interface WorkJournalRecord {
   readonly schema: 1
   readonly fingerprint: string
   readonly address: { readonly id: string; readonly parentSessionId: string; readonly childId: string; readonly generation: number }
-  readonly target: { readonly fullAccess?: boolean; readonly modelProvider: string; readonly model: string; readonly agentPreset: string; readonly reasoningEffort?: string; readonly timeoutMs: number }
+  readonly target: { readonly fullAccess?: boolean; readonly modelProvider: string; readonly model: string; readonly agentPreset: string; readonly reasoningEffort?: string; readonly timeoutMs: number | null }
   readonly usage?: readonly WorkUsageStep[]
   readonly progress?: readonly WorkProgress[]
   readonly permissionVerified?: boolean
@@ -47,7 +47,7 @@ function valid(value: unknown): value is WorkJournalRecord {
     || target.fullAccess !== undefined && typeof target.fullAccess !== 'boolean'
     || ![target.modelProvider, target.model, target.agentPreset].every(validIdentifier)
     || target.reasoningEffort !== undefined && !validIdentifier(target.reasoningEffort)
-    || !Number.isSafeInteger(target.timeoutMs) || Number(target.timeoutMs) < 10 || Number(target.timeoutMs) > 300000
+    || target.timeoutMs !== null && (!Number.isSafeInteger(target.timeoutMs) || Number(target.timeoutMs) < 10 || Number(target.timeoutMs) > 300000)
     || value.error !== null && (typeof value.error !== 'string' || !/^[A-Z][A-Z_]{1,63}$/.test(value.error))
     || value.acceptedMessageId !== null && !validIdentifier(value.acceptedMessageId)
     || value.followupRequestId !== null && !validIdentifier(value.followupRequestId)) return false

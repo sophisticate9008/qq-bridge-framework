@@ -6,7 +6,7 @@ import type { DeliveryReceipt, EffectRequest, EffectScope, JsonObject, JsonValue
 import { normalizeContent } from '../core/content.ts'
 import { assert, errorCode, isRecord, reference, snapshot } from '../core/values.ts'
 import { digest, json, object } from './data.ts'
-import { withDeadline } from './deadlines.ts'
+import { withCancellation, withDeadline } from './deadlines.ts'
 import type { NativeMessageSource, NativeMessageSourceReader } from './native-message-sources.ts'
 import { validateNativeWorkConfiguration, type NativeWorkConfiguration } from './native-work-configuration.ts'
 import type { DurableStore, StoredRecord } from './types.ts'
@@ -71,7 +71,7 @@ export interface NativeWorkExecutorOptions {
   readonly isCurrentParent?: (binding: { readonly conversationId: string; readonly sessionId: string; readonly generation: number }) => boolean
   readonly maxRecoveryRecords?: number
   readonly registerChild?: (binding: { readonly childId: string; readonly parentSessionId: string; readonly conversationId: string;
-    readonly generation: number; readonly ownerId: string; readonly expiresAt: number }) => () => void
+    readonly generation: number; readonly ownerId: string; readonly expiresAt: number | null }) => () => void
 }
 
 interface PendingWork {
@@ -103,14 +103,14 @@ function projection(record: StoredRecord): Readonly<NativeWorkView> {
   assert(reference(value.parentSessionId) && reference(value.conversationId)
     && Number.isSafeInteger(value.generation) && Number(value.generation) > 0
     && Number.isSafeInteger(value.createdAt) && Number(value.createdAt) >= 0
-    && Number.isSafeInteger(value.deadlineAt) && Number(value.deadlineAt) >= Number(value.createdAt)
+    && (value.deadlineAt === null || Number.isSafeInteger(value.deadlineAt) && Number(value.deadlineAt) >= Number(value.createdAt))
     && (value.lastError === null || value.lastError === undefined || typeof value.lastError === 'string' && /^[A-Z][A-Z_]{1,63}$/.test(value.lastError)),
   'INVALID_NATIVE_WORK_RECORD', 'The work binding or deadline is invalid.')
   const delivery = value.delivery ?? 'unavailable'
   assert(value.progress === undefined || isDshWorkProgress(value.progress), 'INVALID_NATIVE_WORK_RECORD', 'Invalid work progress.')
   assert(deliveries.some(state => state === delivery), 'INVALID_NATIVE_WORK_RECORD', 'The work delivery state is invalid.')
   return snapshot({ ...(value.progress === undefined ? {} : { progress: value.progress as readonly DshWorkProgress[] }), id: record.key, childId: String(value.childId), parentSessionId: value.parentSessionId,
-    conversationId: value.conversationId, generation: Number(value.generation), createdAt: Number(value.createdAt), deadlineAt: Number(value.deadlineAt),
+    conversationId: value.conversationId, generation: Number(value.generation), createdAt: Number(value.createdAt), deadlineAt: value.deadlineAt === null ? null : Number(value.deadlineAt),
     status: value.status as NativeWorkView['status'], result: value.result == null ? null : validatedResult(value.result),
     lateResult: value.lateResult == null ? null : validatedResult(value.lateResult), delivery: delivery as NativeWorkView['delivery'],
     lastError: typeof value.lastError === 'string' ? value.lastError : null,
@@ -255,6 +255,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
       update(entry, { lateOutcome: { stopReason: result.stopReason, outputFingerprint: digest(result.output) }, lateResult: json(result) })
       return
     }
+    clearTimeout(entry.timer)
     update(entry, { stopReason: result.stopReason, outputFingerprint: digest(result.output), result: json(result), resultId,
       status: result.stopReason === 'completed' ? 'completed' : 'failed',
       delivery: options.onResult ? 'delivering' : 'unavailable', deliveryError: null,
@@ -267,7 +268,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
     const deliveryId = `work-result:${resultId}`
     try {
       const receipt = normalizeDeliveryReceipt(await withDeadline({ signal: AbortSignal.any([lifetime.signal, entry.controller.signal]),
-        timeoutMs: Math.max(1, Math.min(120000, view.deadlineAt - Date.now())), code: 'NATIVE_WORK_DELIVERY_UNKNOWN',
+        timeoutMs: 120000, code: 'NATIVE_WORK_DELIVERY_UNKNOWN',
         run: signal => options.onResult!({ ...result, id: view.id, resultId, deliveryId, childId: view.childId,
           parentSessionId: view.parentSessionId, conversationId: view.conversationId, generation: view.generation }, signal) }))
       update(entry, { delivery: receipt.status, deliveryId,
@@ -353,10 +354,10 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
         if (!active) {
           followup = entry
           update(entry, { status: 'starting', runId: id, result: null, lateResult: null, delivery: 'not-requested', stopReason: null,
-            deadlineAt: Date.now() + configuration.timeoutMs, lastError: null })
+            deadlineAt: configuration.timeoutMs === null ? null : Date.now() + configuration.timeoutMs, lastError: null })
           pending.set(view.id, entry)
-          entry.timer = setTimeout(() => isolate(entry, 'NATIVE_WORK_TIMEOUT_UNKNOWN'), configuration.timeoutMs)
-        } else assert(Date.now() < view.deadlineAt, 'NATIVE_WORK_RECONCILIATION_REQUIRED', 'The active work deadline has elapsed.')
+          if (configuration.timeoutMs !== null) entry.timer = setTimeout(() => isolate(entry, 'NATIVE_WORK_TIMEOUT_UNKNOWN'), configuration.timeoutMs)
+        } else assert(view.deadlineAt === null || Date.now() < view.deadlineAt, 'NATIVE_WORK_RECONCILIATION_REQUIRED', 'The active work deadline has elapsed.')
         registerChild(entry)
         const accepted = await withDeadline({ signal, timeoutMs: 5000, code: 'NATIVE_WORK_CONTROL_UNKNOWN',
           run: activeSignal => backend.followup!({ id: view.id, childId: view.childId, parentSessionId: view.parentSessionId,
@@ -365,7 +366,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
         assert(reference(accepted.messageId), 'INVALID_NATIVE_WORK_RECEIPT', 'Follow-up requires an accepted SDK inbox identity.')
         if (followup) {
           update(entry, { status: 'running' })
-          entry.operation = withDeadline({ signal: AbortSignal.any([entry.controller.signal, lifetime.signal]),
+          entry.operation = withCancellation({ signal: AbortSignal.any([entry.controller.signal, lifetime.signal]),
             timeoutMs: configuration.timeoutMs, code: 'NATIVE_WORK_RESULT_UNKNOWN', run: async activeSignal => {
               for (;;) {
                 const observed = await backend.inspect!({ id: view.id, childId: view.childId,
@@ -373,7 +374,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
                 assert(observed.state !== 'unknown', 'NATIVE_WORK_RESULT_UNKNOWN', 'The continuation result cannot be verified.')
                 if (observed.state === 'completed') {
                   assert(observed.result, 'INVALID_NATIVE_WORK_RESULT', 'Completed work needs a captured result.')
-                  await settle(entry, observed.result); return
+                  return observed.result
                 }
                 if (observed.progress) progress(entry, observed.progress)
                 await new Promise<void>(resolve => {
@@ -384,7 +385,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
                 })
                 activeSignal.throwIfAborted()
               }
-            } }).catch(error => { isolate(entry, errorCode(error, 'NATIVE_WORK_RESULT_UNKNOWN')); fault(error) })
+            } }).then(result => settle(entry, result)).catch(error => { isolate(entry, errorCode(error, 'NATIVE_WORK_RESULT_UNKNOWN')); fault(error) })
             .finally(() => finish(entry))
         }
         marker = options.store.write(controlNamespace, id, { ...object(marker.value), state: 'accepted', messageId: accepted.messageId },
@@ -444,7 +445,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
       signal.throwIfAborted()
       const childId = randomUUID()
       const createdAt = Date.now()
-      const deadlineAt = createdAt + configuration.timeoutMs
+      const deadlineAt = configuration.timeoutMs === null ? null : createdAt + configuration.timeoutMs
       const entry: PendingWork = { controller: new AbortController(),
         record: options.store.write(namespace, id, json({ schema: 1, id, fingerprint, childId, status: 'starting',
           conversationId: scope.conversationId, sourceMessageId: source.sourceMessageId, ownerId: source.userId,
@@ -454,7 +455,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
       childIds.set(childId, id)
       observe(entry.record)
       pending.set(id, entry)
-      entry.timer = setTimeout(() => isolate(entry, 'NATIVE_WORK_TIMEOUT_UNKNOWN'), configuration.timeoutMs)
+      if (configuration.timeoutMs !== null) entry.timer = setTimeout(() => isolate(entry, 'NATIVE_WORK_TIMEOUT_UNKNOWN'), configuration.timeoutMs)
       let publication: Promise<NativeWorkActivation> | undefined
       let startAttempted = false
       const recordStartFailure = (error: unknown) => {
@@ -467,7 +468,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
         }
       }
       try {
-        await withDeadline({ signal, timeoutMs: Math.max(1, Math.min(configuration.timeoutMs, source.expiresAt - Date.now())),
+        await withDeadline({ signal, timeoutMs: Math.max(1, Math.min(30000, configuration.timeoutMs ?? 30000, source.expiresAt - Date.now())),
           code: 'NATIVE_WORK_START_UNKNOWN', run: currentSignal => {
             publication = (async () => {
               const executionSignal = AbortSignal.any([currentSignal, entry.controller.signal])
@@ -536,7 +537,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
       const view = projection(record)
       const ownerId = object(record.value).ownerId
       if (view.childId !== childId || !['starting', 'running'].includes(view.status)
-        || Date.now() >= view.deadlineAt || !reference(ownerId) || !currentParent(view)) return null
+        || view.deadlineAt !== null && Date.now() >= view.deadlineAt || !reference(ownerId) || !currentParent(view)) return null
       return snapshot({ id: view.id, childId: view.childId, parentSessionId: view.parentSessionId,
         conversationId: view.conversationId, generation: view.generation, ownerId, expiresAt: view.deadlineAt })
     },

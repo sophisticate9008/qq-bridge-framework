@@ -27,7 +27,7 @@ export interface WorkTarget {
 export interface WorkStart extends WorkAddress, WorkTarget {
   readonly task: string
   readonly context: string
-  readonly timeoutMs: number
+  readonly timeoutMs: number | null
 }
 interface Entry {
   readonly request: WorkStart
@@ -195,7 +195,7 @@ export function createWorkChannel(options: {
     async verify(request: WorkTarget & { issuerEpoch: string }) {
       epoch(request.issuerEpoch)
       return { schema: 1 as const, issuerEpoch: options.issuerEpoch, available: (await target(request)).available,
-        provider: 'spawn', continuable: true, externalToolAuthorizationVerified: false,
+        provider: 'spawn', continuable: true, continuousWorkSupported: true, externalToolAuthorizationVerified: false,
         childFullAccessSupported: options.fullAccessAvailable?.() === true }
     },
     async start(request: WorkStart, signal: AbortSignal) {
@@ -204,7 +204,7 @@ export function createWorkChannel(options: {
         || !Number.isSafeInteger(request.generation) || request.generation < 1
         || typeof request.task !== 'string' || !request.task.trim() || request.task.length > 16000
         || typeof request.context !== 'string' || request.context.length > 32000
-        || !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 10 || request.timeoutMs > 300000) throw new TypeError('Invalid work request')
+        || request.timeoutMs !== null && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 10 || request.timeoutMs > 300000)) throw new TypeError('Invalid work request')
       if (entries.has(request.id)) throw new TypeError('Work creation was already observed; inspect its result instead')
       if (entries.size >= 64) throw new TypeError('Work retention capacity is occupied')
       const selected = await target(request)
@@ -216,7 +216,7 @@ export function createWorkChannel(options: {
       const controller = new AbortController()
       const entry: Entry = { request: Object.freeze({ ...request }), fingerprint: workFingerprint(request), persistence: Promise.resolve(),
         acceptedMessageId: null, followupRequestId: null, pendingFollowups: new Set(), attachments: [], controller, state: 'starting', result: null, error: null,
-        timer: setTimeout(() => isolate(entry, 'WORK_DEADLINE_UNKNOWN'), request.timeoutMs) }
+        ...(request.timeoutMs === null ? {} : { timer: setTimeout(() => isolate(entry, 'WORK_DEADLINE_UNKNOWN'), request.timeoutMs) }) }
       // Reserve before the first external action; an uncertain start is never retried.
       try { await options.journal?.reserve(durable(entry)) } catch (error) { clearTimeout(entry.timer); throw error }
       entries.set(request.id, entry)
@@ -279,7 +279,7 @@ export function createWorkChannel(options: {
       const terminal = entry.state === 'completed'
       if (terminal) {
         clearTimeout(entry.timer)
-        entry.timer = setTimeout(() => isolate(entry, 'WORK_DEADLINE_UNKNOWN'), entry.request.timeoutMs)
+        if (entry.request.timeoutMs !== null) entry.timer = setTimeout(() => isolate(entry, 'WORK_DEADLINE_UNKNOWN'), entry.request.timeoutMs)
         entry.state = 'starting'; entry.result = null; entry.attachments.length = 0
       }
       entry.pendingFollowups.add(address.requestId)

@@ -38,7 +38,7 @@ export function createDshWorkPort(invoke: (method: DshWorkMethod, request: unkno
       if (!isRecord(value) || value.schema !== 1 || value.issuerEpoch !== request.issuerEpoch || typeof value.available !== 'boolean'
         || value.provider !== 'spawn' || value.continuable !== true || value.externalToolAuthorizationVerified !== false
         || request.fullAccess === true && value.available === true && value.childFullAccessSupported !== true) return invalid()
-      return value.available
+      return value.available && (request.continuous !== true || value.continuousWorkSupported === true)
     },
     start: (request, signal) => read('bridgePlugin/startWork', request, signal),
     inspect: (request, signal) => read('bridgePlugin/inspectWork', request, signal),

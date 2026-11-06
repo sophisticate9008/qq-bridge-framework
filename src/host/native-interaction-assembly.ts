@@ -44,7 +44,7 @@ export function createNativeInteractionAssembly(options: {
     resolveSession(sessionId) {
       const child = runtime.work?.resolveChild(sessionId)
       if (child && child.ownerId === runtime.owner) return { conversationId: child.conversationId,
-        sessionId, generation: child.generation, expiresAt: child.expiresAt }
+        sessionId, generation: child.generation, ...(child.expiresAt === null ? {} : { expiresAt: child.expiresAt }) }
       const binding = options.bindingForSession(sessionId)
       if (!binding?.sessionId) return undefined
       const execution = runtime.executions?.forConversation(binding.conversationId)

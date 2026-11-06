@@ -467,3 +467,9 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 自动恢复通过已保存运行意图与现有生命周期和修复入口执行，预算持久化且故障消失不清空小时预算。`GET /api/chat/automatic-recovery` 提供只读证据；恢复不会增加权限或重试业务未知执行。详细适用范围见 [恢复手册](RECOVERY.md#有界自动恢复)。
 
 完整发行包的 `distribution.json` 新增兼容文件清单与 `compatibility: { data: 1, overwrite: 1 }`，原 schema 1 的组件与来源字段保留。`GET /api/framework/update` 提供监督更新能力与当前操作；`POST` 只接受 `{ operationId, version }`，只允许官方仓库、同主版本前进更新。操作由 preparing → ready → applying → verifying → completed 前进，失败或回滚为终态；跨进程写入串行并验证状态转换，终态不能被迟到下载结果重新激活。收到编号单独持久去重；替换阶段的写屏障与进程租约阻止并行程序替换。详见 [更新流程](UPDATING.md)。
+
+## 后台工作持续执行
+
+原生工作配置及 DSH `startWork` 的 `timeoutMs` 接受 `null`，表示仅受任务生命周期取消控制、不设置总执行计时器；默认助手使用此值。旧有限时长 10–300000 毫秒继续有效。`verifyWork` 增加 `continuousWorkSupported: true` 能力，宿主在持续工作准入前核验，旧桥接插件不能被推定支持。工作 journal 沿用 schema 1，接受有限时长和 null；`NativeWorkView.deadlineAt` 同样接受 null，历史记录原样保留。
+
+持续工作子会话的来源绑定随实际运行存在，完成、停止或失效时撤销；提问与单次工具调用各自的有效期不延长。结果交付独立限时两分钟，不消费已用去的工作时间。公开中间文字与最终结果沿原父会话反馈通道转述，不重复启动任务。重启、结果未知和未知投递继续要求核对既有证据，不自动重放。

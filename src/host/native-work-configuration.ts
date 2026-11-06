@@ -9,11 +9,11 @@ export interface NativeWorkConfiguration {
   readonly agentPreset: string | null
   readonly reasoningEffort?: string
   readonly fullAccess: boolean
-  readonly timeoutMs: number
+  readonly timeoutMs: number | null
 }
 
 export const DEFAULT_NATIVE_WORK_CONFIGURATION: NativeWorkConfiguration = Object.freeze({
-  schema: 1, enabled: false, provider: null, model: null, agentPreset: null, fullAccess: false, timeoutMs: 300_000
+  schema: 1, enabled: false, provider: null, model: null, agentPreset: null, fullAccess: false, timeoutMs: null
 })
 
 const configurationKeys = ['schema', 'enabled', 'provider', 'model', 'agentPreset', 'fullAccess', 'timeoutMs'] as const
@@ -33,8 +33,8 @@ export function validateNativeWorkConfiguration(input: unknown): Readonly<Native
     || input.agentPreset !== null && !validReference(input.agentPreset)
     || (input.provider === null) !== (input.model === null)
     || input.enabled && (input.provider === null || input.model === null || input.agentPreset === null)
-    || typeof input.timeoutMs !== 'number' || !Number.isSafeInteger(input.timeoutMs)
-    || input.timeoutMs < 10 || input.timeoutMs > 300_000) {
+    || input.timeoutMs !== null && (typeof input.timeoutMs !== 'number' || !Number.isSafeInteger(input.timeoutMs)
+    || input.timeoutMs < 10 || input.timeoutMs > 300_000)) {
     throw new TypeError('Invalid native work configuration')
   }
   return Object.freeze({ schema: 1, enabled: input.enabled, provider: input.provider as string | null,

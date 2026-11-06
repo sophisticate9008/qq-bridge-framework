@@ -42,6 +42,7 @@ export interface DshWorkAddress {
   readonly generation: number
 }
 export interface DshWorkTarget {
+  readonly continuous?: boolean
   /** Only the authenticated, owner-admitted child lease may request this scope. */
   readonly fullAccess?: boolean
   readonly parentSessionId: string
@@ -53,7 +54,7 @@ export interface DshWorkTarget {
 export interface DshWorkStart extends DshWorkAddress, DshWorkTarget {
   readonly task: string
   readonly context: string
-  readonly timeoutMs: number
+  readonly timeoutMs: number | null
 }
 export interface DshWorkUsageStep {
   readonly eventId: string

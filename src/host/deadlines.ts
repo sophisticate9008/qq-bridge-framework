@@ -27,6 +27,15 @@ export function withDeadline<Value>({ run, signal, timeoutMs, code, onLate }:
     onLate?(value: Value): void | Promise<void> }): Promise<Value> {
   assert(Number.isSafeInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 3_600_000,
     'INVALID_TIMEOUT', 'A finite operation deadline is required.');
+  return withCancellation({ run, signal, timeoutMs, code, onLate });
+}
+
+/** Observe a cancellable lifetime; null has no wall-clock deadline. */
+export function withCancellation<Value>({ run, signal, timeoutMs = null, code = 'OPERATION_ABORTED_UNKNOWN', onLate }:
+  { run(signal: AbortSignal): Value | Promise<Value>; signal: AbortSignal; timeoutMs?: number | null; code?: string;
+    onLate?(value: Value): void | Promise<void> }): Promise<Value> {
+  assert(timeoutMs === null || Number.isSafeInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 3_600_000,
+    'INVALID_TIMEOUT', 'A lifetime must be cancellable or have a valid deadline.');
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     let settled = false;
@@ -46,7 +55,7 @@ export function withDeadline<Value>({ run, signal, timeoutMs, code, onLate }:
     function aborted() { fail('OPERATION_ABORTED_UNKNOWN'); }
     if (signal.aborted) { aborted(); return; }
     signal.addEventListener('abort', aborted, { once: true });
-    timer = setTimeout(() => fail(code), timeoutMs);
+    if (timeoutMs !== null) timer = setTimeout(() => fail(code), timeoutMs);
     let result: Value | Promise<Value>;
     try { result = run(controller.signal); }
     catch (error) { settled = true; cleanup(); reject(error); return; }

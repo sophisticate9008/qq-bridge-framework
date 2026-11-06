@@ -3,7 +3,7 @@ import type { DshWorkAddress, DshWorkMediaReference, DshWorkSnapshot, DshWorkUsa
 import type { MessageContent } from '../contracts/messages.ts'
 import { normalizeContent } from '../core/content.ts'
 import { assert } from '../core/values.ts'
-import { withDeadline } from './deadlines.ts'
+import { withCancellation, withDeadline } from './deadlines.ts'
 import type { NativeWorkBackend, NativeWorkBackendAddress } from './native-work.ts'
 import type { NativeWorkConfiguration } from './native-work-configuration.ts'
 
@@ -49,7 +49,7 @@ export function createDshNativeWorkBackend(options: {
     async verify(request) {
       assert(options.generation(request.parentSessionId) !== null, 'WORK_PARENT_UNAVAILABLE', 'The parent session is no longer current.')
       const target = await options.resolveTarget(request.configuration, request.signal)
-      assert(await options.port.verify({ issuerEpoch: options.issuerEpoch, parentSessionId: request.parentSessionId, ...target, fullAccess: request.configuration.fullAccess }, request.signal),
+      assert(await options.port.verify({ issuerEpoch: options.issuerEpoch, parentSessionId: request.parentSessionId, ...target, fullAccess: request.configuration.fullAccess, continuous: request.configuration.timeoutMs === null }, request.signal),
         'NATIVE_WORK_BACKEND_UNAVAILABLE', 'A continuable SDK spawn provider and selected preset are required.')
     },
     async start(request) {
@@ -65,7 +65,7 @@ export function createDshNativeWorkBackend(options: {
         timeoutMs: request.configuration.timeoutMs }, request.signal)
       const lifetime = new AbortController()
       const observedProgress = new Set<string>()
-      const result = withDeadline({ signal: lifetime.signal, timeoutMs: request.configuration.timeoutMs, code: 'WORK_RESULT_UNKNOWN', run: async signal => {
+      const result = withCancellation({ signal: lifetime.signal, timeoutMs: request.configuration.timeoutMs, code: 'WORK_RESULT_UNKNOWN', run: async signal => {
         let current = initial
         for (;;) {
           if (current.usage?.length) options.recordUsage?.({ address, steps: current.usage, ...(request.configuration.provider ? { provider: request.configuration.provider } : {}) })

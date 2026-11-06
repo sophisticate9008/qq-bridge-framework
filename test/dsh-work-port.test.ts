@@ -49,3 +49,16 @@ test('full-access start requires explicit supported scope and verified child per
   fullAccess = true
   assert.equal((await port.start(start, signal)).fullAccess, true)
 })
+
+test('continuous work requires explicit bridge support while finite legacy requests remain compatible', async () => {
+  let supported = false
+  const port = createDshWorkPort(async () => ({ schema: 1, issuerEpoch: 'epoch', available: true,
+    provider: 'spawn', continuable: true, externalToolAuthorizationVerified: false,
+    ...(supported ? { continuousWorkSupported: true } : {}) }))
+  const target = { issuerEpoch: 'epoch', parentSessionId: 'parent', modelProvider: 'provider', model: 'model', agentPreset: 'assistant' }
+  const signal = new AbortController().signal
+  assert.equal(await port.verify(target, signal), true)
+  assert.equal(await port.verify({ ...target, continuous: true }, signal), false)
+  supported = true
+  assert.equal(await port.verify({ ...target, continuous: true }, signal), true)
+})

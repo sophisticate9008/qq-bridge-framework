@@ -24,7 +24,8 @@ export interface NativeWorkView {
   readonly conversationId: string
   readonly generation: number
   readonly createdAt: number
-  readonly deadlineAt: number
+  /** null means the work runs until completion or explicit interruption. */
+  readonly deadlineAt: number | null
   readonly status: 'starting' | 'running' | 'completed' | 'failed' | 'unknown'
   readonly result: NativeWorkBackendResult | null
   readonly lateResult: NativeWorkBackendResult | null
@@ -95,7 +96,7 @@ export function parseNativeWorkView(input: unknown): NativeWorkView | null {
     || !ref(input.id) || !ref(input.childId) || !ref(input.parentSessionId) || !ref(input.conversationId)
     || typeof input.generation !== 'number' || !Number.isSafeInteger(input.generation) || input.generation <= 0
     || typeof input.createdAt !== 'number' || !Number.isSafeInteger(input.createdAt) || input.createdAt < 0
-    || typeof input.deadlineAt !== 'number' || !Number.isSafeInteger(input.deadlineAt) || input.deadlineAt < input.createdAt
+    || input.deadlineAt !== null && (typeof input.deadlineAt !== 'number' || !Number.isSafeInteger(input.deadlineAt) || input.deadlineAt < input.createdAt)
     || !['starting', 'running', 'completed', 'failed', 'unknown'].includes(String(input.status))
     || !['not-requested', 'delivering', 'confirmed', 'rejected', 'unknown', 'unavailable'].includes(String(input.delivery))
     || input.lastError !== null && (typeof input.lastError !== 'string' || !/^[A-Z][A-Z_]{1,63}$/.test(input.lastError))

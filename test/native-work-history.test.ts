@@ -52,6 +52,7 @@ test('work DTO rejects authority fields and invalid content, media URLs, cursors
     store.write('native-work.executions', 'a', record('a'))
     const view = createNativeWorkHistoryReader(store).read('a')!
     assert(parseNativeWorkView(view))
+    assert.equal(parseNativeWorkView({ ...view, deadlineAt: null })?.deadlineAt, null)
     assert.equal(parseNativeWorkView({ ...view, task: 'hidden' }), null)
     assert.equal(parseNativeWorkView({ ...view, deadlineAt: 99 }), null)
     assert.equal(parseNativeWorkView({ ...view, generation: 0 }), null)

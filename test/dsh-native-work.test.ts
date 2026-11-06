@@ -149,3 +149,12 @@ test('completed child SDK token facts are observed under its original work addre
   assert.equal(observations.length, 2, 'inspection can repeat exact usage for idempotent ledger projection')
   await activation.dispose()
 })
+
+test('continuous result polling remains cancellable without a task deadline', async () => {
+  const f = fixtureForTest()
+  const activation = await f.backend.start({ ...request, configuration: { ...configuration, timeoutMs: null } })
+  const rejected = assert.rejects(activation.result, { code: 'OPERATION_ABORTED_UNKNOWN' })
+  await activation.dispose()
+  await rejected
+  assert.equal(f.interrupted(), 1)
+})
