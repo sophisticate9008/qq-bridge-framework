@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 export function FrameworkVersion({ api, connected, triggerContainer }: { readonly api: ApiClient; readonly connected: boolean; readonly triggerContainer: HTMLElement | null }) {
   const { setOpenMobile } = useSidebar();
   const [status, setStatus] = useState<FrameworkReleaseStatus | null>(null);
+  const [checkFailed, setCheckFailed] = useState(false);
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [updateAvailable, setUpdateAvailable] = useState(false), [update, setUpdate] = useState<FrameworkUpdateState | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -49,12 +50,13 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
     applying: '备份并替换程序', verifying: '核对新版本启动', completed: '更新完成，请刷新页面', failed: '更新未完成，原版本保留', 'rolled-back': '启动未通过，已恢复原程序' };
   const updating = submitted || !!update && !['completed', 'failed', 'rolled-back'].includes(update.state);
   useEffect(() => {
-    if (!connected) { setStatus(null); return; }
+    if (!connected) { setStatus(null); setCheckFailed(false); return; }
     const controller = new AbortController();
     void api.get('/api/framework/version', controller.signal).then(value => {
       const parsed = parseFrameworkReleaseStatus(value);
-      if (!controller.signal.aborted && parsed) setStatus(parsed);
-    }).catch(() => undefined);
+      if (!parsed) throw new Error('invalid_version_response');
+      if (!controller.signal.aborted) { setStatus(parsed); setCheckFailed(false); }
+    }).catch(() => { if (!controller.signal.aborted) setCheckFailed(true); });
     return () => controller.abort();
   }, [api, connected]);
   async function check() {
@@ -62,12 +64,18 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
     try {
       const parsed = parseFrameworkReleaseStatus(await api.get('/api/framework/version?refresh=1'));
       if (!parsed) throw new Error('invalid_version_response');
-      setStatus(parsed);
-    } catch (failure) { setError(errorMessage(failure)); }
+      setStatus(parsed); setCheckFailed(false);
+    } catch (failure) { setCheckFailed(true); setError(errorMessage(failure)); }
     finally { setBusy(false); }
   }
-  return <>{triggerContainer && createPortal(<Button variant="ghost" size="sm" disabled={!connected} onClick={() => { setOpenMobile(false); setOpen(true); }} aria-label="框架版本与更新" className="h-5 justify-start px-0 text-xs text-muted-foreground tabular-nums">
-    {status ? `v${status.currentVersion}` : '版本'}{status?.state === 'available' && <span className="ml-1 size-1.5 rounded-full bg-primary" />}
+  const indicator = !connected || busy || checkFailed || !status || status.state === 'unavailable'
+    ? 'unknown' : status.state === 'available' ? 'available' : 'current';
+  const indicatorLabel = !connected ? '未连接，更新状态未知' : busy ? '正在检查更新'
+    : checkFailed || status?.state === 'unavailable' ? '检查失败，更新状态未知；点击查看并重试'
+      : !status ? '正在读取版本' : status.state === 'available' ? `有新版本 v${status.latestVersion}`
+        : status.state === 'ahead' ? '暂无更新，当前运行版本高于最新正式发行版本' : '暂无更新，当前已是最新正式版本';
+  return <>{triggerContainer && createPortal(<Button variant="ghost" size="sm" disabled={!connected} onClick={() => { setOpenMobile(false); setOpen(true); }} aria-label="框架版本与更新" aria-describedby="framework-version-state" title={indicatorLabel} className="h-5 justify-start px-0 text-xs text-muted-foreground tabular-nums">
+    {status ? `v${status.currentVersion}` : '版本'}<span id="framework-version-state" role="img" aria-label={indicatorLabel} data-version-indicator={indicator} className={`ml-1 size-2 shrink-0 rounded-full bg-current ${indicator === 'available' ? 'text-amber-400' : indicator === 'current' ? 'text-green-500' : 'text-muted-foreground/50'}`} style={{ boxShadow: indicator === 'unknown' ? undefined : '0 0 3px currentColor, 0 0 9px currentColor' }} />
   </Button>, triggerContainer)}<Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>框架版本与更新</DialogTitle><DialogDescription>查看运行版本和 GitHub 正式发行版本。</DialogDescription></DialogHeader>
     <div className="stack text-sm"><p>当前版本：{status ? `v${status.currentVersion}` : '待读取'}</p>
       <p>最新发行：{status?.latestVersion ? `v${status.latestVersion}` : '尚未获取'}</p>
