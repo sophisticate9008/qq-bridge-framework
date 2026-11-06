@@ -40,7 +40,14 @@ interface Applied {
 }
 interface Journal { readonly schema: 1; readonly pending: Pending | null; readonly applied: Applied | null }
 const fallback: Journal = Object.freeze({ schema: 1, pending: null, applied: null })
-const instructions = '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。'
+const legacyInstructions = '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。'
+const instructions = legacyInstructions
+  + '后台工作没有固定执行总时限；持续推进直到完成、用户要求停止或出现真实阻碍。适时给出简短的实际进展，阶段性回复会交回原聊天会话转述，不必为等待转述停止工作。'
+  + '涉及新增长期能力、重复处理同类文件或用户要求插件时，优先考虑通过框架 SDK 做成可注册、可复用的框架扩展。这是开发偏好，不是每个任务的硬性要求；一次性处理、接入成本明显过高或当前接口难以实现时，可以使用现有库或临时脚本，并说明取舍。'
+  + '开发前先查当前安装目录的 README.md、docs/EXTENDING.md、docs/SERVICE_CONVENTIONS.md 与 examples/reloadable-plugin；本机私人扩展放在 private/extensions/<标识>/，运行数据放在 runtime/。完整安装包提供文档和公开源码；缺少文档时参考 https://github.com/sophisticate9008/qq-bridge-framework 并核对已安装版本。'
+  + '采用 @qq-bridge-framework/sdk 的公开导出，由可信 bootstrap 的 create() 返回 packages，填写 NativePackageManifest 的稳定标识、版本、displayName、description 和 toolNames，再在 install() 注册实际工具或服务并管理生命周期。复用现有配置、存储与权限机制，保留用户数据，避免依赖内部源码路径。'
+  + '交付时区分源码已写、依赖已安装、扩展已登记、运行已加载和调用已验证；以实际状态确认控制台可见及后续会话可调用。安装 Python/npm 库或写临时脚本只能说明本次工具已可用，不能称为框架插件已接入。'
+
 const assistantPresetPlugins: readonly JsonObject[] = Object.freeze([
   Object.freeze({ id: 'qbf-assistant-fs', name: '@deepseek-ai/dsh-tool-fs' }),
   Object.freeze({ id: 'qbf-assistant-fs-search', name: '@deepseek-ai/dsh-tool-fs-search', config: Object.freeze({ sampleOverCapGlobResults: false }) }),
@@ -147,13 +154,13 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
   const instanceId = randomUUID()
   let busy = false
   async function readJournal(): Promise<Document<Journal>> { return readDocument(filename, fallback, journal) }
-  function configurationRevision(configuration: NativeChatConfiguration, legacy = false): string {
+  function configurationRevision(configuration: NativeChatConfiguration, legacy = false, prompt = instructions): string {
     const plan = configuration.catalog.plans.find(candidate => candidate.id === configuration.catalog.activePlanId)
     if (!plan) fail('ASSISTANT_CONFIGURATION_INVALID')
     const provider = configuration.providers.find(candidate => candidate.id === plan.provider)
     return hash({ schema: 1, provider, model: plan.model, reasoningEffort: plan.reasoningEffort,
       target: configuration.deployment.target, settings: configuration.deployment.modelSettings,
-      connection: configuration.adapters.dshAgent, instructions,
+      connection: configuration.adapters.dshAgent, instructions: prompt,
       ...(legacy ? {} : { assistantTools: { schema: 1, plugins: assistantPresetPlugins } }) })
   }
   async function managedPresetBindings(configuration: NativeChatConfiguration): Promise<readonly DshPresetBinding[]> {
@@ -161,7 +168,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     // Ownership comes from the verified journal for this exact target, not a preset name prefix.
     // The old journal already binds provider/model/target/connection/settings/instructions. It may
     // authorize an in-place tools upgrade only when all those exact legacy inputs still match.
-    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, true)].includes(applied.configurationRevision)) return []
+    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
     const plan = configuration.catalog.plans.find(candidate => candidate.id === configuration.catalog.activePlanId)
     const persona = configuration.personas.find(candidate => candidate.id === plan?.personaId)
     if (!plan || !persona || plan.provider !== applied.provider || plan.model !== applied.model) return []
@@ -330,7 +337,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
       const document = await readJournal()
       if (document.value.pending?.state !== 'verified' || !document.value.applied) return false
       const current = await selected(signal)
-      if (![current.configurationRevision, configurationRevision(current.configuration, true)].includes(document.value.applied.configurationRevision)) return false
+      if (![current.configurationRevision, configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
       const live = await verified(current)
       return live.reasons.length === 1 && live.reasons[0] === 'pending_reload'
     },

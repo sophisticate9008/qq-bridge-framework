@@ -264,7 +264,7 @@ test('work admission rejects changed deployment bytes and cancellation retains i
   await assert.rejects(data.target.resolve(controller.signal), error => error === reason)
 })
 
-test('legacy verified assistant journal upgrades tools in its exact existing preset and never adopts a name without ownership', async context => {
+for (const hasTools of [false, true]) test(`verified assistant upgrades guidance and tools in its owned preset (existing tools: ${hasTools})`, async context => {
   const data = await fixture(context)
   const prepared = await data.target.prepare(data.assistant().revision, signal)
   const applied = await data.target.apply(request(prepared), signal)
@@ -279,7 +279,12 @@ test('legacy verified assistant journal upgrades tools in its exact existing pre
       if (!candidate.config || object(candidate.config).id !== applied.agentPreset) continue
       const config = object(candidate.config)
       assert(Array.isArray(config.plugins))
-      config.plugins = config.plugins.filter(plugin => !String(object(plugin).id).startsWith('qbf-assistant-'))
+      const selectedPlugins = hasTools ? config.plugins : config.plugins.filter(plugin => !String(object(plugin).id).startsWith('qbf-assistant-'))
+      config.plugins = selectedPlugins
+      const persona = selectedPlugins.find(plugin => object(plugin).id === 'persona')
+      assert(persona)
+      const personaConfig = object(object(persona).config)
+      personaConfig.prefix = String(personaConfig.prefix).replace(/后台工作没有固定执行总时限[\s\S]*?不能称为框架插件已接入。/, '')
     }
   }
   await writeFile(data.profilePath, JSON.stringify(profile), { mode: 0o600 })
@@ -289,7 +294,12 @@ test('legacy verified assistant journal upgrades tools in its exact existing pre
     model: 'assistant-model', reasoningEffort: 'off', target: data.configuration.deployment.target,
     settings: { contextWindow: 256_000, maxTokens: 8_000, reasoningEfforts: false },
     connection: data.configuration.adapters.dshAgent,
-    instructions: '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。' })
+    instructions: '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。',
+    ...(hasTools ? { assistantTools: { schema: 1, plugins: [
+      { id: 'qbf-assistant-fs', name: '@deepseek-ai/dsh-tool-fs' },
+      { id: 'qbf-assistant-fs-search', name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } },
+      { id: 'qbf-assistant-shell', name: process.platform === 'win32' ? '@deepseek-ai/dsh-tool-pwsh' : '@deepseek-ai/dsh-tool-bash' }
+    ] } } : {}), })
   const restored = createNativeAssistantTarget(data.options)
   object(journal.applied).configurationRevision = '1'.repeat(64)
   object(journal.pending).configurationRevision = '1'.repeat(64)
@@ -313,6 +323,9 @@ test('legacy verified assistant journal upgrades tools in its exact existing pre
   assert.equal(matches.length, 1)
   const plugins = object(matches[0]!.config).plugins
   assert(Array.isArray(plugins))
+  assert(JSON.stringify(plugins).includes('这是开发偏好，不是每个任务的硬性要求'))
+  assert(JSON.stringify(plugins).includes('docs/EXTENDING.md'))
+  assert.equal((await restored.resolve(signal)).configuration.timeoutMs, null)
   assert(plugins.some(plugin => object(plugin).name === '@deepseek-ai/dsh-tool-fs'))
   assert(plugins.some(plugin => object(plugin).name === '@deepseek-ai/dsh-tool-fs-search'))
   assert(plugins.some(plugin => ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh'].includes(String(object(plugin).name))))
