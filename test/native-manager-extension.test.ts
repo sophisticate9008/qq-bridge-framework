@@ -24,7 +24,7 @@ export default { manifest: { id: 'manager-extension-test', version: '1.0.0', api
 }
 
 async function fixture(context: TestContext) {
-  const root = fileURLToPath(new URL('../runtime/engineering/validation/017/native-manager-extension/', import.meta.url));
+  const root = fileURLToPath(new URL('../private/maintenance/engineering/validation/017/native-manager-extension/', import.meta.url));
   await mkdir(root, { recursive: true, mode: 0o700 });
   const directory = await mkdtemp(join(root, 'fixture-'));
   context.after(() => rm(directory, { recursive: true, force: true }));

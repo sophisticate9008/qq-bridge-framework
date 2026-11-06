@@ -55,26 +55,26 @@ test('browser diagnostics project only known booleans/counts, error types and pu
 
 test('browser diagnostics retain whitelisted synthetic PNG and JSON summaries, not raw runtime data', async context => {
   const values = await fixture(context);
-  await values.put('runtime/page-navigation-smoke/failure-2026-10-25T00-00-00-000Z.json', JSON.stringify({
+  await values.put('private/maintenance/page-navigation-smoke/failure-2026-10-25T00-00-00-000Z.json', JSON.stringify({
     allVisibleH2Indexed: false, error: { name: 'TimeoutError', message: syntheticSecret },
     state: { body: syntheticSecret }, token: syntheticSecret
   }));
-  await values.put('runtime/page-navigation-smoke/failure.png', png);
-  await values.put('runtime/page-navigation-smoke/forged.png', syntheticSecret);
-  await values.put('runtime/page-navigation-smoke/admin.token', syntheticSecret);
-  await values.put('runtime/page-navigation-smoke/config.json', syntheticSecret);
-  await values.put('runtime/page-navigation-smoke/native-chat.sqlite', syntheticSecret);
-  await values.put('runtime/page-navigation-smoke/console.log', syntheticSecret);
-  await values.put('runtime/page-navigation-smoke/result-1.json', '{' + syntheticSecret);
+  await values.put('private/maintenance/page-navigation-smoke/failure.png', png);
+  await values.put('private/maintenance/page-navigation-smoke/forged.png', syntheticSecret);
+  await values.put('private/maintenance/page-navigation-smoke/admin.token', syntheticSecret);
+  await values.put('private/maintenance/page-navigation-smoke/config.json', syntheticSecret);
+  await values.put('private/maintenance/page-navigation-smoke/native-chat.sqlite', syntheticSecret);
+  await values.put('private/maintenance/page-navigation-smoke/console.log', syntheticSecret);
+  await values.put('private/maintenance/page-navigation-smoke/result-1.json', '{' + syntheticSecret);
   await values.put('runtime/testing/failure.png', png);
   await values.put('.cache/testing/failure.png', png);
   await values.put('.cache/vite/failure.png', png);
   await values.put('runtime/private/result.json', syntheticSecret);
-  await values.put('runtime/engineering/validation/006/private.png', png);
-  await values.put('runtime/engineering/validation/006/markdown-page-1.png', png);
-  await values.put('runtime/engineering/validation/006/presentation-assets/page-1.png', png);
-  await values.put('runtime/engineering/validation/006/presentation-assets/result.json', syntheticSecret);
-  await values.put('runtime/execution-journal-smoke/terminal.json', JSON.stringify({ status: 'failed', error: syntheticSecret }));
+  await values.put('private/maintenance/engineering/validation/006/private.png', png);
+  await values.put('private/maintenance/engineering/validation/006/markdown-page-1.png', png);
+  await values.put('private/maintenance/engineering/validation/006/presentation-assets/page-1.png', png);
+  await values.put('private/maintenance/engineering/validation/006/presentation-assets/result.json', syntheticSecret);
+  await values.put('private/maintenance/execution-journal-smoke/terminal.json', JSON.stringify({ status: 'failed', error: syntheticSecret }));
   const result = await collectBrowserDiagnostics(values);
   assert.deepEqual((await readdir(result.directory)).sort(), ['execution-journal-terminal.json', 'markdown-markdown-page-1.png',
     'page-navigation-failure-2026-10-25T00-00-00-000Z.json', 'page-navigation-failure.png',
@@ -92,14 +92,14 @@ test('browser diagnostics retain whitelisted synthetic PNG and JSON summaries, n
 test('browser diagnostics reject symlinks, hardlinks, linked directories and noncanonical roots', async context => {
   const values = await fixture(context);
   const external = await values.put('private.json', syntheticSecret);
-  const suite = join(values.workspace, 'runtime/page-navigation-smoke');
+  const suite = join(values.workspace, 'private/maintenance/page-navigation-smoke');
   await mkdir(suite, { recursive: true });
   await symlink(external, join(suite, 'failure.png'));
   await link(external, join(suite, 'failure-1.json'));
   const outside = join(values.directory, 'outside');
   await mkdir(outside);
   await writeFile(join(outside, 'failure.png'), png);
-  await symlink(outside, join(values.workspace, 'runtime/native-chat-ui-smoke'));
+  await symlink(outside, join(values.workspace, 'private/maintenance/native-chat-ui-smoke'));
   const result = await collectBrowserDiagnostics(values);
   assert.equal(result.files, 0);
   assert.equal(result.rejected, 2);
@@ -123,7 +123,7 @@ test('browser diagnostics bound source file sizes before reading or parsing over
   const values = await fixture(context);
   for (const [name, length] of [['failure.png', BROWSER_DIAGNOSTIC_LIMITS.pngBytes + 1],
     ['failure-1.json', BROWSER_DIAGNOSTIC_LIMITS.jsonBytes + 1]] as const) {
-    const filename = await values.put(`runtime/page-navigation-smoke/${name}`, '');
+    const filename = await values.put(`private/maintenance/page-navigation-smoke/${name}`, '');
     const handle = await open(filename, 'r+');
     await handle.truncate(length);
     await handle.close();
@@ -137,14 +137,14 @@ test('browser diagnostics bound source file sizes before reading or parsing over
 test('browser diagnostics cap total files and shallow directory entries', async context => {
   const values = await fixture(context);
   for (let index = 0; index < BROWSER_DIAGNOSTIC_LIMITS.files + 3; index++) {
-    await values.put(`runtime/ui-smoke/image-${index}.png`, png);
+    await values.put(`private/maintenance/ui-smoke/image-${index}.png`, png);
   }
   const result = await collectBrowserDiagnostics(values);
   assert.equal(result.files, BROWSER_DIAGNOSTIC_LIMITS.files);
   assert.equal(result.fileLimitReached, true);
   const entries = await fixture(context);
   for (let index = 0; index < BROWSER_DIAGNOSTIC_LIMITS.entriesPerSuite + 3; index++) {
-    await entries.put(`runtime/ui-smoke/ignored-${index}.token`, syntheticSecret);
+    await entries.put(`private/maintenance/ui-smoke/ignored-${index}.token`, syntheticSecret);
   }
   const capped = await collectBrowserDiagnostics(entries);
   assert.equal(capped.files, 0);
@@ -155,7 +155,7 @@ test('browser diagnostics enforce a total byte budget across individually allowe
   const values = await fixture(context);
   const count = Math.floor(BROWSER_DIAGNOSTIC_LIMITS.totalBytes / BROWSER_DIAGNOSTIC_LIMITS.pngBytes) + 1;
   for (let index = 0; index < count; index++) {
-    const filename = await values.put(`runtime/ui-smoke/image-${index}.png`, png);
+    const filename = await values.put(`private/maintenance/ui-smoke/image-${index}.png`, png);
     const handle = await open(filename, 'r+');
     await handle.truncate(BROWSER_DIAGNOSTIC_LIMITS.pngBytes);
     await handle.close();
@@ -183,7 +183,7 @@ test('browser diagnostics reject custom CLI scan paths and require the runner en
 
 test('browser diagnostics executable collects only the current fixture workspace and refuses custom arguments', async context => {
   const values = await fixture(context);
-  await values.put('runtime/ui-smoke/result.json', JSON.stringify({ pageErrors: 0, token: syntheticSecret }));
+  await values.put('private/maintenance/ui-smoke/result.json', JSON.stringify({ pageErrors: 0, token: syntheticSecret }));
   const extension = import.meta.url.endsWith('.js') ? 'js' : 'ts';
   const entry = fileURLToPath(new URL(`../scripts/collect-browser-diagnostics.${extension}`, import.meta.url));
   const environment = { ...process.env, RUNNER_TEMP: values.runnerTemp };
