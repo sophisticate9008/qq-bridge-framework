@@ -58,6 +58,21 @@ try {
   assert.equal(health.healthy, true, 'Read-only probes must verify the actual configured protocol and DSH paths');
   assert.equal(health.modelExecutionVerified, false);
   await start.getByRole('button', { name: '关闭', exact: true }).click();
+  await navigateConsolePage(page, 'features');
+  const services = page.locator('#framework-services');
+  for (const name of ['表情收藏', '表情发送', '插件宿主服务']) {
+    await services.getByRole('heading', { name, exact: true }).waitFor();
+  }
+  await page.getByRole('tab', { name: '扩展功能', exact: true }).click();
+  const extensions = page.getByRole('tabpanel');
+  for (const name of ['表情收藏', '表情发送', '插件宿主服务']) {
+    assert.equal(await extensions.getByRole('heading', { name, exact: true }).count(), 0);
+  }
+  await page.getByRole('tab', { name: '框架内置', exact: true }).click();
+  await services.locator('article').filter({ has: page.getByRole('heading', { name: '表情收藏', exact: true }) })
+    .getByRole('button', { name: '设置', exact: true }).click();
+  await page.locator('[data-page="stickers"]').waitFor();
+  await page.getByText('表情触发概率', { exact: true }).waitFor();
   fixture.inbound(1);
   await capabilityUntil(() => fixture.calls.filter(call => call.method === 'session/prompt').length === 1, 'Real local prompt is required');
   const sessionId = fixture.streams.at(-1)!.sessionId;

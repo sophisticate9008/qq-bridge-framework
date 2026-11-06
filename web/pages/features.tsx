@@ -90,15 +90,18 @@ function parseFeatures(value: unknown): NativeFeatures | null {
   };
 }
 
-const builtinIds = ['agent-relay', 'framework-tools', 'reminder', 'reminders', 'memory', 'media', 'native-services', 'chat-input', 'chat-output', 'qzone'];
 const builtinServices: Readonly<Record<string, { readonly name: string; readonly description: string; readonly page?: PageId }>> = {
+  'plugin-runtime': { name: '插件宿主服务', description: '提供扩展包加载、宿主服务与运行资源管理。' },
   'chat-input': { name: '唤醒与续聊', description: '私聊、@、昵称、引用与会话续聊；在人设中调整。', page: 'persona' },
   'chat-output': { name: '回复呈现与 Markdown 转图', description: '框架内置 Markdown 图片渲染、短回复分条与长纯文本转发。', page: 'overview' },
   media: { name: '媒体读取与视频观察', description: '按需读取图片、文件与视频抽样画面；视频观察在首页开启，音频需转写服务。', page: 'overview' },
+  'sticker-library': { name: '表情收藏', description: '管理账号收藏与额外表情，配置自动收藏和索引。', page: 'stickers' },
+  'sticker-sending': { name: '表情发送', description: '按会话可见性选择并发送收藏表情，在表情库中配置。', page: 'stickers' },
   reminders: { name: '提醒服务', description: '提供提醒与定时触发，供扩展包注册业务工具。' },
   memory: { name: '记忆与偏好', description: '提供带来源与范围的记忆，供扩展包注册业务工具。' },
   'native-services': { name: '会话与后台工作', description: '提供工作状态、执行记录与会话互动；模型提问在 QQ 内回复。', page: 'sessions' },
 };
+const builtinIds = ['agent-relay', 'framework-tools', 'reminder', 'qzone', ...Object.keys(builtinServices)];
 const normalize = (value: string) => value.normalize('NFKC').trim().toLocaleLowerCase();
 const cardGridClass = 'grid min-w-0 w-full max-w-[1280px] grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))] items-start gap-3';
 const iconTones = [
