@@ -98,3 +98,72 @@ test('new pricing routes require the central enabled catalog while unchanged his
   assert.equal(validUsagePriceRoutes([{ ...historic, model: 'different-route' }], [historic], providers), false);
   assert.equal(Object.hasOwn(providers[0], 'apiKeyConfigured'), false);
 });
+
+test('cache hit rates use paired valid observations across summary, session and turn without partial-record poisoning', context => {
+  const store = createSqliteStore({ filename: ':memory:' });
+  context.after(() => store.close());
+  const usage = createNativeUsage({ store });
+  usage.setPricing([price], null);
+  usage.append(turn);
+  usage.append({ ...turn, stepId: 'step:missing-input', coverage: 'partial',
+    tokens: { input: null, output: null, cacheRead: 900, cacheWrite: null, total: null } });
+  usage.append({ ...turn, turnId: 'all-unknown', coverage: 'unknown',
+    tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, total: null } });
+  const projection = createNativeUsageProjection({ usage });
+  const summary = parseUsageSnapshot(projection.summary());
+  assert(summary);
+  const expected = { includedRecords: 1, excludedRecords: 2, inputTokens: 150, cacheHitTokens: 40 };
+  assert.equal(summary.totals.cacheHitRate, 40 / 150);
+  assert.deepEqual(summary.totals.cacheHitCoverage, expected);
+  assert.equal(summary.conversations[0].cacheHitRate, 40 / 150);
+  assert.deepEqual(summary.conversations[0].cacheHitCoverage, expected);
+  // The skipped observation's known tokens remain visible, but do not pollute the ratio.
+  assert.equal(summary.totals.cacheHitTokens, 940);
+  assert.equal(summary.coverage?.missingTokens.input, 2);
+  const details = parseUsageConversation(projection.conversation(turn.conversationId), turn.conversationId);
+  assert(details);
+  const mixed = details.turns.find(item => item.turnId === turn.turnId);
+  assert(mixed);
+  assert.equal(mixed.cacheHitRate, 40 / 150);
+  assert.deepEqual(mixed.cacheHitCoverage, { ...expected, excludedRecords: 1 });
+  assert.equal(details.turns.find(item => item.turnId === 'all-unknown')?.cacheHitRate, null);
+  const bounded = createNativeUsageProjection({ usage: { ...usage, snapshot(query) {
+    return { ...usage.snapshot(query), truncated: true };
+  }, summary(query) { return { ...usage.summary(query), partial: true }; } } });
+  const partial = parseUsageSnapshot(bounded.summary());
+  assert(partial?.coverage?.partial);
+  assert.equal(partial.totals.cacheHitRate, 40 / 150);
+  assert.deepEqual(partial.totals.cacheHitCoverage, expected);
+});
+
+test('cache ratios depend on available input and cache counts rather than unrelated coverage and costs', context => {
+  const store = createSqliteStore({ filename: ':memory:' });
+  context.after(() => store.close());
+  const usage = createNativeUsage({ store });
+  usage.append({ ...turn, coverage: 'partial', tokens: { input: null, output: 20, cacheRead: 25, cacheWrite: null, total: 120 } });
+  const projection = createNativeUsageProjection({ usage });
+  const summary = parseUsageSnapshot(projection.summary());
+  assert(summary);
+  assert.equal(summary.totals.cacheHitRate, 0.25);
+  assert.deepEqual(summary.totals.cacheHitCoverage, { includedRecords: 1, excludedRecords: 0, inputTokens: 100, cacheHitTokens: 25 });
+  const payload = projection.summary();
+  assert(parseUsageSnapshot({ ...payload, totals: { ...payload.totals, cacheHitCoverage: undefined } }));
+  assert.equal(parseUsageSnapshot({ ...payload, totals: { ...payload.totals,
+    cacheHitCoverage: { includedRecords: 1, excludedRecords: 0, inputTokens: 10, cacheHitTokens: 11 } } }), null);
+  usage.append({ ...turn, turnId: 'unknown-cache', tokens: { input: null, output: 20, cacheRead: null, cacheWrite: null, total: 220 } });
+  assert.equal(parseUsageSnapshot(projection.summary())?.totals.cacheHitRate, 0.25);
+});
+
+test('empty, zero-input and wholly missing cache samples remain distinguishable', context => {
+  const store = createSqliteStore({ filename: ':memory:' });
+  context.after(() => store.close());
+  const usage = createNativeUsage({ store });
+  const projection = createNativeUsageProjection({ usage });
+  assert.equal(parseUsageSnapshot(projection.summary())?.totals.cacheHitRate, null);
+  usage.append({ ...turn, tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, total: null } });
+  const missing = parseUsageSnapshot(projection.summary());
+  assert.equal(missing?.totals.cacheHitRate, null);
+  assert.equal(missing?.totals.cacheHitCoverage?.excludedRecords, 1);
+  usage.append({ ...turn, turnId: 'zero', tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
+  assert.equal(parseUsageSnapshot(projection.summary())?.totals.cacheHitRate, 0);
+});

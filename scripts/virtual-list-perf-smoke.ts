@@ -191,6 +191,8 @@ try {
   assert.match(await page.locator('[data-usage-metric="total-tokens"] > strong').innerText(), /13\.6m/);
   assert.match(await page.locator('[data-usage-metric="total-tokens"]').innerText(), /已记录 Token/);
   assert.equal(await page.locator('[data-usage-metric="estimated-cost"] > strong').innerText(), 'USD 11.92');
+  assert.equal(await page.locator('[data-usage-metric="cache-hit-rate"] > strong').innerText(), '26.7%');
+  assert.match(await page.locator('[data-usage-metric="cache-hit-rate"]').innerText(), /有效 80 条 · 跳过 1 条/);
   await page.getByRole('button', { name: '统计说明', exact: true }).click();
   await page.locator('[data-native-usage-coverage]').waitFor();
   assert.match(await page.locator('[data-native-usage-coverage]').innerText(), /1 轮计数不完整，1 条费用未知/);

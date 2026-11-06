@@ -59,6 +59,18 @@ function totals(records: readonly UsageRecord[], partial: boolean, currency: str
     return null
   })
   const input = sumKnown(inputs)
+  // Pair each numerator with its own denominator. Incomplete records must not
+  // poison other observations or contribute only one side of the ratio.
+  const cacheSamples = items.flatMap((item, index) => {
+    const denominator = inputs[index]
+    const hit = item.tokens.cacheRead
+    return denominator !== null && hit !== null && hit <= denominator
+      ? [{ input: denominator, hit }] : []
+  })
+  const cacheSampleInput = sumKnown(cacheSamples.map(item => item.input)) ?? 0
+  const cacheSampleHit = sumKnown(cacheSamples.map(item => item.hit)) ?? 0
+  const cacheHitCoverage = { includedRecords: cacheSamples.length, excludedRecords: items.length - cacheSamples.length,
+    inputTokens: cacheSampleInput, cacheHitTokens: cacheSampleHit }
   const missingCostRecords = items.filter(item => item.cost === null).length
   const costComplete = complete && items.length > 0 && missingCostRecords === 0 && priced.length === items.length
   const totalsComplete = costComplete
@@ -74,8 +86,8 @@ function totals(records: readonly UsageRecord[], partial: boolean, currency: str
     conversations: new Set(records.map(item => digest([item.conversationId, item.sessionId]))).size, turns, steps: modelRecords.length,
     attributedCost: cost, unattributedCost: 0,
     buckets: { cacheMiss, cacheHit, cacheWrite, output: sum('output'), reasoning: sum('reasoning') },
-    byTier: null, cacheHitRate: !complete || missingTokens.cacheRead > 0 || inputs.some(value => value === null)
-      || input === null || cacheHit === null ? null : input > 0 ? cacheHit / input : 0,
+    byTier: null, cacheHitCoverage,
+    cacheHitRate: cacheSamples.length === 0 ? null : cacheSampleInput > 0 ? cacheSampleHit / cacheSampleInput : 0,
     avgCostPerTurn: modelCost === null ? null : totalModelTurns > 0 ? modelCost / totalModelTurns : 0,
     avgCostPerStep: modelCost === null ? null : totalModelRecords.length > 0 ? modelCost / totalModelRecords.length : 0,
     coverage: items.length === 0 ? 'unknown' : totalsComplete ? 'complete' : 'partial',
@@ -109,7 +121,8 @@ function groupTurns(items: readonly UsageRecord[], partial: boolean, currency: s
       startedAt: Math.min(...group.map(item => item.recordedAt)), endedAt: Math.max(...group.map(item => item.recordedAt)),
       timeSource: 'framework-observed', model: models.length === 1 ? models[0] : null,
       provider: providers.length === 1 ? providers[0] : null,
-      buckets: summary.buckets, cost: summary.cost, tier: tiers.length === 1 ? tiers[0] : 'mixed', coverage: summary.coverage,
+      buckets: summary.buckets, cacheHitRate: summary.cacheHitRate, cacheHitCoverage: summary.cacheHitCoverage,
+      cost: summary.cost, tier: tiers.length === 1 ? tiers[0] : 'mixed', coverage: summary.coverage,
       costRecovery: group.some(item => item.costRecovery === 'historical-reference') ? 'historical-reference'
         : group.some(item => item.costRecovery === 'price-snapshot') ? 'price-snapshot' : null,
       knownCosts: Object.fromEntries([...new Set(group.flatMap(item => item.cost ? [item.cost.currency] : []))]

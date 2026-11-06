@@ -113,7 +113,15 @@ export function parseSessionResetResult(value: unknown, key: string, sessionId: 
   };
 }
 
+export interface UsageCacheHitCoverage {
+  readonly includedRecords: number;
+  readonly excludedRecords: number;
+  readonly inputTokens: number;
+  readonly cacheHitTokens: number;
+}
+
 export interface UsageTotals {
+  readonly cacheHitCoverage?: UsageCacheHitCoverage;
   readonly totalTokens: number | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
@@ -198,6 +206,7 @@ export interface UsageLedgerStats {
 }
 
 export interface ConversationUsage {
+  readonly cacheHitCoverage?: UsageCacheHitCoverage;
   readonly key: string;
   readonly ledgerKey?: string;
   readonly sessionId?: string | null;

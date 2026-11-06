@@ -56,6 +56,18 @@ function buckets(value: unknown, observed = true): UsageBuckets {
   const parsed = { cacheMiss: counter(source.cacheMiss), cacheHit: counter(source.cacheHit), cacheWrite: counter(source.cacheWrite), output: counter(source.output), reasoning: counter(source.reasoning) };
   return observed ? parsed : { cacheMiss: null, cacheHit: null, cacheWrite: null, output: null, reasoning: null };
 }
+function cacheHitCoverage(value: unknown): UsageTotals['cacheHitCoverage'] {
+  if (value === undefined) return undefined;
+  const source = record(value);
+  const includedRecords = count(source.includedRecords), excludedRecords = count(source.excludedRecords);
+  const inputTokens = count(source.inputTokens), cacheHitTokens = count(source.cacheHitTokens);
+  if (cacheHitTokens > inputTokens || includedRecords === 0 && (inputTokens !== 0 || cacheHitTokens !== 0)) invalid();
+  return { includedRecords, excludedRecords, inputTokens, cacheHitTokens };
+}
+function hitRate(value: unknown): number | null {
+  const parsed = quantity(value);
+  return parsed !== null && parsed > 1 ? invalid() : parsed;
+}
 function totals(value: unknown, observed = true): UsageTotals {
   const source = record(value);
   const input = (key: string) => { const parsed = counter(source[key]); return observed ? parsed : null; };
@@ -66,7 +78,8 @@ function totals(value: unknown, observed = true): UsageTotals {
     cacheHitTokens: input('cacheHitTokens'), cacheMissTokens: input('cacheMissTokens'), cacheWriteTokens: input('cacheWriteTokens'), reasoningTokens: input('reasoningTokens'),
     cost: money('cost'), estimated: bool(source.estimated), conversations: count(source.conversations), turns: count(source.turns), steps: count(source.steps),
     attributedCost: money('attributedCost'), unattributedCost: money('unattributedCost'), buckets: buckets(source.buckets, observed), byTier: null,
-    cacheHitRate: observed ? hitRate : null, avgCostPerTurn: money('avgCostPerTurn'), avgCostPerStep: money('avgCostPerStep') };
+    cacheHitRate: observed ? hitRate : null, cacheHitCoverage: cacheHitCoverage(source.cacheHitCoverage),
+    avgCostPerTurn: money('avgCostPerTurn'), avgCostPerStep: money('avgCostPerStep') };
 }
 function pricing(value: unknown): UsagePriceTable | null {
   if (value === null) return null;
@@ -192,7 +205,7 @@ export function parseNativeUsageConversation(value: unknown, expectedKey?: strin
       const startedAt = time(row.startedAt), endedAt = time(row.endedAt);
       if (startedAt > endedAt) invalid();
       return { sessionId: text(row.sessionId), key: text(row.key, 160), generation: count(row.generation), turn: counter(row.turn), turnId: text(row.turnId, 160), steps: count(row.steps), attempts: count(row.attempts),
-        startedAt, endedAt, model: row.model === null ? null : text(row.model, 160), provider: row.provider === null ? null : text(row.provider, 160), buckets: buckets(row.buckets), cost: quantity(row.cost), costRecovery: costRecovery(row.costRecovery), tier, coverage: coverageState(row.coverage), knownCosts: numericMap(row.knownCosts) };
+        startedAt, endedAt, model: row.model === null ? null : text(row.model, 160), provider: row.provider === null ? null : text(row.provider, 160), buckets: buckets(row.buckets), cacheHitRate: row.cacheHitRate === undefined ? undefined : hitRate(row.cacheHitRate), cacheHitCoverage: cacheHitCoverage(row.cacheHitCoverage), cost: quantity(row.cost), costRecovery: costRecovery(row.costRecovery), tier, coverage: coverageState(row.coverage), knownCosts: numericMap(row.knownCosts) };
     });
     const observed = turns.length > 0;
     if (expectedSessionId !== undefined && turns.some(turn => turn.sessionId !== expectedSessionId)) invalid();

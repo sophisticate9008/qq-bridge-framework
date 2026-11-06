@@ -1,4 +1,4 @@
-import type { UsageBuckets, UsageByTier } from './activity.ts';
+import type { UsageBuckets, UsageByTier, UsageCacheHitCoverage } from './activity.ts';
 import { parseNativeUsageConversation, parseNativeUsageRecent, parseNativeUsageSeries } from './native-usage.ts';
 
 export const usageSectionLabels = Object.freeze({
@@ -195,6 +195,8 @@ export function parseUsageSeries(value: unknown): UsageSeries | null {
 }
 
 export interface UsageTurn {
+  readonly cacheHitRate?: number | null;
+  readonly cacheHitCoverage?: UsageCacheHitCoverage;
   readonly costRecovery?: 'price-snapshot' | 'historical-reference' | null;
   readonly sessionId: string;
   readonly key: string | null;
