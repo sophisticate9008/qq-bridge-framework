@@ -1569,9 +1569,16 @@ function publicDeploymentResolution(result: Awaited<ReturnType<NativeChatDeploym
 function usageQuery(query: URLSearchParams): NativeUsageQuery {
   const numeric = ['limit', 'since', 'until']
   const textual = ['after', 'conversationId', 'sessionId', 'provider', 'model']
-  if ([...query.keys()].some(key => ![...numeric, ...textual].includes(key))
+  if ([...query.keys()].some(key => ![...numeric, ...textual, 'ledgerKeys'].includes(key))
     || [...query.keys()].some(key => query.getAll(key).length !== 1)) requestError(400, 'invalid_query')
-  const result: Record<string, string | number> = {}
+  const result: Record<string, string | number | readonly string[]> = {}
+  const ledgerKeys = query.get('ledgerKeys')
+  if (ledgerKeys !== null) {
+    const keys = ledgerKeys.split(',')
+    if (keys.length > 200 || keys.some(key => !/^[a-f0-9]{64}$/.test(key))
+      || new Set(keys).size !== keys.length) requestError(400, 'invalid_query')
+    result.ledgerKeys = keys
+  }
   for (const key of numeric) {
     const value = query.get(key)
     if (value === null) continue

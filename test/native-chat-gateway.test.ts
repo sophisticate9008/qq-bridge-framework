@@ -134,6 +134,17 @@ test('CLI-admin subprocess default mount applies real fixture YAML then manually
     assert.equal(fullSeries.native, true)
     assert.equal((fullSeries.buckets as unknown[]).length, 48)
     assert.equal(object(fullSeries.totals).tokens, 51)
+    const ledgerKey = parseUsageSnapshot(usage)!.conversations[0].ledgerKey!
+    assert.equal(object((await api(`/api/chat/usage?ledgerKeys=${ledgerKey}`)).totals).totalTokens, 51)
+    assert.equal(object((await api(`/api/chat/usage/series?hours=24&ledgerKeys=${ledgerKey}`)).totals).tokens, 51)
+    assert.equal((await api(`/api/chat/usage/recent?ledgerKeys=${ledgerKey}`)).partial, false)
+    assert.equal((await api(`/api/chat/usage?ledgerKeys=${'f'.repeat(64)}`)).records, 0)
+    // The maximum public selection fits the actual HTTP server's header budget.
+    const maxSelection = Array.from({ length: 200 }, (_, index) => index.toString(16).padStart(64, '0')).join(',')
+    assert.equal((await api(`/api/chat/usage?ledgerKeys=${maxSelection}`)).records, 0)
+    for (const query of ['ledgerKeys=', 'ledgerKeys=invalid', `ledgerKeys=${ledgerKey},${ledgerKey}`, `ledgerKeys=${ledgerKey}&ledgerKeys=${ledgerKey}`]) {
+      await api(`/api/chat/usage?${query}`, undefined, 400)
+    }
     const detail = await api('/api/chat/usage/turns?key=private%3A123&limit=200')
     assert(parseUsageConversation(detail, 'private:123'), 'Actual native per-turn detail must parse in the usage UI')
     assert.equal(detail.native, true)

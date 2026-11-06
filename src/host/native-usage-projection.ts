@@ -75,8 +75,8 @@ function totals(records: readonly UsageRecord[], partial: boolean, currency: str
   const costComplete = complete && items.length > 0 && missingCostRecords === 0 && priced.length === items.length
   const totalsComplete = costComplete
     && tokenKeys.filter(key => key !== 'reasoning').every(key => missingTokens[key] === 0)
-  const turns = new Set(modelRecords.map(item => digest([item.sessionId, item.generation, item.turnId]))).size
-  const totalModelTurns = new Set(totalModelRecords.map(item => digest([item.sessionId, item.generation, item.turnId]))).size
+  const turns = new Set(modelRecords.map(item => digest([item.conversationId, item.sessionId, item.generation, item.turnId]))).size
+  const totalModelTurns = new Set(totalModelRecords.map(item => digest([item.conversationId, item.sessionId, item.generation, item.turnId]))).size
   const modelCost = totalModelRecords.length > 0 && !partial
     && totalModelRecords.every(item => item.coverage === 'complete' && item.cost?.currency === currency)
     ? totalModelRecords.reduce((amount, item) => amount + item.cost!.amount, 0) : null
@@ -94,7 +94,7 @@ function totals(records: readonly UsageRecord[], partial: boolean, currency: str
     totalsComplete, costComplete, missingTokens, missingCostRecords,
     knownCosts: Object.fromEntries([...new Set(items.flatMap(item => item.cost ? [item.cost.currency] : []))]
       .map(unit => [unit, items.reduce((amount, item) => amount + (item.cost?.currency === unit ? item.cost.amount : 0), 0)])),
-    missingCostTurns: new Set(totalModelRecords.filter(item => !item.cost).map(item => digest([item.sessionId, item.generation, item.turnId]))).size,
+    missingCostTurns: new Set(totalModelRecords.filter(item => !item.cost).map(item => digest([item.conversationId, item.sessionId, item.generation, item.turnId]))).size,
     currencies: [...new Set(items.flatMap(item => item.cost ? [item.cost.currency] : []))] }
 }
 

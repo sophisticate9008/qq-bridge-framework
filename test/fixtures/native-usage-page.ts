@@ -23,6 +23,15 @@ export function createNativeUsagePageFixture() {
     mode = 'normal';
     if (kind === 'empty') return;
     usage.setPricing([basePrice], null);
+    if (kind === 'selection') {
+      for (let index = 0; index < 100; index++) {
+        now += 1000;
+        usage.append({ ...baseTurn, conversationId: index < 2 ? 'private:123' : `group:${1000 + index}`,
+          sessionId: `selection-session-${index}`, turnId: `selection-turn-${index}`,
+          tokens: { input: 100 * (index + 1), output: 20, cacheRead: 40, cacheWrite: 0, total: 100 * (index + 1) + 60 } });
+      }
+      return;
+    }
     for (let index = 0; index < 80; index++) usage.append({ ...baseTurn, turnId: `turn-${index}`, stepId: `step-${index}` });
     if (kind === 'partial' || kind === 'mixed') usage.append({ ...baseTurn, turnId: 'unknown-turn', stepId: 'unknown-step', coverage: 'unknown', tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, total: null } });
     if (kind === 'mixed') usage.append({ ...baseTurn, turnId: 'reported-cny', stepId: 'reported-step', reportedCost: { amount: 3, currency: 'CNY' } });
@@ -36,7 +45,7 @@ export function createNativeUsagePageFixture() {
       const success = (value: unknown) => ({ status: 200, body: value });
       if (url.pathname === '/isolated-native-control' && method === 'POST') {
         const input = object(body);
-        if (input.action === 'seed' && ['empty', 'complete', 'partial', 'mixed'].includes(String(input.kind))) seed(String(input.kind));
+        if (input.action === 'seed' && ['empty', 'complete', 'partial', 'mixed', 'selection'].includes(String(input.kind))) seed(String(input.kind));
         else if (input.action === 'write-mode' && ['normal', 'conflict', 'unknown'].includes(String(input.mode))) mode = String(input.mode);
         else if (input.action === 'append') { now += 1000; usage.append({ ...baseTurn, turnId: `new-turn-${now}`, stepId: `new-step-${now}` }); }
         else if (input.action === 'large-prices') usage.setPricing(Array.from({ length: 256 }, (_, index) => ({ ...basePrice, model: index === 0 ? basePrice.model : `fixture-model-${index}` })), usage.pricing().revision);
@@ -50,12 +59,13 @@ export function createNativeUsagePageFixture() {
           newestCost: usage.recent({ limit: 1 }).items[0]?.cost ?? null });
       }
       if (method === 'GET') {
+        const filter = url.searchParams.has('ledgerKeys') ? { ledgerKeys: url.searchParams.get('ledgerKeys')!.split(',') } : {};
         if (url.pathname === '/api/chat/providers') return success({ revision: 'isolated-provider-catalog', providers: [{ id: basePrice.provider, name: '合成模型服务', enabled: true,
           models: Array.from({ length: 128 }, (_, index) => ({ id: index === 0 ? basePrice.model : `fixture-model-${index}`, name: index === 0 ? '合成聊天模型' : `合成模型 ${index}` })) }] });
-        if (url.pathname === '/api/chat/usage') return success(projection.summary({ limit: Number(url.searchParams.get('limit') ?? 200) }));
-        if (url.pathname === '/api/chat/usage/series') return success(projection.series(Number(url.searchParams.get('hours') ?? 24), Number(url.searchParams.get('buckets') ?? 48)));
+        if (url.pathname === '/api/chat/usage') return success(projection.summary({ ...filter, limit: Number(url.searchParams.get('limit') ?? 200) }));
+        if (url.pathname === '/api/chat/usage/series') return success(projection.series(Number(url.searchParams.get('hours') ?? 24), Number(url.searchParams.get('buckets') ?? 48), filter));
         if (url.pathname === '/api/chat/usage/turns') return success(projection.conversation(url.searchParams.get('key') ?? 'private:123', { limit: Number(url.searchParams.get('limit') ?? 200) }));
-        if (url.pathname === '/api/chat/usage/recent') return success(projection.recent({ limit: Number(url.searchParams.get('limit') ?? 40) }));
+        if (url.pathname === '/api/chat/usage/recent') return success(projection.recent({ ...filter, limit: Number(url.searchParams.get('limit') ?? 40) }));
         if (url.pathname === '/api/chat/usage/pricing') return success(usage.pricing());
       }
       if (method === 'POST' && url.pathname === '/api/chat/usage/pricing') {

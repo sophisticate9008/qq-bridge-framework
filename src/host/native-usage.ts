@@ -55,6 +55,8 @@ export interface NativeUsageTurn {
 }
 
 export interface NativeUsageQuery {
+  /** Exact conversation/session ledger identities; omitted means all, empty means none. */
+  readonly ledgerKeys?: readonly string[]
   readonly limit?: number
   readonly after?: string
   readonly conversationId?: string
@@ -225,7 +227,10 @@ function validateTurn(input: NativeUsageTurn): NativeUsageTurn {
 function validateQuery(query: NativeUsageQuery): Required<Pick<NativeUsageQuery, 'limit'>> & NativeUsageQuery {
   const limit = query.limit ?? 100
   assert(Number.isSafeInteger(limit) && limit > 0 && limit <= 1_000
-    && Object.keys(query).every(key => ['limit', 'after', 'conversationId', 'sessionId', 'provider', 'model', 'since', 'until'].includes(key))
+    && Object.keys(query).every(key => ['limit', 'after', 'conversationId', 'sessionId', 'provider', 'model', 'since', 'until', 'ledgerKeys'].includes(key))
+    && (query.ledgerKeys === undefined || Array.isArray(query.ledgerKeys) && query.ledgerKeys.length <= 200
+      && query.ledgerKeys.every(key => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key))
+      && new Set(query.ledgerKeys).size === query.ledgerKeys.length)
     && ['after', 'conversationId', 'sessionId', 'provider', 'model'].every(key => query[key as keyof NativeUsageQuery] === undefined
       || reference(query[key as keyof NativeUsageQuery]))
     && [query.since, query.until].every(value => value === undefined || token(value))
@@ -283,8 +288,9 @@ export function readNativeUsageStoredTurn(record: StoredRecord) {
     ...(priceSnapshot === undefined ? {} : { priceSnapshot }), pricingRevision: value.pricingRevision as number | null }
 }
 
-function matches(turn: ReturnType<typeof readNativeUsageStoredTurn>, query: NativeUsageQuery): boolean {
-  return (query.conversationId === undefined || turn.conversationId === query.conversationId)
+function matches(turn: ReturnType<typeof readNativeUsageStoredTurn>, query: NativeUsageQuery, ledgers?: ReadonlySet<string>): boolean {
+  return (ledgers === undefined || ledgers.has(digest([turn.conversationId, turn.sessionId])))
+    && (query.conversationId === undefined || turn.conversationId === query.conversationId)
     && (query.sessionId === undefined || turn.sessionId === query.sessionId)
     && (query.provider === undefined || turn.provider === query.provider)
     && (query.model === undefined || turn.model === query.model)
@@ -308,6 +314,7 @@ export function createNativeUsage({ store, clock = Date.now, maxScan = 10_000, b
   function scan(query: NativeUsageQuery = {}) {
     const validated = validateQuery(query)
     const items: ReturnType<typeof readNativeUsageStoredTurn>[] = []
+    const ledgers = validated.ledgerKeys === undefined ? undefined : new Set(validated.ledgerKeys)
     let after = validated.after
     let scanned = 0
     while (scanned < maxScan) {
@@ -317,7 +324,7 @@ export function createNativeUsage({ store, clock = Date.now, maxScan = 10_000, b
         scanned++
         after = record.key
         const turn = readNativeUsageStoredTurn(record)
-        if (matches(turn, validated)) items.push(turn)
+        if (matches(turn, validated, ledgers)) items.push(turn)
       }
       if (batch.length < limit) return { items, truncated: false, next: null }
     }
@@ -352,12 +359,12 @@ export function createNativeUsage({ store, clock = Date.now, maxScan = 10_000, b
     }
     const modelRecords = items.filter(turn => turn.recordKind !== 'opening-balance')
     const incompleteTurns = new Set(modelRecords.filter(turn => turn.coverage !== 'complete')
-      .map(turn => digest([turn.sessionId, turn.generation, turn.turnId])))
+      .map(turn => digest([turn.conversationId, turn.sessionId, turn.generation, turn.turnId])))
     const incompleteTotals = modelRecords.some(turn => turn.recordKind !== 'detail-only' && turn.coverage !== 'complete')
     const historical = items.some(turn => turn.recordKind === 'opening-balance' || turn.recordKind === 'detail-only' || turn.status === 'unknown')
     const tokens = Object.fromEntries(tokenKeys.map(key => [key,
       totalRecords.length > missingTokens[key] ? knownTokens[key] : null]))
-    return { turns: new Set(modelRecords.map(turn => digest([turn.sessionId, turn.generation, turn.turnId]))).size,
+    return { turns: new Set(modelRecords.map(turn => digest([turn.conversationId, turn.sessionId, turn.generation, turn.turnId]))).size,
       records: items.length, incompleteTurns: incompleteTurns.size, partial, tokens, knownTokens, missingTokens,
       knownCosts: costs, missingCostTurns, costComplete: !partial && missingCostRecords === 0 && !incompleteTotals
         && totalRecords.length > 0 && Object.keys(costs).length === 1,

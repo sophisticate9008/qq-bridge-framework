@@ -1,3 +1,4 @@
+import { verifyUsageSelection } from './usage-selection-smoke.ts';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -206,6 +207,7 @@ try {
   await page.getByRole('tab', { name: '调用记录', exact: true }).click();
   await page.waitForSelector('[data-usage-recent]');
   assert.equal(await page.locator('[data-usage-recent]').count(), 40);
+  await verifyUsageSelection(page);
   const sessionsUrl = `${origin}/test/fixtures/session-pages.html`;
   async function openSessions() {
     await page.goto(sessionsUrl);
@@ -249,7 +251,7 @@ try {
   console.log(JSON.stringify({ ...evidence, scrollToEnd: true, stickyHeader: true, focusedDraftRetained: true,
     secretRetained: true, fullDataFilter: true, keyboardHomeEnd: true, textSelectionRetained: true,
     sessions: { mounted: sessionsDom, reachableBeyond256: true, cancelledLateReadsIgnored: true, emptyPageContinues: true, cursorCycleStops: true },
-    usage: { conversationsMounted: usageDom, turnsMounted: turnsDom, recent: 40, nativeUnknownIsNotZero: true },
+    usage: { conversationsMounted: usageDom, turnsMounted: turnsDom, recent: 40, nativeUnknownIsNotZero: true, selectedSummaryAndChart: true, selectionShortcuts: true, longPressRectangle: true, virtualDragScroll: true, staleSelectionReadsIgnored: true },
     provider: { models: 128, filteredModelEditor: true, draftAndSecretRetained: true, narrowScreen: true }, errors }, null, 2));
 } finally {
   await browser?.close();
