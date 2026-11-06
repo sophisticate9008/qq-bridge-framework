@@ -53,7 +53,7 @@ export function UsageChart({ series, metric, selectedIndex, detailedCounts = fal
   const observedTiers = [...new Set(series.buckets.map(bucket => bucket.tier))];
 
   return <div id="usage-chart" className="grid min-w-0 gap-3" data-chart-engine="recharts">
-    {series.native && <p className="text-[11px] leading-5 text-muted-foreground" data-usage-chart-coverage>{allUnknown ? '所选窗口尚无可确认的用量或费用；未知值留空，不绘制为零。' : '空缺柱表示未记录或未知，不等于零；仅展示已确认数值。'}{series.partial && '扫描达到容量边界，窗口结果不完整。'}</p>}
+    <p className="text-[11px] leading-5 text-muted-foreground" data-usage-chart-coverage>{series.native && <>{allUnknown ? '所选窗口尚无可确认的用量或费用；未知值留空，不绘制为零。' : '空缺柱表示未记录或未知，不等于零；仅展示已确认数值。'}{series.partial && '扫描达到容量边界，窗口结果不完整。'}</>}</p>
     <ChartContainer className="h-[188px] rounded-md border bg-muted/10 px-1 py-2 sm:h-[206px]">
       <BarChart data={chartData} accessibilityLayer aria-label={`${metric === 'cost' ? '估算费用' : 'Token'}随时间的用量图`} margin={{ top: 10, right: 10, bottom: 0, left: 0 }} barCategoryGap="28%">
         <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
@@ -77,10 +77,6 @@ export function UsageChart({ series, metric, selectedIndex, detailedCounts = fal
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted-foreground" aria-label="价格时段图例">
         {observedTiers.map(tier => <span key={tier} className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: tierColors[tier] }} />{tierLabels[tier]}</span>)}
       </div>
-      <label className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground" htmlFor="usage-bucket-select"><span className="shrink-0">时间桶明细</span><select id="usage-bucket-select" aria-label="查看时间桶" className="h-8 min-w-0 rounded-lg border bg-background px-2 text-xs text-foreground" value={selectedBucket ? String(selectedIndex) : ''} onChange={event => {
-        const index = bucketIndex(event.target.value, series.buckets.length);
-        if (index !== null) onSelect(index);
-      }}><option value="" disabled>选择时间</option>{series.buckets.map((bucket, index) => <option key={bucket.t} value={index}>{formatBucketTime(bucket.t, series.bucketMs)} · {tierLabels[bucket.tier]}</option>)}</select></label>
     </div>
     <DetailsWindow open={selectedBucket !== null} onOpenChange={open => { if (!open) onSelect(null); }} title="时段明细" description="查看所选时间桶中的实际用量与计价类型。">{selectedBucket && <div className="p-1" data-usage-bucket-details={selectedIndex ?? ''}><div className="grid gap-2"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{formatBucketTime(selectedBucket.t, series.bucketMs)}</strong><span className="text-xs text-muted-foreground">{tierLabels[selectedBucket.tier]} · {formatActivityCost(selectedBucket.cost, series.currency, series.symbol)}</span></div><BucketCounts bucket={selectedBucket} detailedCounts={detailedCounts} />{selectedBucket.keys.length > 0 && <p className="break-words text-[11px] text-muted-foreground">涉及会话：{selectedBucket.keys.map(key => <span key={key} className="mr-3 inline-flex"><UsageConversation conversationKey={key} showRun /></span>)}</p>}</div></div>}</DetailsWindow>
     <p className="text-[11px] leading-5 text-muted-foreground">悬浮查看，点击柱形打开时段明细；计价类型以记录为准。</p>

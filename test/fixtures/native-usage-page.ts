@@ -23,6 +23,17 @@ export function createNativeUsagePageFixture() {
     mode = 'normal';
     if (kind === 'empty') return;
     usage.setPricing([basePrice], null);
+    if (kind === 'geometry') {
+      for (let index = 0; index < 12; index++) {
+        now += 1000;
+        usage.append({ ...baseTurn, conversationId: `group:${2000 + index}`, sessionId: `geometry-${index}`,
+          model: `fixture-long-model-name-${index}`, turnId: `geometry-turn-${index}`,
+          coverage: index === 0 ? 'unknown' : 'complete',
+          tokens: index === 0 ? { input: null, output: null, cacheRead: null, cacheWrite: null, total: null } : baseTurn.tokens,
+          reportedCost: index === 0 ? null : { amount: 12345.6789, currency: ['USD', 'CNY', 'EUR'][index % 3]! } });
+      }
+      return;
+    }
     if (kind === 'selection') {
       for (let index = 0; index < 100; index++) {
         now += 1000;
@@ -45,7 +56,7 @@ export function createNativeUsagePageFixture() {
       const success = (value: unknown) => ({ status: 200, body: value });
       if (url.pathname === '/isolated-native-control' && method === 'POST') {
         const input = object(body);
-        if (input.action === 'seed' && ['empty', 'complete', 'partial', 'mixed', 'selection'].includes(String(input.kind))) seed(String(input.kind));
+        if (input.action === 'seed' && ['empty', 'complete', 'partial', 'mixed', 'selection', 'geometry'].includes(String(input.kind))) seed(String(input.kind));
         else if (input.action === 'write-mode' && ['normal', 'conflict', 'unknown'].includes(String(input.mode))) mode = String(input.mode);
         else if (input.action === 'append') { now += 1000; usage.append({ ...baseTurn, turnId: `new-turn-${now}`, stepId: `new-step-${now}` }); }
         else if (input.action === 'large-prices') usage.setPricing(Array.from({ length: 256 }, (_, index) => ({ ...basePrice, model: index === 0 ? basePrice.model : `fixture-model-${index}` })), usage.pricing().revision);

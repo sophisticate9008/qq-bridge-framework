@@ -29,7 +29,7 @@ function Fixture() {
     await fetch('/isolated-native-control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'seed', kind }) });
     setVersion(value => value + 1);
   }
-  return <main className="mx-auto grid max-w-[90rem] gap-5 p-5"><nav className="flex gap-3">{['empty', 'complete', 'partial', 'mixed', 'selection'].map(kind => <button key={kind} data-native-seed={kind} onClick={() => void seed(kind)}>{kind}</button>)}<output data-native-pricing-dirty={dirty} data-native-fixture-version={version}>{dirty ? '单价未保存' : '单价已载入'}</output></nav><UsagePage key={version} {...props} /></main>;
+  return <main className="mx-auto grid max-w-[90rem] gap-5 p-5"><nav className="flex flex-wrap gap-3">{['empty', 'complete', 'partial', 'mixed', 'selection', 'geometry'].map(kind => <button key={kind} data-native-seed={kind} onClick={() => void seed(kind)}>{kind}</button>)}<output data-native-pricing-dirty={dirty} data-native-fixture-version={version}>{dirty ? '单价未保存' : '单价已载入'}</output></nav><UsagePage key={version} {...props} /></main>;
 }
 const root = document.getElementById('root');
 if (!root) throw new Error('fixture_root_missing');

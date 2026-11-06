@@ -287,3 +287,23 @@
   .editor-detail .panel-footer { justify-content:flex-start; }
   .editor-detail .panel-footer>div { width:100%; }
 }
+
+/* Usage refresh changes values inside stable slots, including partial and empty results. */
+[data-usage-statistics] .usage-summary-notices { height:40px; overflow:auto; scrollbar-gutter:stable; }
+[data-usage-statistics] .usage-summary-notices p { margin:0; }
+[data-usage-statistics] .metric { height:160px; grid-template-rows:16px 64px minmax(0,1fr); }
+[data-usage-statistics] .metric > strong,
+[data-usage-statistics] .metric > p { min-height:0; overflow:auto; overflow-wrap:anywhere; scrollbar-gutter:stable; }
+#usage-series > .panel-body { height:450px; }
+#usage-series .usage-series-content { display:grid; height:100%; min-height:0; gap:8px; grid-template-rows:72px minmax(0,1fr) 27px; }
+#usage-series .usage-series-totals { min-height:0; overflow:auto; scrollbar-gutter:stable; }
+#usage-chart { gap:8px; grid-template-rows:40px 206px 20px minmax(20px,1fr); }
+#usage-chart > p, #usage-chart > div { min-height:0; }
+#usage-chart > p, #usage-chart > .flex { overflow:auto; }
+#usage-chart > .flex { flex-wrap:nowrap; }
+#usage-chart [aria-label="价格时段图例"] { flex-wrap:nowrap; white-space:nowrap; }
+#usage-model-costs > .panel-body { height:200px; overflow:auto; scrollbar-gutter:stable; }
+#usage-model-costs .tablewrap { max-height:none; }
+@media(max-width:639px) {
+  #usage-chart { grid-template-rows:40px 188px 20px minmax(40px,1fr); }
+}

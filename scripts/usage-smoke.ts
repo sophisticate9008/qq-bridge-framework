@@ -1024,7 +1024,7 @@ async function assertBuiltUsageContract(): Promise<void> {
     const modifiedAt = (await stat(new URL(`../web/${source}`, import.meta.url))).mtimeMs;
     assert(builtAt >= modifiedAt, `Built UI predates web/${source}; wait for the main thread build.`);
   }
-  for (const text of ['usage-auto-refresh', 'usage-reset-open', 'usage-recent', 'usage-bucket-select',
+  for (const text of ['usage-auto-refresh', 'usage-reset-open', 'usage-recent', 'data-usage-bucket-index',
     'usage-detailed-counts', 'data-usage-turns-panel', 'data-usage-turns-body', 'data-usage-turns-scroll',
     'data-usage-recent-panel', 'data-usage-recent-body', 'data-usage-recent-scroll',
     'data-token-direction', 'data-token-cache']) {
@@ -1203,7 +1203,6 @@ async function run(): Promise<void> {
     console.log('用量浏览器验证通过：会话与逐轮明细、走势图、主题窄屏、自动刷新、错误保留与清空结果未知保护。');
   } catch (error: unknown) {
     const chartDiagnostics = page === undefined || page.isClosed() ? null : await page.evaluate(() => ({
-      selectedIndex: document.querySelector<HTMLSelectElement>('#usage-bucket-select')?.value,
       detailsIndex: document.querySelector('[data-usage-bucket-details]')?.getAttribute('data-usage-bucket-details'),
       tooltipIndex: document.querySelector('[data-usage-tooltip-index]')?.getAttribute('data-usage-tooltip-index'),
       svg: document.querySelector('#usage-chart .recharts-surface')?.getBoundingClientRect().toJSON(),
