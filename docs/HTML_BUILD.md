@@ -36,6 +36,8 @@ npm run build
 
 组件安装在 Git 忽略的 `assets/native/html-renderer/<平台>/`，编译后复制到 `dist/assets/native/html-renderer/<平台>/`。不要提交生成的二进制、依赖目录或运行数据。
 
+本机部署编译快照时使用 `dist/scripts/gateway-admin.js` 等编译入口，并保留整个 `dist/assets/`。源码入口从源码树的 `assets/` 查找组件，编译入口从 `dist/assets/` 查找；只复制 Git 跟踪文件及 `dist/` 后运行源码入口，会遗漏未跟踪的原生组件。部署前用实际入口所在树的渲染模块完成 HTML 与 Markdown 排版核验，检查 PNG 内容；源码目录中单独渲染成功不能证明运行快照已具备组件。
+
 工作流先查精确指纹的 Actions 缓存，再查正式 Release 中同名独立组件附件，最后才从源码编译。复用也会在原生 runner 核验二进制 SHA-256，并实际验证系统字体缺失时的中文回退、长图和 SVG 文件资源隔离。缓存或七天保留的 Actions artifact 丢失不影响从正式 Release 取回组件。
 
 需要刻意重建时：

@@ -2,6 +2,9 @@ import type { MessageContent } from '../core/types.ts'
 
 export function splitNativeChatBubbles(content: readonly MessageContent[]): readonly (readonly MessageContent[])[] {
   if (content.some(part => part.type !== 'text')) return [content]
+  // Text segments carry explicit boundaries. Keep up to four deliveries, with
+  // any remaining bounded segments together in the last delivery.
+  if (content.length > 1) return [...content.slice(0, 3).map(part => [part]), ...(content.length > 3 ? [content.slice(3)] : [])]
   const text = content.map(part => part.type === 'text' ? part.text : '').join('')
   if (text.length > 480 || /[`|]|~~~|!?\[[^\]\n]*\]\(/.test(text)
     || /^(?: {4}|\t)[ \t]*\S/m.test(text)) return [content]

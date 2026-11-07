@@ -12,6 +12,27 @@ import { isRecord } from '../src/core/values.ts'
 const event = { id: 'output-1', type: 'agent.message', conversationId: 'private:123', data: {} }
 const signal = new AbortController().signal
 
+test('explicit text segments keep bubble boundaries and mixed media keeps its segment order', async context => {
+  const directory = await mkdtemp(join(tmpdir(), 'native-output-segments-')); context.after(() => rm(directory, { recursive: true, force: true }))
+  const registry = createNativePackageConfigurationRegistry({ directory })
+  const output = createNativeOutputService(registry)
+  const parts = [{ type: 'text' as const, text: '第一条' }, { type: 'text' as const, text: '第二条' }]
+  for (const content of [parts, [{ type: 'text', text: JSON.stringify({ schema: 'qbf.output/1', content: parts }) }]]) {
+    assert.deepEqual(output.split(await output.prepare(content, event, signal), event), parts.map(part => [part]))
+  }
+  const mixed = [parts[0]!, { type: 'image' as const, assetId: 'registered-image' }, parts[1]!]
+  assert.deepEqual(output.split(await output.prepare(mixed, event, signal), event), [mixed])
+  const eight = Array.from({ length: 8 }, (_, index) => ({ type: 'text' as const, text: `段${index}` }))
+  const groups = output.split(await output.prepare(eight, event, signal), event)
+  assert.equal(groups.length, 4)
+  assert.deepEqual(groups.flat(), eight)
+  const literal = [{ type: 'text' as const, text: JSON.stringify(parts) }]
+  assert.deepEqual(output.split(await output.prepare(literal, event, signal), event), [literal])
+  const current = await registry.read('chat-output')
+  await registry.compareAndSet('chat-output', current.revision, { ...DEFAULT_NATIVE_OUTPUT, bubbles: false }, signal)
+  assert.deepEqual(output.split(await output.prepare(parts, event, signal), event), [parts])
+})
+
 test('output package reads live CAS configuration and plans complete messages without acquiring send authority', async context => {
   const directory = await mkdtemp(join(tmpdir(), 'native-output-')); context.after(() => rm(directory, { recursive: true, force: true }))
   const registry = createNativePackageConfigurationRegistry({ directory }); const output = createNativeOutputService(registry)

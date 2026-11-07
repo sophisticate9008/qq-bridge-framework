@@ -11,7 +11,7 @@ import type { DeliveryReceipt, JsonValue, SendRequest } from '../src/core/types.
 import { isRecord } from '../src/core/values.ts'
 import { createContextStore } from '../src/core/context.ts'
 import { createBridgeHost } from '../src/host/bridge.ts'
-import { digest } from '../src/host/data.ts'
+import { digest, json } from '../src/host/data.ts'
 import { createNativeFrameworkTools, NATIVE_TOOL_EVENT, validateNativeToolEvent } from '../src/host/native-framework-tools.ts'
 import { createNativeMessageSources } from '../src/host/native-message-sources.ts'
 import { createNativeOutputService } from '../src/host/native-output.ts'
@@ -111,6 +111,20 @@ test('reply tool sends a non-owner source through policy and outbox without clea
   runtime.host.policy.revoke('tools')
   assert.deepEqual(await runtime.invoke({ content: 'revoked' }), { status: 'rejected', code: 'POLICY_DENIED' })
   assert.equal(runtime.sent.length, 1)
+})
+
+test('reply arrays send separate text bubbles and preserve text/image/text in one ordered message', async context => {
+  const runtime = await fixture(context)
+  const result = await runtime.invoke({ content: [{ type: 'text', text: 'first bubble' }, { type: 'text', text: 'second bubble' }] })
+  assert.deepEqual(receiptResult(result), { status: 'confirmed', value: { status: 'sent', receipts: [
+    { status: 'confirmed', messageId: 'sent-1' }, { status: 'confirmed', messageId: 'sent-2' }] } })
+  assert.deepEqual(runtime.sent.map(request => request.content), [[{ type: 'text', text: 'first bubble' }], [{ type: 'text', text: 'second bubble' }]])
+  const mixed = [{ type: 'text' as const, text: 'before' }, { type: 'image' as const, assetId: 'registered-image' }, { type: 'text' as const, text: 'after' }]
+  await runtime.invoke({ content: json(mixed) })
+  assert.deepEqual(runtime.sent[2]?.content, mixed)
+  const literal = JSON.stringify([{ type: 'text', text: 'literal array' }])
+  await runtime.invoke({ content: literal })
+  assert.deepEqual(runtime.sent[3]?.content, [{ type: 'text', text: literal }])
 })
 
 for (const status of ['unknown', 'rejected'] as const) test(`reply tool preserves partial ${status} receipts and only confirmed history`, async context => {
