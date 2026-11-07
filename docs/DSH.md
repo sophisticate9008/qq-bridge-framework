@@ -14,7 +14,7 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 ## 版本与安装
 
-当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **1.13.2**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
+当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **1.13.3**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
 
 
 ### 安全依赖覆盖
@@ -40,7 +40,7 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 下一次实际模型调用后，pi-ai 的 `dist/api/qbf-provider-usage-observed.json` 保留最近一次上游用量诊断：只包含白名单数值计数、缓存报告标记及时间，不记录请求、正文或凭据。文件以 `0600` 权限原子覆盖，不累积历史；诊断写入失败不影响聊天。它用于区分网关缺少缓存字段与下游映射丢失。
 
-从 [v1.13.2 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.13.2) 下载插件 tarball，或直接使用完整框架包内的 `components/qq-bridge-framework-dsh-bridge-plugin-1.13.2.tgz`。无需在安装机器上构建插件。
+从 [v1.13.3 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.13.3) 下载插件 tarball，或直接使用完整框架包内的 `components/qq-bridge-framework-dsh-bridge-plugin-1.13.3.tgz`。无需在安装机器上构建插件。
 
 开发者也可在框架仓库根目录执行以下命令生成安装包：
 
@@ -55,7 +55,7 @@ printf '安装包目录：%s\n' "$artifact_dir"
 记下输出的 `.tgz` 绝对路径。在你管理的独立 DSH Node 项目目录中明确安装它，例如：
 
 ```sh
-npm install --ignore-scripts /absolute/path/qq-bridge-framework-dsh-bridge-plugin-1.13.2.tgz
+npm install --ignore-scripts /absolute/path/qq-bridge-framework-dsh-bridge-plugin-1.13.3.tgz
 ```
 
 安装前核对该实例的 SDK 版本与锁文件。安装包只包含公开清单及编译后的插件文件，不包含框架配置、凭据或会话数据。隔离打包验收会在临时项目中安装真实 tarball，核对既有依赖的版本和完整性，并运行官方 SDK 的加载及 owner 认证测试。

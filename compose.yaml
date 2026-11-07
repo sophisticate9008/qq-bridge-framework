@@ -1,6 +1,6 @@
 services:
   framework:
-    image: qq-bridge-framework:1.13.2
+    image: qq-bridge-framework:1.13.3
     restart: unless-stopped
     init: true
     ports:
