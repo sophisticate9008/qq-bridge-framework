@@ -129,7 +129,9 @@ export function createFrameworkToolChannel(options: { issuerEpoch: string; getAg
       if (!claim || claim.turn !== turn || lease?.agent !== agent || !Array.isArray(content)) return
       for (const block of content) {
         if (block && typeof block === 'object' && !Array.isArray(block) && block.type === 'tool-call'
-          && validIdentifier(block.id) && typeof block.name === 'string' && lease.roots.size < 4096)
+          // Responses adapters retain call_id|item_id as one opaque SDK identity.
+          && typeof block.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/|\-]{0,159}$/.test(block.id)
+          && typeof block.name === 'string' && lease.roots.size < 4096)
           lease.roots.set(block.id, { ...claim, name: block.name })
       }
     },

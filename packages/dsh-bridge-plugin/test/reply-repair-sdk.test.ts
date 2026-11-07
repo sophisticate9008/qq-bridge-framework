@@ -19,13 +19,14 @@ import type {} from '../dist/index.js'
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 class ReplyAdapter extends LlmAdapter {
   requests = 0
+  replyId = 'reply-call'
   readonly responses: ('bare' | 'tool' | 'silent' | 'invalid' | 'siblings')[] = ['bare', 'tool', 'tool']
   override async *stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests++
     const response = this.responses.shift() ?? 'silent'
     if (response === 'tool' || response === 'invalid' || response === 'siblings') {
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
-      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId(this.requests <= 3 ? 'reply-call' : `reply-call-${this.requests}`),
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId(this.requests <= 3 ? this.replyId : `${this.replyId}-${this.requests}`),
         name: 'qbf_reply', arguments: response === 'invalid' ? '{"unexpected":true}' : '{"content":"Sent by an explicit tool"}' } }
       if (response === 'siblings') {
         yield { type: 'block-start', index: 1, blockType: 'tool-call' }
@@ -41,7 +42,7 @@ class ReplyAdapter extends LlmAdapter {
   }
 }
 
-test('actual SDK repair stays inside the original turn and user claim until its explicit reply tool settles', async context => {
+for (const replyId of ['reply-call', 'call_response_01|fc_item_01']) test(`actual SDK repair retains exact user provenance for ${replyId}`, async context => {
   const ctx = new Context()
   const loader = ctx.plugin(Loader)
   const fibers = [Agents, Sessions, Projections, SystemPrompt, Tools, Llm, Registry, RemoteAccess, Gateway].map(plugin => ctx.plugin(plugin))
@@ -52,6 +53,7 @@ test('actual SDK repair stays inside the original turn and user claim until its 
   await ctx.loader.await()
   await new Promise<void>(resolve => setImmediate(resolve))
   const adapter = new ReplyAdapter()
+  adapter.replyId = replyId
   ctx.llm.registerAdapter(['fixture'], adapter)
   const handle = await ctx.agents.create({ sessionId: SessionId('reply-repair-sdk'), agentOptions: { provider: 'fixture', model: 'model' } })
   const agent = handle.agent
@@ -101,6 +103,13 @@ test('actual SDK repair stays inside the original turn and user claim until its 
   assert.equal(pending.call.requestId, 'authentic-qq-request')
   assert.equal(pending.call.userMessageId, original.id)
   assert.equal(pending.call.turn, 1)
+  assert.equal(pending.call.id, replyId, 'the complete SDK identity is preserved without splitting')
+  if (replyId.includes('|')) {
+    const truncated = await agent.ctx.tools.execute({ callId: ToolCallId(replyId.split('|')[0]!), agent, name: 'qbf_reply',
+      arguments: { content: 'A partial response id must not claim the original source' }, signal: new AbortController().signal })
+    assert(object(truncated.value))
+    assert.equal(truncated.value.code, 'TOOL_SOURCE_UNAVAILABLE')
+  }
   const receipts = await invoke('claimReceipts', { request: { sessionId: agent.id } })
   assert(object(receipts) && Array.isArray(receipts.receipts))
   assert.equal(receipts.receipts.length, 1, 'synthetic steering does not register a fresh user claim')
@@ -113,7 +122,7 @@ test('actual SDK repair stays inside the original turn and user claim until its 
   const probe = agent.ctx.on('agent/request', async (payload, next) => {
     if (payload.turn === 2 && !probed) {
       probed = true
-      oldProbe = await agent.ctx.tools.execute({ callId: ToolCallId('reply-call'), agent, name: 'qbf_reply',
+      oldProbe = await agent.ctx.tools.execute({ callId: ToolCallId(replyId), agent, name: 'qbf_reply',
         arguments: { content: 'An old call must not borrow the new user source' }, signal: payload.signal })
     }
     return next()
@@ -133,7 +142,7 @@ test('actual SDK repair stays inside the original turn and user claim until its 
   assert.equal(secondCalls.length, 1, 'a fresh SDK root may reuse a previous turn call id after seen cleanup')
   const secondPending = secondCalls[0]
   assert(object(secondPending) && object(secondPending.call) && typeof secondPending.ticket === 'string')
-  assert.equal(secondPending.call.id, 'reply-call')
+  assert.equal(secondPending.call.id, replyId)
   assert.equal(secondPending.call.requestId, 'second-qq-request')
   assert.equal(secondPending.call.userMessageId, second.id)
   assert.equal(secondPending.call.turn, 2)
