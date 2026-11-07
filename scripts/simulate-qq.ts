@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { preserveDshChatOutputBudget } from '../src/contracts/dsh-model-settings.ts'
 import { resolveLivePath } from './runtime-configuration.ts';
 import { appendFileSync, constants } from 'node:fs'
 import { execFile } from 'node:child_process'
@@ -412,7 +413,7 @@ export async function simulateQq(values = process.argv.slice(2)) {
     let configuration = await load()
     const resolvedSettings = await resolveLocalDshModelSettings(configuration, dsh.target, lifetime.signal, nativeDirectory)
     const savedDeployment = await repository.readDeployment()
-    const modelSettings = resolvedSettings.modelSettings
+    const modelSettings = preserveDshChatOutputBudget(resolvedSettings.modelSettings, savedDeployment.value.deployment.modelSettings)
     await repository.replaceDeployment(savedDeployment.revision, { ...savedDeployment.value.deployment, modelSettings })
     configuration = await load()
     record({ type: 'simulation-model-settings-prepared', source: resolvedSettings.source,

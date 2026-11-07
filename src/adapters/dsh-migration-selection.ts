@@ -1,3 +1,4 @@
+import { chatCompactionSummaryBudget } from '../contracts/chat-capacity.ts'
 import { isAlias, parseDocument, visit } from 'yaml'
 import { validMigrationTargetSelection, type MigrationTargetSelection } from '../contracts/dsh-session-migration.ts'
 import type { JsonValue } from '../contracts/data.ts'
@@ -57,9 +58,11 @@ export function deriveDshMigrationTargetSelection(request: { readonly provider: 
     }
   }
   inspect(parsed)
+  if (typeof configured[0].contextWindow !== 'number' || typeof configured[0].maxTokens !== 'number') return invalid()
   const compaction = compactions[0]
   if (compactions.length !== 1 || !compaction || compaction.auto !== true || compaction.summarizationProvider !== request.provider
-    || compaction.summarizationModel !== request.model || compaction.maxTokens !== configured[0].maxTokens) return invalid()
+    || compaction.summarizationModel !== request.model || (compaction.maxTokens !== configured[0].maxTokens
+      && compaction.maxTokens !== chatCompactionSummaryBudget(configured[0].contextWindow, configured[0].maxTokens))) return invalid()
   const selection = { provider: request.provider, model: request.model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     contextLimits: { contextWindow: configured[0].contextWindow, maxTokens: configured[0].maxTokens, headroomTokens: compaction.headroomTokens } }
   if (!validMigrationTargetSelection(selection)) return invalid()

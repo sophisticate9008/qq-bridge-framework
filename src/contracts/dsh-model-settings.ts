@@ -42,3 +42,9 @@ export function validateManualDshModelSettings(value: unknown): DshDeploymentMod
   }
   return settings
 }
+
+/** Model metadata describes a maximum; applying it must preserve the saved chat output allowance. */
+export function preserveDshChatOutputBudget(metadata: DshDeploymentModelSettings, saved: DshDeploymentModelSettings | null): DshDeploymentModelSettings {
+  const actual = validateDshModelSettings(metadata)
+  return validateDshModelSettings({ ...actual, maxTokens: Math.min(actual.maxTokens, saved?.maxTokens ?? actual.maxTokens) })
+}

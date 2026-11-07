@@ -12,6 +12,11 @@ export function chatCompactionHeadroom(contextWindow: number, maxTokens: number)
   if (!Number.isSafeInteger(contextWindow) || !Number.isSafeInteger(maxTokens) || maxTokens <= 0 || contextWindow <= maxTokens || contextWindow > 16_777_216) throw new TypeError('Invalid model capacity')
   return Math.min(8192, Math.floor((contextWindow - maxTokens) * 0.05))
 }
+/** Summary generation has its own bounded output allowance, independent of ordinary reply capacity. */
+export function chatCompactionSummaryBudget(contextWindow: number, maxTokens: number): number {
+  chatCompactionHeadroom(contextWindow, maxTokens)
+  return Math.max(1, Math.min(8192, maxTokens, Math.floor((contextWindow - maxTokens) / 4)))
+}
 export function recommendChatCapacity(metadata: unknown): ChatCapacityRecommendation | null {
   if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return null
   const value = metadata as Record<string, unknown>

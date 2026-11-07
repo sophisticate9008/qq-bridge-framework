@@ -1,3 +1,4 @@
+import { preserveDshChatOutputBudget } from '../contracts/dsh-model-settings.ts'
 import { withDeadline } from '../host/deadlines.ts'
 import { readAdminActivity } from './simulation-activity.ts'
 import { createNativeToolInventoryRoutes, type NativeToolInventoryReader } from './native-tool-inventory.ts'
@@ -1229,7 +1230,7 @@ export function createNativeRuntimeApplicationPorts(options: {
           const target = await discoverLocalDshDeployment({ endpoint: adapter.endpoint,
             localCredentialsPath: adapter.localCredentialsPath, signal })
           const resolved = await resolveLocalDshModelSettings(configuration, target, signal, directory)
-          deployment = { ...configuration.deployment, target, modelSettings: resolved.modelSettings }
+          deployment = { ...configuration.deployment, target, modelSettings: preserveDshChatOutputBudget(resolved.modelSettings, configuration.deployment.modelSettings) }
         } catch (error) {
           if (signal.aborted) requestError(499, 'request_aborted')
           if (isRecord(error) && error.code === 'LOCAL_DSH_MODEL_SETTINGS_MISSING') requestError(422, 'local_dsh_model_settings_missing')

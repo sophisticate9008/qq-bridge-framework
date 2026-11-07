@@ -1,5 +1,5 @@
 import { NATIVE_CHAT_PROTOCOL_INSTRUCTIONS } from './native-chat-protocol.ts'
-import { chatCompactionHeadroom } from '../contracts/chat-capacity.ts'
+import { chatCompactionHeadroom, chatCompactionSummaryBudget } from '../contracts/chat-capacity.ts'
 import { validateDshModelSettings, type DshDeploymentModelSettings } from '../contracts/dsh-model-settings.ts'
 export { validateDshModelSettings } from '../contracts/dsh-model-settings.ts'
 export type { DshDeploymentModelSettings } from '../contracts/dsh-model-settings.ts'
@@ -250,7 +250,8 @@ export function prepareDshDeployment(input: DshDeploymentInput): DshDeploymentPr
               ...presetPlugins,
               { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
                 { id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic', config: {
-                  auto: true, headroomTokens: chatCompactionHeadroom(contextWindow, settings.maxTokens), maxTokens: settings.maxTokens,
+                  auto: true, headroomTokens: chatCompactionHeadroom(contextWindow, settings.maxTokens),
+                  maxTokens: chatCompactionSummaryBudget(contextWindow, settings.maxTokens), compactionRetries: 0,
                   summarizationProvider: externalProvider, summarizationModel: definition.model.name,
                 } },
               ] },

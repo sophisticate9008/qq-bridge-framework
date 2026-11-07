@@ -1,3 +1,4 @@
+import { chatCompactionSummaryBudget } from './chat-capacity.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { isVolatile } from '@deepseek-ai/cosmokit'
 import { constants } from 'node:fs'
@@ -136,7 +137,8 @@ async function equivalentPresets(ctx: Context, source: unknown[], target: unknow
             || !Number.isSafeInteger(config.headroomTokens) || Number(config.headroomTokens) < 0) reject('migration_capacity_unverified')
           if (side === 0 && (config.summarizationModel !== options.model || config.summarizationProvider !== options.provider)) reject('migration_model_changed')
           if (side === 1 && (config.summarizationModel !== selection.model || config.summarizationProvider !== selection.provider
-            || config.maxTokens !== selection.contextLimits.maxTokens || config.headroomTokens !== selection.contextLimits.headroomTokens)) reject('migration_target_selection_mismatch')
+            || (config.maxTokens !== selection.contextLimits.maxTokens
+              && config.maxTokens !== chatCompactionSummaryBudget(selection.contextLimits.contextWindow, selection.contextLimits.maxTokens)) || config.headroomTokens !== selection.contextLimits.headroomTokens)) reject('migration_target_selection_mismatch')
           routeProofs[side]!.push(await providerIdentity(ctx, providers, config.summarizationProvider))
           output.push({ ...row, config: { ...config, summarizationProvider: '<managed-provider>', summarizationModel: '<managed-model>',
             maxTokens: '<managed-output-reserve>', headroomTokens: '<managed-headroom>' } })
