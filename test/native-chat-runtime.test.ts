@@ -3199,8 +3199,8 @@ test(`failed ${kind} assistant work is narrated in its original model session ($
     assert.equal(String(fake.sends[0]![kind === 'group' ? 'group_id' : 'user_id']), kind === 'group' ? '456' : '123')
     if (kind === 'group') assert.match(JSON.stringify(fake.sends[0]), /"type":"at","data":\{"qq":"123"/)
   }
-  assert.equal(fake.runtime().readWork(id)?.status, 'unknown')
-  assert.equal(fake.runtime().readWork(id)?.delivery, 'not-requested')
+  await until(() => fake.runtime().readWork(id)?.status === 'failed')
+  assert.equal(fake.runtime().readWork(id)?.delivery, 'unknown', 'automatic inspection records the actual interrupted child without replaying delivery')
   assert.equal(fake.rpc.filter(row => row.method === 'session/prompt').length, 2)
   assert.equal(fake.rpc.filter(row => row.method === 'bridgePlugin/startWork').length, 1)
   assert.doesNotMatch(JSON.stringify(fake.sends), /WORK_RESULT_UNKNOWN|private-parent-provider-failure|原任务记录已保留/)

@@ -526,6 +526,8 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
     const observed = await withDeadline({ signal, timeoutMs: 5000, code: 'NATIVE_WORK_INSPECTION_UNKNOWN',
       run: activeSignal => options.backend!.inspect!({ id: view.id, childId: view.childId,
         parentSessionId: view.parentSessionId, generation: view.generation, signal: activeSignal }) })
+    const notice = options.store.read('native-work.failure-notices', digest([view.id, object(record.value).runId ?? view.id]))
+    if (notice && ['pending', 'sending'].includes(String(object(notice.value).status))) return view
     const evidence: JsonObject = { observedState: observed.state, observedAt: Date.now() }
     if (observed.state === 'completed') {
       assert(observed.result, 'INVALID_NATIVE_WORK_RESULT', 'Completed work requires captured result evidence.')

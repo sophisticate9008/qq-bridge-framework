@@ -39,7 +39,7 @@ export async function recoverSdkWork(ctx: Context, record: WorkJournalRecord, si
         active = null
       }
     }
-    if (matched === null || active !== null || !terminal || attachmentCalled && record.attachments === undefined) return null
+    if (matched === null || active !== null || !terminal || attachmentCalled && !record.attachments?.length) return null
     const hash = await executionCheckpoint({ ...observation.header, delegationDepth: observation.header.delegationDepth ?? 0 }, observation.events, signal)
     const durable = await persistence.open(id, 'read', { signal })
     try {
