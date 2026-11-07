@@ -64,11 +64,14 @@ try {
     await services.getByRole('heading', { name, exact: true }).waitFor();
   }
   await page.getByRole('tab', { name: '扩展功能', exact: true }).click();
-  const extensions = page.getByRole('tabpanel');
+  const extensions = page.getByRole('tabpanel').filter({ has: page.locator('#local-extensions') });
+  await extensions.waitFor({ state: 'visible' });
+  await services.waitFor({ state: 'hidden' });
   for (const name of ['表情收藏', '表情发送', '插件宿主服务']) {
     assert.equal(await extensions.getByRole('heading', { name, exact: true }).count(), 0);
   }
   await page.getByRole('tab', { name: '框架内置', exact: true }).click();
+  await services.waitFor({ state: 'visible' });
   await services.locator('article').filter({ has: page.getByRole('heading', { name: '表情收藏', exact: true }) })
     .getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('[data-page="stickers"]').waitFor();
