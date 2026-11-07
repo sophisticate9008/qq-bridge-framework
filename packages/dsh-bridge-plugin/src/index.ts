@@ -1,4 +1,6 @@
 import { inspectRegisteredToolInventory } from './tool-inventory.js'
+import { recoverSdkWork } from './work-recovery.js'
+import { createExecutionCancellation } from './execution-cancellation.js'
 import { inspectSdkExecution } from './execution-evidence.js'
 import { DSH_EXECUTION_EVIDENCE_PROTOCOL, type DshExecutionEvidenceRequest } from './execution-evidence-protocol.js'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
@@ -34,10 +36,13 @@ export default class BridgePlugin extends TypertRemoteService {
   private readonly frameworkTools
   private readonly work
   private readonly pluginModels
+  private readonly executionCancellation
   private eventStreams = 0
 
   constructor(ctx: Context) {
     super(ctx, 'bridgePlugin')
+    this.executionCancellation = createExecutionCancellation({ issuerEpoch: this.journal.issuerEpoch, getAgent: id => ctx.agents.get(SessionId(id)) })
+    ctx.effect(() => () => this.executionCancellation.close())
     this.pluginModels = createPluginModelChannel(ctx)
     ctx.effect(() => () => this.pluginModels.close())
     const replyRepair = createReplyDecisionRepair({ current: agent => ctx.agents.get(SessionId(agent.id)) === agent,
@@ -61,6 +66,7 @@ export default class BridgePlugin extends TypertRemoteService {
       return { set, current }
     }
     this.work = createWorkChannel({
+      recover: (record, signal) => recoverSdkWork(ctx, record, signal),
       fullAccessAvailable: () => { try { fullAccessService(); return true } catch { return false } },
       applyFullAccess: agent => {
         const service = fullAccessService(agent)
@@ -109,6 +115,7 @@ export default class BridgePlugin extends TypertRemoteService {
       return undefined
     })
     ctx.on('agent/disposed', ({ agent }) => {
+      this.executionCancellation.ended(agent)
       this.work.recordDisposedChild(agent)
       attachmentTools.get(agent.session.id)?.(); attachmentTools.delete(agent.session.id)
     })
@@ -127,7 +134,7 @@ export default class BridgePlugin extends TypertRemoteService {
         this.frameworkTools.recordToolCalls(agent, event.data.turn, event.data.message.content)
         replyRepair.assistant(agent, event.data.turn, event.data.message.content)
       }
-      if (event.type === 'turn/end') { this.frameworkTools.endTurn(agent, event.data.turn); replyRepair.clear(agent) }
+      if (event.type === 'turn/end') { this.executionCancellation.ended(agent, event.data.turn); this.frameworkTools.endTurn(agent, event.data.turn); replyRepair.clear(agent) }
     })
     ctx.on('agent/turn-stopping', ({ agent, turn, signal }) => replyRepair.stopping(agent, turn, signal))
     this.migrations = createMigrationJournal({ directory: join(resolveDshHome(), 'storages', 'qbf-session-migrations'),
@@ -143,6 +150,7 @@ export default class BridgePlugin extends TypertRemoteService {
         this.work.recordClaim(agent.session.id, message.source.rpcId)
       if (ctx.agents.get(agent.id) !== agent || agent.session.id !== agent.id || message.source?.kind !== 'user'
         || !('rpcId' in message.source) || typeof message.source.rpcId !== 'string') return
+      this.executionCancellation.claimed(agent, message.source.rpcId, turn)
       this.journal.record({ sessionId: agent.session.id, requestId: message.source.rpcId, userMessageId: message.id, turn })
       this.frameworkTools.recordClaim(agent, { requestId: message.source.rpcId, userMessageId: message.id, turn })
     })
@@ -170,7 +178,7 @@ export default class BridgePlugin extends TypertRemoteService {
         'bridgePlugin/forkPreview', 'bridgePlugin/forkWithPreset', 'bridgePlugin/inspectMigration',
         'bridgePlugin/installFrameworkTools', 'bridgePlugin/withdrawFrameworkTools',
         'bridgePlugin/pollFrameworkTools', 'bridgePlugin/completeFrameworkTool', 'bridgePlugin/inspectFrameworkTools',
-        'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkAsset', 'bridgePlugin/inspectExecution', 'bridgePlugin/inspectSessionStorage',
+        'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkAsset', 'bridgePlugin/inspectExecution', 'bridgePlugin/cancelExecution', 'bridgePlugin/inspectSessionStorage',
         'bridgePlugin/preparePluginModelSession', 'bridgePlugin/pluginModels', 'bridgePlugin/createPluginModelSession', 'bridgePlugin/inspectPluginModelSession', 'bridgePlugin/startPluginModel', 'bridgePlugin/waitPluginModelIdle', 'bridgePlugin/inspectPluginModelRun', 'bridgePlugin/followSessionEvents'],
       claimMeaning: 'inbox-claimed-not-completed', durableReceipts: false, externalToolAuthorizationVerified: false }
   }
@@ -246,6 +254,12 @@ export default class BridgePlugin extends TypertRemoteService {
     return { sessionId: request.sessionId, exists: true, root: backend.root, filename: location.path }
   }
 
+  @Remote('cancelExecution')
+  cancelExecution(request: { sessionId: string; requestId: string; issuerEpoch: string }) {
+    this.assertOperator()
+    return this.executionCancellation.cancel(request)
+  }
+
   @Remote('inspectExecution')
   inspectExecution(request: DshExecutionEvidenceRequest) {
     const invocation = this.assertOperator()
@@ -268,7 +282,7 @@ export default class BridgePlugin extends TypertRemoteService {
   }
 
   @Remote('inspectWork')
-  inspectWork(request: WorkAddress) { this.assertOperator(); return this.work.inspect(request) }
+  inspectWork(request: WorkAddress) { const invocation = this.assertOperator(); return this.work.inspect(request, invocation.signal) }
 
   @Remote('readWorkAsset')
   readWorkAsset(request: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; offset: number; limit: number }) {

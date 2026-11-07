@@ -43,6 +43,7 @@ export interface DshSessionEvent {
   event: {
     id?: string
     seq?: number
+    time?: number
     type: string
     data?: JsonObject
   }
@@ -562,6 +563,7 @@ export function createDshSdkPort(options: DshSdkPortOptions): DshClientPort {
 }
 
 export function createDshAdapter(client: DshClientPort, observations: {
+  readonly onPhase?: (event: { readonly sessionId: string; readonly turn: number; readonly phase: string; readonly at?: number; readonly sequence?: number; readonly code?: string }) => void
   readonly onObservation?: (event: NativeEventInput) => void
 } = {}): AgentAdapter {
   validatePort(client)
@@ -628,6 +630,14 @@ export function createDshAdapter(client: DshClientPort, observations: {
               } catch {}
             }
             if (frame.type === 'session/event') {
+              const phase = ({ 'turn/start': 'model-turn-start', 'compaction/start': 'compaction-start', 'compaction/end': 'compaction-end',
+                'request/header': 'model-request', 'assistant/message': 'model-response', 'tool/call': 'tool-start', 'tool/result': 'tool-end',
+                'turn/end': 'model-turn-end' } as Record<string, string>)[frame.event.type]
+              const turn = frame.event.data?.turn ?? usageTurn
+              if (phase && typeof turn === 'number' && Number.isSafeInteger(turn)) observations.onPhase?.({ sessionId: frame.sessionId, turn, phase,
+                ...(typeof frame.event.time === 'number' ? { at: frame.event.time } : {}),
+                ...(typeof frame.event.seq === 'number' ? { sequence: frame.event.seq } : {}),
+                ...(frame.event.data?.failed === true ? { code: 'DSH_COMPACTION_FAILED' } : {}) })
               if (frame.event.type === 'turn/start' || frame.event.type === 'step/start') pending = undefined
               if (frame.event.type === 'turn/start') {
                 usageTurn = frame.event.data?.turn

@@ -102,3 +102,28 @@ test('a durable late completion releases the session while preserving the local 
   assert.equal(f.controller.forConversation(binding.conversationId),null)
   assert.doesNotThrow(()=>f.controller.admit({binding,requestId:'fresh-after-timeout',policyRevision:'a'.repeat(64)}))
 })
+
+for (const status of ['requesting', 'unknown'] as const) test(`request-scoped ${status} cancellation settles only with a durable quiescent checkpoint`, async context => {
+  const store=createSqliteStore({filename:':memory:'})
+  let complete!: (value: {status:'accepted'}) => void
+  const controller=createNativeExecutionController({store,cancelIsRequestScoped:()=>true,
+    cancel:()=>new Promise(resolve=>{complete=resolve}),policy:{...DEFAULT_NATIVE_EXECUTION_POLICY,cancelTimeoutMs:10},
+    onReleased:record=>{assert.equal(record.isolated,false)}})
+  controller.start()
+  context.after(async()=>{await controller.stop();store.close()})
+  const record=controller.admit({binding,requestId:'scoped-request',policyRevision:'a'.repeat(64)})
+  await controller.submit(record.id,async()=>({status:'accepted'}))
+  const cancellation=controller.cancel(record.id)
+  if(status==='unknown') await cancellation
+  assert.equal(controller.get(record.id)?.cancelStatus,status)
+  const proof={binding,requestId:record.requestId,userMessageId:'exact-message',turnId:'5',outcome:'cancelled' as const,
+    evidenceId:'durable-abort',checkpointHash:'b'.repeat(64),checkpointSequence:10,quiescent:true as const}
+  assert.throws(()=>controller.reconcileCheckpoint(record.id,{...proof,requestId:'other'}),{code:'EXECUTION_INVALID_EVIDENCE'})
+  assert.equal(controller.reconcileCheckpoint(record.id,proof).cancelStatus,'confirmed')
+  const next=controller.admit({binding,requestId:'successor',policyRevision:'a'.repeat(64)})
+  complete({status:'accepted'})
+  await cancellation
+  await new Promise(resolve=>setTimeout(resolve,0))
+  assert.equal(controller.get(record.id)?.isolated,false)
+  assert.equal(controller.forConversation(binding.conversationId)?.id,next.id)
+})

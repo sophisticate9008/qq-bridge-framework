@@ -3,6 +3,7 @@ import { FrameworkError, assert, errorCode, isRecord, reference, snapshot } from
 import { digest, json, object } from './data.ts'
 import { withDeadline } from './deadlines.ts'
 import type { DurableStore, SessionBinding, StoredRecord } from './types.ts'
+import { readNativeExecutionDiagnostics, recordNativeExecutionPhase } from './native-execution-diagnostics.ts'
 import { readNativeExecutionSummaries } from './native-execution-summary.ts'
 
 export interface NativeExecutionPolicy {
@@ -42,6 +43,7 @@ export interface NativeExecutionRecord {
   readonly externalStatus: ExternalStatus
   readonly isolated: boolean
   readonly deadlineReached: boolean
+  readonly cancelScope?: 'request'
   readonly cancelStatus: CancelStatus
   readonly noticeStatus: NoticeStatus
   readonly userMessage: { readonly eventId: string; readonly messageId: string } | null
@@ -94,6 +96,9 @@ export interface NativeExecutionOptions {
   readonly clock?: Clock
   readonly maxPendingOperations?: number
   readonly onFault?: (code: string) => void
+  /** Runs after the exact durable scope claims have been released, including late cancel receipts. */
+  readonly cancelIsRequestScoped?: () => boolean
+  readonly onReleased?: (execution: NativeExecutionRecord) => void
   readonly cancel?: (request: NativeExecutionAction) => Promise<{ readonly status: 'accepted' | 'rejected' | 'unknown' }>
   readonly notify?: (request: NativeExecutionAction) => Promise<DeliveryReceipt>
 }
@@ -141,6 +146,7 @@ function readExecution(record: StoredRecord): NativeExecutionRecord {
     && typeof value.isolated === 'boolean' && typeof value.deadlineReached === 'boolean'
     && ['prepared', 'submitting', 'running', 'completed', 'failed', 'rejected', 'timed-out', 'unknown'].includes(String(value.status))
     && ['not-started', 'submitting', 'accepted', 'completed', 'failed', 'rejected', 'cancelled', 'unknown'].includes(String(value.externalStatus))
+    && (value.cancelScope === undefined || value.cancelScope === 'request')
     && ['not-requested', 'unavailable', 'requesting', 'accepted', 'rejected', 'unknown', 'confirmed'].includes(String(value.cancelStatus))
     && ['not-requested', 'unavailable', 'sending', 'confirmed', 'rejected', 'unknown'].includes(String(value.noticeStatus)),
   'EXECUTION_DATA_CORRUPT', 'Stored execution metadata is invalid.')
@@ -207,7 +213,14 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
       const previous = readExecution(current)
       const value = operation(previous)
       if (digest(value) === digest(previous)) return previous
-      try { return readExecution(store.write(executions, id, json(value), { expectedRevision: current.revision })) }
+      try {
+        const next = readExecution(store.write(executions, id, json(value), { expectedRevision: current.revision }))
+        if (previous.status !== next.status || previous.cancelStatus !== next.cancelStatus || previous.externalStatus !== next.externalStatus) {
+          recordNativeExecutionPhase(store, { sessionId: next.binding.sessionId, requestId: next.requestId,
+            phase: `execution:${next.status}:${next.externalStatus}:cancel-${next.cancelStatus}`, ...(next.lastError ? { code: next.lastError } : {}) })
+        }
+        return next
+      }
       catch (error) { if (errorCode(error) !== 'STORE_CONFLICT') throw error }
     }
     throw new FrameworkError('EXECUTION_CONFLICT', 'Execution metadata changed concurrently.')
@@ -227,6 +240,9 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
     signals.delete(record.id)
     removeClaim(sessions, digest(record.binding.sessionId), record.id)
     removeClaim(conversations, digest(record.binding.conversationId), record.id)
+    try {
+      recordNativeExecutionPhase(store, { sessionId: record.binding.sessionId, requestId: record.requestId, phase: 'released', ...(record.lastError ? { code: record.lastError } : {}) })
+    } finally { options.onReleased?.(snapshot(record)) }
   }
 
   function releaseRetired(record: NativeExecutionRecord): boolean {
@@ -294,19 +310,20 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
       let claimed = false
       update(id, value => {
         claimed = value.cancelStatus === 'not-requested' && !terminalExternal.has(value.externalStatus)
-        return claimed ? { ...value, cancelStatus: 'requesting', isolated: true } : value
+        return claimed ? { ...value, cancelStatus: 'requesting', isolated: true,
+          ...(options.cancelIsRequestScoped?.() ? { cancelScope: 'request' as const } : {}) } : value
       })
       if (!claimed) return
       const accept = (status: 'accepted' | 'rejected' | 'unknown') => {
         if (stopped) return
         if (!['accepted', 'rejected', 'unknown'].includes(status)) status = 'unknown'
-        const record = update(id, value => value.cancelStatus === 'confirmed' ? value : settleIsolation({ ...value,
+        const record = update(id, value => value.cancelStatus === 'confirmed' || !value.isolated && terminalExternal.has(value.externalStatus) ? value : settleIsolation({ ...value,
           cancelStatus: status === 'accepted' && value.externalStatus === 'cancelled' ? 'confirmed' : status }))
         release(record)
       }
       try {
         const result = await withDeadline({ signal: lifetime.signal, timeoutMs: current.policy.cancelTimeoutMs,
-          code: 'EXECUTION_CANCEL_UNKNOWN', run: signal => limited(() => options.cancel!({ execution: current,
+          code: 'EXECUTION_CANCEL_UNKNOWN', run: signal => limited(() => options.cancel!({ execution: get(id)!,
             idempotencyKey: `execution:${id}:cancel`, signal })), onLate: result => accept(result.status) })
         accept(result.status)
       } catch { accept('unknown') }
@@ -440,7 +457,7 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
     admit, get,
     inspect(id: string) {
       const execution = get(id)
-      return execution ? snapshot({ ...execution, summary: readNativeExecutionSummaries(store, [execution]).get(id)! }) : null
+      return execution ? snapshot({ ...execution, summary: readNativeExecutionSummaries(store, [execution]).get(id)!, diagnostics: readNativeExecutionDiagnostics(store, execution) }) : null
     },
     listForDisplay(query: Parameters<typeof list>[0] = {}) {
       const rows = list(query)
@@ -455,17 +472,18 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
       if (terminalExternal.has(current.externalStatus) || current.cancelStatus !== 'not-requested') return current
       signals.get(id)?.abort()
       update(id, value => ({ ...value, status: 'unknown', isolated: true,
+        ...(options.cancelIsRequestScoped?.() ? { cancelScope: 'request' as const } : {}),
         cancelStatus: options.cancel ? 'requesting' : 'unavailable', lastError: 'EXECUTION_CANCEL_REQUESTED' }))
       if (!options.cancel) return get(id)!
       const accept = (status: 'accepted' | 'rejected' | 'unknown') => {
         if (stopped) return
-        const next = update(id, value => value.cancelStatus === 'confirmed' ? value : settleIsolation({ ...value,
+        const next = update(id, value => value.cancelStatus === 'confirmed' || !value.isolated && terminalExternal.has(value.externalStatus) ? value : settleIsolation({ ...value,
           cancelStatus: status === 'accepted' && value.externalStatus === 'cancelled' ? 'confirmed' : status }))
         release(next)
       }
       try {
         const result = await withDeadline({ signal: lifetime.signal, timeoutMs: current.policy.cancelTimeoutMs,
-          code: 'EXECUTION_CANCEL_UNKNOWN', run: signal => limited(() => options.cancel!({ execution: current,
+          code: 'EXECUTION_CANCEL_UNKNOWN', run: signal => limited(() => options.cancel!({ execution: get(id)!,
             idempotencyKey: `execution:${id}:cancel`, signal })), onLate: result => accept(result.status) })
         accept(result.status)
       } catch { accept('unknown') }
@@ -560,7 +578,7 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
       assert((current.userMessage === null || current.userMessage.messageId === proof.userMessageId)
         && (current.turn === null || current.turn.id === proof.turnId), 'EXECUTION_CORRELATION_CONFLICT', 'Recovery cannot change the accepted user message or turn.')
       function canRelease(value: NativeExecutionRecord): void {
-        assert(!['requesting', 'unknown'].includes(value.cancelStatus)
+        assert(value.cancelScope === 'request' || !['requesting', 'unknown'].includes(value.cancelStatus)
           && (value.cancelStatus !== 'accepted' || proof.outcome === 'cancelled'),
         'EXECUTION_CANCEL_EVIDENCE_UNKNOWN', 'A late uncorrelated cancellation still owns the old session address.')
         assert(!terminalExternal.has(value.externalStatus) || value.externalStatus === proof.outcome,
@@ -575,7 +593,8 @@ export function createNativeExecutionController(options: NativeExecutionOptions)
       const next = update(id, value => {
         canRelease(value)
         return { ...value, status: value.deadlineReached ? 'timed-out' : proof.outcome === 'completed' ? 'completed' : 'failed', externalStatus: proof.outcome,
-          isolated: false, cancelStatus: value.cancelStatus === 'accepted' ? 'confirmed' : value.cancelStatus,
+          isolated: false, cancelStatus: value.cancelScope === 'request' && unsettledCancel.has(value.cancelStatus)
+            ? proof.outcome === 'cancelled' ? 'confirmed' : 'rejected' : value.cancelStatus === 'accepted' ? 'confirmed' : value.cancelStatus,
           userMessage: value.userMessage ?? { eventId: proof.evidenceId, messageId: proof.userMessageId },
           turn: value.turn ?? { id: proof.turnId, evidenceId: proof.evidenceId }, lastEventId: proof.evidenceId,
           lateOutcome: { eventId: proof.evidenceId, outcome: proof.outcome },

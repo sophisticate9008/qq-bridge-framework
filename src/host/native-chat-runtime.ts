@@ -12,6 +12,8 @@ import { createPluginModelService, type PluginModelService } from './plugin-mode
 import { createPluginSchedulerService, createPluginScheduleReader, emptyPluginScheduleSnapshot, type PluginSchedulerService } from './plugin-scheduler.ts'
 import type { PluginScheduleManagementRequest, PluginScheduleReadOptions } from '../contracts/plugin-schedules.ts'
 import { createPluginToolDirectory } from './plugin-tool-directory.ts'
+import { recordNativeExecutionPhase } from './native-execution-diagnostics.ts'
+import { createExecutionRecoveryPoll } from './execution-recovery-poll.ts'
 import { createSessionTurnQueue } from './session-turns.ts'
 import type { PluginRuntimeServices } from './plugin-runtime.ts'
 import { createNativeCapabilityDirectory, NATIVE_DIRECTORY_TOOLS } from './native-capability-directory.ts'
@@ -1021,7 +1023,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             if (!current || current.conversationId !== binding.conversationId || current.generation !== binding.generation) failure('SESSION_STALE')
             return image
           } })
-        const sourceAgent = createDshAdapter(dsh, { onObservation(observation) {
+        const sourceAgent = createDshAdapter(dsh, { onPhase: event => recordNativeExecutionPhase(store!, event), onObservation(observation) {
           const sessionId = observation.correlation.sessionId
           const binding = sessionId ? bindingForSession(sessionId) : null
           activity.observe({ ...observation, correlation: { ...observation.correlation,
@@ -1383,9 +1385,32 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           lastError = safeCode(new FrameworkError(code, 'Execution state is unavailable.')); state = 'error'
           activity.record('error')
         }
-        executions = createNativeExecutionController({ store, policy: configuration.execution, onFault: executionFault,
+        let requestScopedCancellation = false
+        executions = createNativeExecutionController({ store, cancelIsRequestScoped: () => requestScopedCancellation, policy: configuration.execution, onFault: executionFault,
+          onReleased(execution) {
+            sessionTurns?.releaseReconciled(execution.binding.sessionId, execution.requestId)
+            // Completion still travels through the attributed event handler. Cancellation/failure
+            // must close only this request's watchdog even when no further event will arrive.
+            if (execution.deadlineReached || execution.status === 'unknown' || execution.cancelStatus !== 'not-requested'
+              || ['failed', 'cancelled', 'rejected'].includes(execution.externalStatus)) {
+              const reply = host?.replies.get(execution.binding.conversationId)
+              if (reply?.sessionId === execution.binding.sessionId && reply.generation === execution.binding.generation
+                && digest([execution.binding.conversationId, reply.requestId, 'prompt']) === execution.requestId) {
+                host!.replies.suppress(execution.binding, reply.requestId)
+              }
+              host?.releaseDeliveryRequest(execution.requestId)
+            }
+          },
           ...createNativeExecutionPolicyActions({ policy: host.policy, transport: host.outbox,
             persona: { id: contentIdentity.contextId, version: personaMetadata.scopeVersion }, cancel: sourceAgent.cancel,
+            async cancelExact(request) {
+              if (request.execution.cancelScope === 'request' && dsh?.bridgePlugin?.cancelExecution && pluginEpoch) {
+                return dsh.bridgePlugin.cancelExecution({ sessionId: request.execution.binding.sessionId, requestId: request.execution.requestId }, pluginEpoch, request.signal)
+              }
+              if (!sourceAgent.cancel) return { status: 'rejected' }
+              await sourceAgent.cancel({ sessionId: request.execution.binding.sessionId, signal: request.signal })
+              return { status: 'accepted' }
+            },
             async guard(request) {
               await guard(request.execution.binding.conversationId, request.signal)
               const binding = host?.sessions.get(request.execution.binding.conversationId)
@@ -1484,6 +1509,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         await dsh.verify(controller.signal)
         if (!dsh.bridgePlugin) failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE')
         const plugin = await dsh.bridgePlugin.describe(controller.signal).catch(() => failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE'))
+        requestScopedCancellation = plugin.methods?.includes('bridgePlugin/cancelExecution') === true && dsh.bridgePlugin.cancelExecution !== undefined
         pluginEpoch = plugin.issuerEpoch
         correlationRecovery = createNativeCorrelationRecovery({ issuerEpoch: plugin.issuerEpoch, signal: controller.signal,
           describe: signal => dsh!.bridgePlugin!.describe(signal), restored() {
@@ -1671,28 +1697,15 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           bindings: selected.deployment.presetBindings }, [...configuration.providers.map(provider => provider.apiKey),
           configuration.adapters.onebotHttp.secret, configuration.adapters.onebotWs.secret,
           configuration.adapters.dshAgent.auth, configuration.adapters.onebotWebhook.hmac])
-        const inboxRecheckedAt = new Map<string, number>()
-        const inboxRechecking = new Set<string>()
         inbox = createNativeInbox({ store: store!, coalesceMs: 120, groupContinuationCoalesceMs: 800,
           readiness(conversationId) {
             if (state !== 'running' || controller.signal.aborted || !host || !executions) return 'blocked'
             if (workFeedback?.busy(conversationId)) return 'busy'
             const execution = executions.forConversation(conversationId)
             if (execution) {
-              const uncertain = execution.deadlineReached || execution.status === 'unknown'
-                || execution.externalStatus === 'unknown' || execution.cancelStatus !== 'not-requested'
-              // Observe the old execution in the background. No prompt, replay, cancellation or session reset.
-              if (uncertain && !inboxRechecking.has(conversationId) && inboxRechecking.size < 4
-                && Date.now() - (inboxRecheckedAt.get(conversationId) ?? 0) >= 5_000) {
-                inboxRecheckedAt.set(conversationId, Date.now())
-                inboxRechecking.add(conversationId)
-                void withDeadline({ signal: controller.signal, timeoutMs: 5_000, code: 'NATIVE_INBOX_OBSERVATION_TIMEOUT',
-                  run: signal => reconcileExecution(execution.id, signal) }).catch(() => undefined)
-                  .finally(() => { inboxRechecking.delete(conversationId) })
-              }
+              // The lifecycle recovery observer checks uncertain executions independently of incoming traffic.
               return 'busy'
             }
-            inboxRecheckedAt.delete(conversationId)
             const reply = host.replies.get(conversationId)
             if (reply?.status === 'waiting') return 'busy'
             // An expired reply watchdog is historical; only a live execution owns model admission.
@@ -1773,6 +1786,46 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           closeInteractions: stopInteractions, claimTimer, clearIngress: inbound.clear, drainConfiguration: configurationGuard.drain, drainPolicy: toolPolicy.drain }
         runningResources.lifetime.signal.throwIfAborted()
         state = 'running'
+        const recoveryStore = store, recoveryExecutions = executions, recoveryWork = work
+        let workRecoveryAfter: string | undefined
+        let recoveryChatOffset = 0
+        const recoveryPoll = createExecutionRecoveryPoll({ signal: controller.signal,
+          previous(id) {
+            const row = recoveryStore.read('host.recovery-observations', id)?.value
+            return isRecord(row) && Number.isSafeInteger(row.attempt) && typeof row.exhausted === 'boolean'
+              && (row.nextAt === null || typeof row.nextAt === 'number')
+              ? { attempt: Number(row.attempt), exhausted: row.exhausted, nextAt: row.nextAt } : null
+          },
+          onFault: code => activity.record('error', null, undefined, {}, code),
+          candidates() {
+            if (state !== 'running' || controller.signal.aborted) return []
+            const chat = recoveryExecutions.active().filter(value => value.deadlineReached || value.status === 'unknown'
+              || value.cancelStatus !== 'not-requested').map(value => `chat:${value.id}`)
+            const page = recoveryStore.list('native-work.executions', { limit: 128, ...(workRecoveryAfter ? { after: workRecoveryAfter } : {}) })
+            workRecoveryAfter = page.length === 128 ? page.at(-1)!.key : undefined
+            const selectedChat = [...chat.slice(recoveryChatOffset), ...chat.slice(0, recoveryChatOffset)].slice(0, 128)
+            recoveryChatOffset = chat.length ? (recoveryChatOffset + 128) % chat.length : 0
+            return [...selectedChat, ...page.filter(row => isRecord(row.value) && row.value.status === 'unknown').map(row => `work:${row.key}`)]
+          },
+          async inspect(id, signal) {
+            if (id.startsWith('chat:')) {
+              const result = await reconcileExecution(id.slice(5), signal)
+              const previous = recoveryStore.read('host.recovery-details', id)
+              recoveryStore.write('host.recovery-details', id, json({ schema: 1, id, state: result.state, missingReasons: result.missingReasons,
+                observedAt: Date.now(), automaticReplayAvailable: false }), { expectedRevision: previous?.revision ?? null })
+              return result.state === 'released'
+            }
+            if (!recoveryWork) return false
+            const result = await recoveryWork.observeExisting(id.slice(5), signal)
+            return ['completed', 'failed'].includes(result.status)
+          },
+          observe(id, result) {
+            const prior = recoveryStore.read('host.recovery-observations', id)
+            recoveryStore.write('host.recovery-observations', id, json({ schema: 1, id, observedAt: Date.now(), ...result }),
+              { expectedRevision: prior?.revision ?? null, expiresAt: result.settled ? Date.now() + 7 * 86400000 : null })
+            if (result.error || result.exhausted) activity.record('error', null, undefined, {}, result.error ?? 'RECOVERY_OBSERVATION_EXHAUSTED')
+          } })
+        recoveryPoll.start()
         await workFailures.recover()
         markdownDeliveries.start()
         pluginScheduler.start()

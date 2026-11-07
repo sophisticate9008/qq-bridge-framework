@@ -179,7 +179,7 @@ test('owner follow-up and interrupt retain child identity, enforce scope and nev
   assert.equal(fixture.store.list('native-work.results').length, 2)
 })
 
-test('explicit read-only recovery can capture a durable result while leaving delivery unknown', async context => {
+for (const mode of ['manual', 'automatic'] as const) test(`${mode} read-only recovery captures a durable result while leaving delivery unknown`, async context => {
   const fixture = fixtureForTest(context)
   const started = object(await fixture.executor.execute(fixture.request('recover-source', { task: 'Recover work result' })))
   const id = String(started.id)
@@ -192,7 +192,7 @@ test('explicit read-only recovery can capture a durable result while leaving del
   const recovered = createNativeWorkExecutor(fixture.options)
   context.after(() => recovered.close(signal))
   assert.equal(recovered.read(id)?.result, null)
-  const view = await recovered.reconcile(fixture.request('reconcile-source', { id }))
+  const view = mode === 'manual' ? await recovered.reconcile(fixture.request('reconcile-source', { id })) : await recovered.observeExisting(id, signal)
   assert.deepEqual(view.result, result)
   assert.equal(view.delivery, 'unknown')
   assert.equal(fixture.deliveries(), 1)

@@ -39,6 +39,7 @@ interface Entry {
   readonly attachments: WorkMediaReference[]
   usage?: readonly WorkUsageStep[]
   progress?: readonly WorkProgress[]
+  recoveryEvidence?: WorkJournalRecord['recoveryEvidence']
   recovered?: boolean
   permissionVerified?: boolean
   readonly controller: AbortController
@@ -59,6 +60,7 @@ export function createWorkChannel(options: {
   readonly fullAccessAvailable?: () => boolean
   readonly applyFullAccess?: (agent: Agent) => void
   readonly journal?: WorkJournal
+  readonly recover?: (record: WorkJournalRecord, signal: AbortSignal) => Promise<{ result: NonNullable<WorkJournalRecord['result']>; evidence: NonNullable<WorkJournalRecord['recoveryEvidence']> } | null>
   readonly readAsset?: (asset: WorkMediaReference, signal: AbortSignal) => Promise<Uint8Array>
 }) {
   const entries = new Map<string, Entry>()
@@ -84,6 +86,7 @@ export function createWorkChannel(options: {
       address: { id: request.id, parentSessionId: request.parentSessionId, childId: request.childId, generation: request.generation },
       target: { ...(request.fullAccess === undefined ? {} : { fullAccess: request.fullAccess }), modelProvider: request.modelProvider, model: request.model, agentPreset: request.agentPreset, timeoutMs: request.timeoutMs, ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }) },
       state: entry.state, result: entry.result, error: entry.error, permissionVerified: entry.permissionVerified === true, usage: entry.usage ?? [], progress: entry.progress ?? [],
+      attachments: entry.attachments, ...(entry.recoveryEvidence ? { recoveryEvidence: entry.recoveryEvidence } : {}),
       acceptedMessageId: entry.acceptedMessageId, followupRequestId: entry.followupRequestId }
   }
   function persist(entry: Entry): Promise<void> {
@@ -103,7 +106,7 @@ export function createWorkChannel(options: {
       if (saved) {
         const request: WorkStart = { ...saved.address, ...saved.target, issuerEpoch: options.issuerEpoch, task: '', context: '' }
         entry = { request, usage: saved.usage ?? [], progress: saved.progress ?? [], recovered: true, permissionVerified: saved.permissionVerified === true, fingerprint: saved.fingerprint, persistence: Promise.resolve(), acceptedMessageId: saved.acceptedMessageId,
-          followupRequestId: saved.followupRequestId, pendingFollowups: new Set(), attachments: [], controller: new AbortController(), result: saved.result,
+          followupRequestId: saved.followupRequestId, pendingFollowups: new Set(), attachments: [...(saved.attachments ?? [])], controller: new AbortController(), result: saved.result,
           state: saved.state === 'completed' ? 'completed' : 'unknown', error: saved.state === 'completed' ? saved.error : 'WORK_RECOVERY_REQUIRED' }
         // A recovered record is evidence only. It never launches or replays a child.
         if (entries.size >= 64) throw new TypeError('Work retention capacity is occupied')
@@ -179,6 +182,7 @@ export function createWorkChannel(options: {
       if (entry.attachments.some(value => value.kind === asset.kind && value.attachmentId === asset.attachmentId)) return
       if (entry.attachments.length >= 3) throw new TypeError('A work result accepts at most three attachments')
       entry.attachments.push(Object.freeze({ ...asset }))
+      void persist(entry).catch(() => {})
     },
     recordClaim(childId: string, requestId: string): void {
       for (const entry of entries.values()) if (entry.request.childId === childId) entry.pendingFollowups.delete(requestId)
@@ -243,8 +247,17 @@ export function createWorkChannel(options: {
         clearTimeout(entry.timer); isolate(entry, 'WORK_START_UNKNOWN'); return view(entry)
       }
     },
-    async inspect(address: WorkAddress) {
+    async inspect(address: WorkAddress, signal: AbortSignal = new AbortController().signal) {
       const entry = await locate(address)
+      if (entry?.state === 'unknown' && options.recover) {
+        const recovered = await options.recover(durable(entry), signal)
+        epoch(address.issuerEpoch)
+        signal.throwIfAborted()
+        if (recovered && entry.state === 'unknown') {
+          entry.result = recovered.result; entry.recoveryEvidence = recovered.evidence; entry.state = 'completed'; entry.error = null
+          await persist(entry)
+        }
+      }
       if (entry) { captureEvidence(entry); await entry.persistence }
       return entry ? view(entry) : { schema: 1 as const, issuerEpoch: options.issuerEpoch, id: address.id,
         parentSessionId: address.parentSessionId, childId: address.childId, generation: address.generation,

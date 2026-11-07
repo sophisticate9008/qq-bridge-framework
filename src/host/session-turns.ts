@@ -1,5 +1,6 @@
 import { assert, isRecord, FrameworkError } from '../core/values.ts'
 import type { AgentAdapter, DurableStore } from '../contracts/ports.ts'
+import { recordNativeExecutionPhase } from './native-execution-diagnostics.ts'
 import { digest } from './data.ts'
 import { pluginModelIdentifier } from '../contracts/plugin-model.ts'
 
@@ -162,11 +163,15 @@ export function createSessionTurnQueue(options: { readonly signal: AbortSignal; 
       return {
         createSession: request => agent.createSession(request),
         async submit(request) {
+          const phase = (name: string, code?: string) => recordNativeExecutionPhase(options.store, { sessionId: request.sessionId, requestId: request.requestId, phase: name, ...(code ? { code } : {}) })
+          phase('queue-start')
           let release: () => void
           try { release = await acquire(request.sessionId, request.signal) }
           catch (error) {
+            phase('queue-failed', error instanceof FrameworkError ? error.code : 'SESSION_QUEUE_UNAVAILABLE')
             return { status: 'rejected' as const, reason: error instanceof FrameworkError ? error.code : 'SESSION_QUEUE_UNAVAILABLE' }
           }
+          phase('queue-end')
           const lease: ChatLease = { requestId: request.requestId, release }
           chatLeases.set(request.sessionId, lease)
           try {

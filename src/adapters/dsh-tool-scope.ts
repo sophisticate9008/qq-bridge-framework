@@ -33,6 +33,7 @@ export interface DshBridgePluginPort {
   inspectScope(request: DshToolScopeRequest, issuerEpoch: string, signal: AbortSignal): Promise<DshBridgeScopeInspection>
   inspectToolInventory?(issuerEpoch: string, signal: AbortSignal): Promise<NativeToolInventory>
   inspectExecution?(request: DshExecutionEvidenceRequest, issuerEpoch: string, signal: AbortSignal): Promise<DshExecutionEvidence>
+  cancelExecution?(request: { readonly sessionId: string; readonly requestId: string }, issuerEpoch: string, signal: AbortSignal): Promise<{ readonly status: 'accepted' | 'rejected' }>
   claimReceipts(request: ClaimReceiptQuery & { readonly issuerEpoch: string }, signal: AbortSignal): Promise<ClaimReceiptPage>
 }
 
@@ -57,7 +58,7 @@ export type DshBridgeScopeInspection = {
   readonly missingReasons: readonly string[]
 }
 
-type PluginMethod = 'bridgePlugin/inspectToolInventory' | 'bridgePlugin/inspectExecution' | 'bridgePlugin/describe' | 'bridgePlugin/inspectScope' | 'bridgePlugin/claimReceipts'
+type PluginMethod = 'bridgePlugin/cancelExecution' | 'bridgePlugin/inspectToolInventory' | 'bridgePlugin/inspectExecution' | 'bridgePlugin/describe' | 'bridgePlugin/inspectScope' | 'bridgePlugin/claimReceipts'
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('DSH_PLUGIN_INVALID_RESPONSE')
@@ -104,6 +105,13 @@ export function createDshBridgePluginPort(invoke: (method: PluginMethod, request
       const value = object(await invoke('bridgePlugin/inspectToolInventory', undefined, signal))
       requireProof(value.protocol === BRIDGE_PLUGIN_PROTOCOL && value.issuerEpoch === issuerEpoch)
       return parseNativeToolInventory(value)
+    },
+    async cancelExecution(request, issuerEpoch, signal) {
+      requireProof(validIdentifier(request.sessionId) && validIdentifier(request.requestId) && validIdentifier(issuerEpoch))
+      const value = object(await invoke('bridgePlugin/cancelExecution', { ...request, issuerEpoch }, signal))
+      requireProof(value.issuerEpoch === issuerEpoch && value.sessionId === request.sessionId && value.requestId === request.requestId
+        && (value.status === 'accepted' || value.status === 'rejected'))
+      return { status: value.status }
     },
     async inspectExecution(request, issuerEpoch, signal) {
       const description = await port.describe(signal)

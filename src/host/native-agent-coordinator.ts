@@ -1,3 +1,4 @@
+import { recordNativeExecutionPhase } from './native-execution-diagnostics.ts'
 import { createHash } from 'node:crypto'
 import type { DshJsonRpcPort, DshPresetBinding } from '../adapters/dsh-jsonrpc.ts'
 import type { ChatSessionDefinition } from '../contracts/chat-session.ts'
@@ -136,6 +137,8 @@ export function createNativeAgentCoordinator(options: {
         return {
           async createSession(request) { await guard(request.conversationId, request.signal, false, 'submit'); return sourceAgent.createSession(request) },
           async submit(request) {
+            const phase = (name: string) => recordNativeExecutionPhase(store, { sessionId: request.sessionId, requestId: request.requestId, phase: name })
+            phase('prepare-start')
             const binding = bindingForSession(request.sessionId)
             if (!binding) failure('SESSION_STALE')
             await checkpoint('agent.submitting', { conversationId: binding.conversationId,
@@ -148,6 +151,7 @@ export function createNativeAgentCoordinator(options: {
               await dsh.configureSession({ sessionId: request.sessionId, conversationId: binding.conversationId, signal: request.signal })
               configuredSessions.add(request.sessionId)
             }
+            phase('configuration-ready')
             let delegatesTools: boolean
             try {
               delegatesTools = await inspectToolScope(request, binding)
@@ -160,6 +164,7 @@ export function createNativeAgentCoordinator(options: {
               // rejection, not an uncertain model execution or global failure.
               return { status: 'rejected' as const }
             }
+            phase('projection-ready')
             const baseline = await runtime.claims.baseline(request.sessionId, request.signal)
             if (definition.capabilitySelection) await guard(binding.conversationId, request.signal, false, 'submit')
             request.signal.throwIfAborted()
@@ -178,6 +183,7 @@ export function createNativeAgentCoordinator(options: {
             runtime.claims.attach(execution, baseline)
             // Capture the trusted origin before a fast response can settle the pending notification.
             const acceptedEvent = acceptedActivity(binding, request.requestId)
+            phase('prepare-end')
             const result = await runtime.executions.submit(execution.id, ({ signal }) => {
               runtime.messageSources?.retain({ requestId: request.requestId, sessionId: request.sessionId, generation: binding.generation })
               return sourceAgent.submit({ ...request, signal: AbortSignal.any([signal, request.signal]) })

@@ -105,7 +105,7 @@ export function createDshUnaryTransport(options: { readonly base: URL; readonly 
     return limited(async () => pending!, signal)
   }
 
-  const rpc = async (method: DshPluginModelMethod | DshWorkMethod | DshFrameworkToolMethod | '$events/result' | 'session/create' | 'session/selectModel' | 'session/modelCatalog' | 'session/prompt' | 'session/cancel' | 'settings/describe' | 'agentPresets/list' | 'agentPresets/read' | 'credentials/describe' | 'bridgePlugin/inspectToolInventory' | 'bridgePlugin/describe' | 'bridgePlugin/inspectScope' | 'bridgePlugin/claimReceipts' | 'bridgePlugin/forkPreview' | 'bridgePlugin/forkWithPreset' | 'bridgePlugin/inspectMigration' | 'bridgePlugin/inspectExecution' | 'bridgePlugin/inspectSessionStorage', input: JsonObject | undefined, signal: AbortSignal, direct = false): Promise<DshPortResult<JsonValue>> => {
+  const rpc = async (method: DshPluginModelMethod | DshWorkMethod | DshFrameworkToolMethod | '$events/result' | 'session/create' | 'session/selectModel' | 'session/modelCatalog' | 'session/prompt' | 'session/cancel' | 'settings/describe' | 'agentPresets/list' | 'agentPresets/read' | 'credentials/describe' | 'bridgePlugin/inspectToolInventory' | 'bridgePlugin/describe' | 'bridgePlugin/inspectScope' | 'bridgePlugin/claimReceipts' | 'bridgePlugin/forkPreview' | 'bridgePlugin/forkWithPreset' | 'bridgePlugin/inspectMigration' | 'bridgePlugin/cancelExecution' | 'bridgePlugin/inspectExecution' | 'bridgePlugin/inspectSessionStorage', input: JsonObject | undefined, signal: AbortSignal, direct = false): Promise<DshPortResult<JsonValue>> => {
     if (pendingRpc >= 32) throw failure('DSH_RPC_BACKPRESSURE')
     pendingRpc += 1
     try {

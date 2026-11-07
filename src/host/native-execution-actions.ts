@@ -10,6 +10,7 @@ export interface NativeExecutionPolicyActionsOptions {
   readonly transport: TransportAdapter
   readonly persona: OutboundScope['persona']
   readonly cancel?: AgentAdapter['cancel']
+  readonly cancelExact?: (request: NativeExecutionAction) => Promise<{ readonly status: 'accepted' | 'rejected' | 'unknown' }>
   readonly guard: (request: NativeExecutionAction) => Promise<void>
 }
 
@@ -25,10 +26,11 @@ export function createNativeExecutionPolicyActions(options: NativeExecutionPolic
   }
 
   return Object.freeze({
-    ...(options.cancel === undefined ? {} : {
+    ...(options.cancel === undefined && options.cancelExact === undefined ? {} : {
       async cancel(request: NativeExecutionAction): Promise<{ readonly status: 'accepted' | 'rejected' | 'unknown' }> {
         try { await authorize(request, 'agent.cancel') } catch { return { status: 'rejected' } }
         try {
+          if (options.cancelExact) return await options.cancelExact(request)
           await options.cancel!({ sessionId: request.execution.binding.sessionId, signal: request.signal })
           return { status: 'accepted' }
         } catch (error) { return { status: errorCode(error) === 'DSH_CANCEL_REJECTED' ? 'rejected' : 'unknown' } }

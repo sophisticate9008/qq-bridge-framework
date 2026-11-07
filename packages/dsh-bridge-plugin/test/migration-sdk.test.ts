@@ -27,6 +27,8 @@ import Tools from '@deepseek-ai/dsh-tools'
 import Registry from '@deepseek-ai/dsh-typert-registry'
 import type BridgePlugin from '../dist/index.js'
 import type { DshExecutionEvidence } from '../dist/execution-evidence-protocol.js'
+import { recoverSdkWork } from '../dist/work-recovery.js'
+import type { WorkJournalRecord } from '../dist/work-journal.js'
 import { migrationDigest } from '../dist/migration-journal.js'
 import { prepareSdkMigration } from '../dist/migration-runtime.js'
 import type { ForkPreviewResult, ForkWithPresetRequest, ForkWithPresetResult } from '../dist/migration-protocol.js'
@@ -306,6 +308,35 @@ test('real SDK owner fork preserves completed text, target model selection, work
     const synthetic = await invoke('inspectExecution', { sessionId: coldChild.id, requestId: 'synthetic-close-request' }) as DshExecutionEvidence
     assert.equal(synthetic.state, 'unavailable')
     assert.deepEqual(synthetic.missingReasons, ['execution_terminal_unverifiable'])
+    assert.equal(adapter.calls, 0)
+    const workChildHandle = await ctx.agents.create({ sessionId: SessionId('checkpoint-work-child'),
+      meta: { cwd: directory, origin: 'subagent', parentSession: source.id },
+      agentOptions: { provider: 'old-route', model: 'fixture-model' } })
+    const workChild = workChildHandle.agent
+    workChild.session.append('turn/start', { turn: 1 })
+    workChild.session.append('step/start', { turn: 1, step: 1 })
+    const workMessage = createUserMessage({ source: { kind: 'user', rpcId: 'work-request' }, content: [{ type: 'text', text: 'Offline recovery fixture' }] })
+    workChild.session.append('user/message', workMessage, { surfaceOp: 'append' })
+    workChild.session.append('assistant/message', { turn: 1, step: 1, message: createAssistantMessage({
+      source: { provider: 'old-route', model: 'fixture-model' }, content: [{ type: 'text', text: 'Verified completed work' }] }), stream: [] }, { surfaceOp: 'append' })
+    const workRecord: WorkJournalRecord = { schema: 1, fingerprint: 'a'.repeat(64),
+      address: { id: 'work-record', parentSessionId: source.id, childId: workChild.id, generation: 1 },
+      target: { modelProvider: 'old-route', model: 'fixture-model', agentPreset: 'old', timeoutMs: null },
+      state: 'unknown', result: null, error: 'WORK_RECOVERY_REQUIRED', acceptedMessageId: workMessage.id, followupRequestId: null, attachments: [] }
+    const workSignal = new AbortController().signal
+    await ctx.sessionPersistence.flush()
+    assert.equal(await recoverSdkWork(ctx, workRecord, workSignal), null)
+    workChild.session.append('step/end', { turn: 1, step: 1 })
+    workChild.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    await ctx.sessionPersistence.flush()
+    const workEvidence = await recoverSdkWork(ctx, workRecord, workSignal)
+    assert.equal(workEvidence?.result.stopReason, 'completed')
+    assert.deepEqual(workEvidence?.result.output, [{ type: 'text', text: 'Verified completed work' }])
+    assert.match(workEvidence!.evidence.checkpointHash, /^[a-f0-9]{64}$/)
+    assert.equal(await recoverSdkWork(ctx, { ...workRecord, acceptedMessageId: 'wrong-message' }, workSignal), null)
+    assert.equal(await recoverSdkWork(ctx, { ...workRecord, address: { ...workRecord.address, parentSessionId: 'other-parent' } }, workSignal), null)
+    await workChildHandle.dispose()
+    assert.equal((await recoverSdkWork(ctx, workRecord, workSignal))?.result.stopReason, 'completed')
     assert.equal(adapter.calls, 0)
     await peer.dispose()
   } finally {

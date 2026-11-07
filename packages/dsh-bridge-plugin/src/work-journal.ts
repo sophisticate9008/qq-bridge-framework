@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { validWorkUsage, type WorkUsageStep } from './work-usage.js'
 import { validWorkProgress, type WorkProgress } from './work-progress.js'
 import { validIdentifier } from './receipts.js'
-import { validWorkOutput, type WorkOutput } from './work-output.js'
+import { validWorkOutput, type WorkOutput, type WorkMediaReference } from './work-output.js'
 import type { WorkStart } from './work.js'
 
 export interface WorkJournalRecord {
@@ -19,6 +19,8 @@ export interface WorkJournalRecord {
   readonly state: 'starting' | 'running' | 'completed' | 'unknown'
   readonly result: { readonly stopReason: string; readonly output: readonly WorkOutput[] } | null
   readonly error: string | null
+  readonly attachments?: readonly WorkMediaReference[]
+  readonly recoveryEvidence?: { readonly checkpointHash: string; readonly checkpointSequence: number; readonly observedAt: number }
   readonly acceptedMessageId: string | null
   readonly followupRequestId: string | null
 }
@@ -40,6 +42,7 @@ function valid(value: unknown): value is WorkJournalRecord {
   if (Object.keys(address).sort().join(',') !== 'childId,generation,id,parentSessionId'
     || ![address.id, address.parentSessionId, address.childId].every(validIdentifier)
     || address.childId === address.parentSessionId || !Number.isSafeInteger(address.generation) || Number(address.generation) < 1
+    || 'attachments' in value && (!Array.isArray(value.attachments) || value.attachments.length > 3 || value.attachments.some(x => !validWorkOutput(x) || x.type !== 'media-reference'))
     || 'usage' in value && !validWorkUsage(value.usage)
     || 'progress' in value && !validWorkProgress(value.progress)
     || 'permissionVerified' in value && value.permissionVerified !== undefined && typeof value.permissionVerified !== 'boolean'

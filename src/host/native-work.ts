@@ -515,6 +515,32 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
     } finally { admissions-- }
   }
 
+  async function inspectExisting(id: string, signal: AbortSignal): Promise<Readonly<NativeWorkView>> {
+    assert(!closed, 'NATIVE_WORK_CLOSED', 'The work executor is closed.')
+    const record = options.store.read(namespace, id)
+    assert(record, 'NATIVE_WORK_NOT_FOUND', 'The addressed work does not exist.')
+    const view = projection(record)
+    assert(currentParent(view), 'NATIVE_WORK_SCOPE_MISMATCH', 'Work inspection requires the original current parent.')
+    assert(options.backend?.inspect, 'NATIVE_WORK_INSPECTION_UNAVAILABLE', 'The backend cannot inspect durable work results.')
+    if (pending.has(view.id)) return view
+    const observed = await withDeadline({ signal, timeoutMs: 5000, code: 'NATIVE_WORK_INSPECTION_UNKNOWN',
+      run: activeSignal => options.backend!.inspect!({ id: view.id, childId: view.childId,
+        parentSessionId: view.parentSessionId, generation: view.generation, signal: activeSignal }) })
+    const evidence: JsonObject = { observedState: observed.state, observedAt: Date.now() }
+    if (observed.state === 'completed') {
+      assert(observed.result, 'INVALID_NATIVE_WORK_RESULT', 'Completed work requires captured result evidence.')
+      const result = validatedResult(observed.result)
+      if (view.status === 'unknown' || view.result === null) Object.assign(evidence,
+        { result: json(result), stopReason: result.stopReason, status: result.stopReason === 'completed' ? 'completed' : 'failed',
+        delivery: 'unknown', deliveryError: 'NATIVE_WORK_RECOVERED_UNDELIVERED', lastError: null })
+      else if (digest(view.result) !== digest(result)) Object.assign(evidence,
+        { lateResult: json(result), lastError: 'NATIVE_WORK_REMOTE_CHANGED', status: 'unknown' })
+    }
+    const updated = options.store.write(namespace, view.id, { ...object(record.value), ...evidence }, { expectedRevision: record.revision })
+    if (object(updated.value).status !== view.status) observe(updated)
+    return projection(updated)
+  }
+
   return Object.freeze({ execute, read,
     list(query: { readonly conversationId?: string; readonly limit?: number; readonly after?: string } = {}) {
       const limit = query.limit ?? 100
@@ -543,6 +569,8 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
     },
     followup(request: EffectRequest) { return control(request, 'followup') },
     interrupt(request: EffectRequest) { return control(request, 'interrupt') },
+    /** Trusted lifecycle observer; never starts work or retries delivery. */
+    observeExisting(id: string, signal: AbortSignal) { return inspectExisting(id, AbortSignal.any([signal, lifetime.signal])) },
     async reconcile(request: EffectRequest): Promise<Readonly<NativeWorkView>> {
       assert(!closed && isRecord(request.input) && Object.keys(request.input).length === 1 && reference(request.input.id),
         'INVALID_NATIVE_WORK_INPUT', 'Work reconciliation accepts one work identifier.')
@@ -555,24 +583,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
       assert(view.conversationId === request.scope.conversationId && view.parentSessionId === request.scope.sessionId
         && view.generation === request.scope.generation && source.userId === object(record.value).ownerId && currentParent(view),
       'NATIVE_WORK_SCOPE_MISMATCH', 'Only the current original parent may inspect this work backend.')
-      assert(options.backend?.inspect, 'NATIVE_WORK_INSPECTION_UNAVAILABLE', 'The backend cannot inspect durable work results.')
-      if (pending.has(view.id)) return view
-      const observed = await withDeadline({ signal, timeoutMs: 5000, code: 'NATIVE_WORK_INSPECTION_UNKNOWN',
-        run: activeSignal => options.backend!.inspect!({ id: view.id, childId: view.childId,
-          parentSessionId: view.parentSessionId, generation: view.generation, signal: activeSignal }) })
-      const evidence: JsonObject = { observedState: observed.state, observedAt: Date.now() }
-      if (observed.state === 'completed') {
-        assert(observed.result, 'INVALID_NATIVE_WORK_RESULT', 'Completed work requires captured result evidence.')
-        const result = validatedResult(observed.result)
-        if (view.status === 'unknown' || view.result === null) Object.assign(evidence,
-          { result: json(result), stopReason: result.stopReason, status: result.stopReason === 'completed' ? 'completed' : 'failed',
-            delivery: 'unknown', deliveryError: 'NATIVE_WORK_RECOVERED_UNDELIVERED', lastError: null })
-        else if (digest(view.result) !== digest(result)) Object.assign(evidence,
-          { lateResult: json(result), lastError: 'NATIVE_WORK_REMOTE_CHANGED', status: 'unknown' })
-      }
-      const updated = options.store.write(namespace, view.id, { ...object(record.value), ...evidence }, { expectedRevision: record.revision })
-      if (object(updated.value).status !== view.status) observe(updated)
-      return projection(updated)
+      return inspectExisting(view.id, signal)
     },
     async close(signal: AbortSignal): Promise<void> {
       closed = true

@@ -17,6 +17,10 @@ function project(event: SessionWireEvent): SessionWireEvent {
   const data = event.data
   if (!data || typeof data !== 'object' || Array.isArray(data)) return { ...event, data: {} }
   if (['assistant/message', 'turn/start', 'turn/end', 'turn/error', 'session/error'].includes(event.type)) return event
+  if (['compaction/start', 'compaction/end'].includes(event.type)) return { ...event, data: {
+    ...(typeof data.turn === 'number' ? { turn: data.turn } : {}),
+    ...(typeof data.compactionId === 'string' ? { compactionId: data.compactionId } : {}), failed: data.error !== undefined,
+  } }
   if (event.type === 'user/message') {
     const { content: _content, ...identity } = data
     return { ...event, data: identity }
