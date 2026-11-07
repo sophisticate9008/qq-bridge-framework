@@ -1159,8 +1159,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           readImage: request => { if (!media) failure('NATIVE_MEDIA_UNAVAILABLE'); return media.readImage(request) },
           selfId, store: store!, sources: () => messageSources?.reader,
           authorize: (conversationId, signal) => guard(conversationId, signal, true, 'resource') })
+        // Auxiliary sessions inherit the selected adapter model's verified capacity.
         const stickerModel = { provider: selected.deployment.presetBindings.find(b => b.externalProvider)?.externalProvider ?? definition.model.provider,
-          model: definition.model.name, reasoningEffort: definition.model.reasoningEffort, contextWindow: 128_000 }
+          model: definition.model.name, reasoningEffort: definition.model.reasoningEffort }
         const stickerUsageStore = store
         const stickerUsage = createStickerUsage({ store: stickerUsageStore, accountId: selfId })
         // Selection only chooses a numbered, already-labelled candidate. Use the
