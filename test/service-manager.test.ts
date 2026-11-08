@@ -35,7 +35,7 @@ function fixture() {
     },
   };
   const save = () => writeFileSync(join(directory, 'data/live/services.json'), JSON.stringify(configuration), { mode: 0o600 });
-  const run = (...args: string[]) => spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', timeout: 15_000 });
+  const run = (...args: string[]) => spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', timeout: 60_000 });
   save();
   return { directory, configuration, save, run };
 }

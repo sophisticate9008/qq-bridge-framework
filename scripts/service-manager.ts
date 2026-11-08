@@ -515,7 +515,8 @@ async function main(): Promise<void> {
       delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
       delete environment.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE;
       // Keep every stage in the detached repair session so stopping its former host protects the whole worker tree.
-      const result = await execute(process.execPath, [entry, value], { env: environment, timeout: 180_000, detached: false });
+      const result = await execute(process.execPath, [entry, value], { env: environment,
+        timeout: value === 'repair-services-start' ? 300_000 : 180_000, detached: false });
       if (result.code !== 0) throw Object.assign(new Error('Managed repair stage failed.'), { code:
         value === 'repair-services-stop' ? 'chat_repair_stop_failed' : 'chat_repair_start_failed' });
     };
@@ -553,7 +554,7 @@ async function main(): Promise<void> {
     } else {
       const { startRepairServices } = await import('./repair-service-start.ts');
       const starts = targets.filter(id => config.services[id]!.enabled !== false);
-      await startRepairServices(starts, Date.now() + 140_000, {
+      await startRepairServices(starts, Date.now() + (action === 'repair-services-start' ? 240_000 : 140_000), {
         bootstrapAdministrator: deadline => startOne(config, 'framework-admin', deadline, true),
         start: (id, deadline) => startOne(config, id, deadline),
         async ready(id, deadline) {
