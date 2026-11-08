@@ -1,7 +1,9 @@
+import type { FileSystem } from '@deepseek-ai/dsh-fs'
+import type { WorkPathDescriptor } from '../dist/work-path.js'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, writeFile, open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -40,6 +42,9 @@ import * as Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 interface FrameworkClient {
   work: {
+    readPath?(request: WorkAddress & { kind: 'file'; attachmentId: string }, signal: AbortSignal): Promise<{ asset: unknown; descriptor: WorkPathDescriptor; file?: string }>
+    releasePath?(request: WorkAddress & { kind: 'file'; attachmentId: string }, signal: AbortSignal): Promise<void>
+
     readAsset?(request: WorkAddress & {kind:'image'|'file';attachmentId:string},signal:AbortSignal):Promise<{asset:unknown;data:Uint8Array}>
     verify(request: WorkTarget & { issuerEpoch: string }, signal: AbortSignal): Promise<boolean>
     start(request: WorkStart, signal: AbortSignal): Promise<{ state: string; childId: string; result: unknown; error: string | null }>
@@ -201,7 +206,8 @@ test('official plugin entry and actual framework HTTP client isolate claims, per
     ctx.plugin(Presets, { default: 'chosen-group' })
     ctx.plugin(AgentLoop)
     ctx.plugin(SessionQuery, { path: ':memory:', openAt: 'never' })
-    ctx.provide('fs', {})
+    ctx.provide('fs', { async lstat(path: string) { const info = await (await import('node:fs/promises')).lstat(path); return { type: info.isFile() ? 'file' : 'directory' }; },
+      async resolve(path: string) { return { displayPath: path }; }, processPath(target: { displayPath: string }) { return target.displayPath; } } as unknown as FileSystem)
     ctx.provide('attachments', { imageLimits: { maxImageBytes: 1024, maxImagesPerMessage: 1,
       maxMessageImageBytes: 1024, maxImagePixels: 1024, maxImageDimension: 32, mediaTypes: ['image/png'] },
       async saveImage(input:{data:Uint8Array;mediaType:string}) {
@@ -738,10 +744,41 @@ test('official plugin entry and actual framework HTTP client isolate claims, per
           {type:'media-reference',kind:'image',attachmentId:'sdk-image',bytes:4,mediaType:'image/png',width:1,height:1},
           {type:'media-reference',kind:'file',attachmentId:'sdk-file',bytes:400000,name:'result.txt'}])
         assert(client.work.readAsset)
-        assert.deepEqual((await client.work.readAsset({...address,kind:'image',attachmentId:'sdk-image'},signal)).data,Buffer.from([1,2,3,4]))
-        assert.deepEqual((await client.work.readAsset({...address,kind:'file',attachmentId:'sdk-file'},signal)).data,Buffer.alloc(400000,7))
+        await assert.rejects(client.work.readAsset({...address,kind:'image',attachmentId:'sdk-image'},signal), /旧附件已失效/)
+        await assert.rejects(client.work.readAsset({...address,kind:'file',attachmentId:'sdk-file'},signal), /旧附件已失效/)
         await assert.rejects(client.work.readAsset({...address,kind:'file',attachmentId:'not-in-result'},signal))
         await assert.rejects(client.work.readAsset({...address,generation:6,kind:'file',attachmentId:'sdk-file'},signal))
+        adapter.workMedia = false; adapter.workHold = true;
+        const pathAddress = { ...address, id: 'sdk-path-work', childId: 'sdk-path-child' };
+        await client.work.start({ ...pathAddress, ...target, task: 'WAIT_FOR_PATH_REGISTRATION', context: '', timeoutMs: null }, signal);
+        const pathChild = ctx.agents.get(SessionId(pathAddress.childId)); assert(pathChild);
+        const workspace = join(directory, 'workspace'); await mkdir(workspace);
+        const path = join(workspace, 'large.bin'); const handle = await open(path, 'wx');
+        try { await handle.truncate(100 * 1024 * 1024); } finally { await handle.close(); }
+        const attach = pathChild.ctx.tools.get('qbf_work_attach', pathChild); assert(attach);
+        const registration = object(await attach.execute({ path }, { agent: pathChild, signal } as Parameters<typeof attach.execute>[1]));
+        assert.equal(registration.bytes, 100 * 1024 * 1024); assert.equal(registration.sent, false);
+        const namedPath = join(workspace, 'small.txt'); await writeFile(namedPath, 'small');
+        const named = object(await attach.execute({ path: namedPath, filename: 'custom.txt', kind: 'file' }, { agent: pathChild, signal } as Parameters<typeof attach.execute>[1]));
+        assert.equal(named.registered, true); assert.equal(named.name, 'custom.txt');
+        assert(typeof registration.resourceId === 'string');
+        const pathRequest = { ...pathAddress, kind: 'file' as const, attachmentId: registration.resourceId };
+        assert(client.work.readPath); assert(client.work.releasePath);
+        assert.equal((await client.work.readPath(pathRequest, signal)).descriptor.path, path);
+        const remote = factory({ endpoint, auth, sharedWorkFilesystem: false }) as FrameworkClient;
+        try {
+          assert(remote.work.readPath);
+          const channel = await remote.work.readPath(pathRequest, signal); assert(channel.file);
+          assert(channel.file.startsWith(endpoint));
+          const streamed = await fetch(channel.file); assert.equal(streamed.status, 200); assert(streamed.body);
+          const { createHash } = await import('node:crypto'); const hash = createHash('sha256'); let bytes = 0;
+          for await (const chunk of streamed.body) { bytes += chunk.length; hash.update(chunk); }
+          assert.equal(bytes, 100 * 1024 * 1024); assert.equal(hash.digest('hex'), channel.descriptor.sha256);
+          await assert.rejects(remote.work.readPath({ ...pathRequest, generation: 999 }, signal));
+          await client.work.releasePath(pathRequest, signal);
+          await assert.rejects(remote.work.readPath(pathRequest, signal));
+        } finally { await remote.close(); }
+        await client.work.interrupt(pathAddress, signal);
       } finally { adapter.workOutput = false; adapter.workHold = false; adapter.workMedia = false; unregister() }
     })
     await context.test('official SDK event carrier opens without historical payload and resumes an acknowledged cursor without model calls', async () => {
