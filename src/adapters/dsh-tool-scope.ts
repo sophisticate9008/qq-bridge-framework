@@ -23,6 +23,7 @@ export interface DshBridgePluginDescription {
   readonly migrationProtocol?: string
   readonly frameworkToolProtocol?: 'qq-bridge-framework.tools/1'
   readonly executionEvidenceProtocol?: typeof DSH_EXECUTION_EVIDENCE_PROTOCOL
+  readonly workPathProtocol?: 'qq-bridge-framework.work-path/1'
   readonly workProtocol?: 'qq-bridge-framework.work/1'
   readonly methods?: readonly string[]
   readonly sessionEventsProtocol?: 'qq-bridge-framework.session-events/1'
@@ -86,9 +87,10 @@ export function createDshBridgePluginPort(invoke: (method: PluginMethod, request
       if (value.migrationApiVersion !== undefined) requireProof(value.migrationApiVersion === 1 || value.migrationApiVersion === 2)
       if (value.migrationProtocol !== undefined) requireProof(validIdentifier(value.migrationProtocol))
       if (value.frameworkToolProtocol !== undefined) requireProof(value.frameworkToolProtocol === 'qq-bridge-framework.tools/1')
+      if (value.workPathProtocol !== undefined) requireProof(value.workPathProtocol === 'qq-bridge-framework.work-path/1')
       if (value.workProtocol !== undefined) requireProof(value.workProtocol === 'qq-bridge-framework.work/1')
       if (value.sessionEventsProtocol !== undefined) requireProof(value.sessionEventsProtocol === 'qq-bridge-framework.session-events/1')
-      if (value.methods !== undefined) requireProof(Array.isArray(value.methods) && value.methods.length <= 32
+      if (value.methods !== undefined) requireProof(Array.isArray(value.methods) && value.methods.length <= 40
         && value.methods.every(validIdentifier) && new Set(value.methods).size === value.methods.length)
       return { protocol: BRIDGE_PLUGIN_PROTOCOL, pluginVersion: value.pluginVersion as string, sdkVersion: value.sdkVersion as string, issuerEpoch: value.issuerEpoch,
         authentication: 'dsh-owner-peer', durableReceipts: false, claimMeaning: 'inbox-claimed-not-completed',
@@ -97,6 +99,7 @@ export function createDshBridgePluginPort(invoke: (method: PluginMethod, request
         ...(value.migrationApiVersion === undefined ? {} : { migrationApiVersion: value.migrationApiVersion as 1 | 2 }),
         ...(value.migrationProtocol === undefined ? {} : { migrationProtocol: value.migrationProtocol as string }),
         ...(value.frameworkToolProtocol === undefined ? {} : { frameworkToolProtocol: 'qq-bridge-framework.tools/1' as const }),
+        ...(value.workPathProtocol === undefined ? {} : { workPathProtocol: 'qq-bridge-framework.work-path/1' as const }),
         ...(value.workProtocol === undefined ? {} : { workProtocol: 'qq-bridge-framework.work/1' as const }),
         ...(value.sessionEventsProtocol === undefined ? {} : { sessionEventsProtocol: 'qq-bridge-framework.session-events/1' as const }),
         ...(value.methods === undefined ? {} : { methods: [...value.methods as string[]] }) }

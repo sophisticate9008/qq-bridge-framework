@@ -109,7 +109,7 @@ node scripts/simulate-qq.ts --provider deepseek-official --model deepseek-flash
 
 模拟 HTTP 端支持本轮消息/转发/素材查询及固定模拟群、群成员、好友信息与聊天记录。戳一戳、撤回由本地记录确认，撤回后相应消息不再可查询。收藏列表初始为空，准备和注入图片只登记素材；实际调用收藏新增后才进入列表，同内容按 MD5 去重。没有登记的素材与节点返回失败；未支持的协议动作明确返回失败，并记录 `unsupported-protocol-action`。这些数据均来自模拟实例。
 
-固定动作包括 `get_msg`、`get_forward_msg`、`get_image`、`get_record`、`get_file`、`get_group_file_url`、`get_private_file_url`、`fetch_custom_face_detail`、`add_custom_face`、`get_group_info`、`get_group_member_info`、`get_group_member_list`、`get_group_msg_history`、`get_friend_msg_history`、`get_friend_list`、`get_group_list`、`group_poke`、`friend_poke`、`delete_msg`。消息、合并转发和上传文件使用原有 `send_*_msg`、`send_*_forward_msg`、`upload_*_file` 路由。出站图片、语音和文件必须能够捕获实际字节，否则返回失败；每份字节记录本地路径、大小和 SHA-256。
+固定动作包括 `get_msg`、`get_forward_msg`、`get_image`、`get_record`、`get_file`、`get_group_file_url`、`get_private_file_url`、`fetch_custom_face_detail`、`add_custom_face`、`get_group_info`、`get_group_member_info`、`get_group_member_list`、`get_group_msg_history`、`get_friend_msg_history`、`get_friend_list`、`get_group_list`、`group_poke`、`friend_poke`、`delete_msg`。消息、合并转发和上传文件使用原有 `send_*_msg`、`send_*_forward_msg`、`upload_*_file` 路由。出站图片、语音和文件必须能够捕获实际字节，否则返回失败；每份字节记录本地路径、大小和 SHA-256。绝对路径文件上传支持最多 512 MiB 的流式磁盘捕获，大文件不进入内存素材库，不能通过模拟素材查询重新读取；Base64、图片及普通素材仍保持原 8 MiB 限制。
 
 ## 批量聊天与连续追加
 

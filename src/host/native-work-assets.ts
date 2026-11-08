@@ -1,3 +1,4 @@
+import { inspectWorkPath, validWorkPath } from '../storage/work-path.ts';
 import { privatePermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -24,6 +25,7 @@ export function createNativeWorkAssets(options: {
 }) {
   const directory = join(options.directory, 'work-assets');
   const namespace = 'native-work.assets';
+  const pathNamespace = 'native-work.paths';
   let tail: Promise<unknown> = Promise.resolve();
   const clock = options.clock ?? Date.now;
   const ttl = 86400000;
@@ -64,7 +66,11 @@ export function createNativeWorkAssets(options: {
     assert(count + (additionalBytes > 0 ? 1 : 0) <= 512 && total + additionalBytes <= 128 * 1024 * 1024,
       'WORK_ASSET_BACKPRESSURE', 'The work asset count or byte limit was reached.');
   }
-  const maintenance = () => enqueue(() => capacity());
+  async function pathCapacity(additional = 0) {
+    const records = options.store.list(pathNamespace, { limit: 513 });
+    assert(records.length + additional <= 512, 'WORK_PATH_BACKPRESSURE', 'The path registration count limit was reached.');
+  }
+  const maintenance = () => enqueue(async () => { await capacity(); await pathCapacity(); });
   function schedule(delay: number) {
     if (closed || options.signal?.aborted) return;
     timer = setTimeout(() => { void maintenance().catch(error => {
@@ -99,6 +105,24 @@ export function createNativeWorkAssets(options: {
         const { address, asset, signal } = request;
         const parent = binding(address);
         await options.authorize(parent.conversationId, signal);
+        if (asset.storage === 'path') {
+          assert(options.port.readPath, 'WORK_PATH_READER_UNAVAILABLE', 'The path attachment reader is unavailable.');
+          const resolved = await options.port.readPath({ ...address, attachmentId: asset.attachmentId, kind: asset.kind }, signal);
+          assert(digest(resolved.asset) === digest(asset) && validWorkPath(resolved.descriptor)
+            && resolved.descriptor.bytes === asset.bytes, 'WORK_PATH_INVALID', 'The registered path metadata changed.');
+          const descriptor = await inspectWorkPath({ path: resolved.descriptor.path, roots: [resolved.descriptor.root], expected: resolved.descriptor, signal, now: clock() });
+          signal.throwIfAborted(); binding(address); await options.authorize(parent.conversationId, signal);
+          const assetId = `work-path-${digest([options.accountId, parent.conversationId, address.id, address.childId, address.parentSessionId, address.generation, asset])}`;
+          const prior = options.store.read(pathNamespace, assetId);
+          if (!prior) {
+            await pathCapacity(1);
+            options.store.write(pathNamespace, assetId, json({ schema: 1, assetId, accountId: options.accountId,
+              conversationId: parent.conversationId, workId: address.id, childId: address.childId,
+              parentSessionId: address.parentSessionId, generation: address.generation, kind: asset.kind,
+              name: asset.name ?? null, descriptor }), { expectedRevision: null, expiresAt: descriptor.expiresAt });
+          } else assert(digest(object(prior.value).descriptor) === digest(descriptor), 'WORK_PATH_CHANGED', 'The registered path changed.');
+          return asset.kind === 'file' ? { type: 'file' as const, assetId, name: asset.name! } : { type: 'image' as const, assetId };
+        }
         assert(options.port.readAsset, 'WORK_MEDIA_READER_UNAVAILABLE', 'The SDK attachment reader is unavailable.');
         const resolved = await options.port.readAsset({ ...address, attachmentId: asset.attachmentId, kind: asset.kind }, signal);
         signal.throwIfAborted(); binding(address);
@@ -128,16 +152,29 @@ export function createNativeWorkAssets(options: {
       return operation;
     },
     resolve(request: OneBotAssetResolutionRequest) { return enqueue(async () => {
-      assert(/^work-asset-[a-f0-9]{64}$/.test(request.assetId), 'WORK_ASSET_UNAVAILABLE', 'This is not a registered work asset.');
+      assert(/^work-(?:asset|path)-[a-f0-9]{64}$/.test(request.assetId), 'WORK_ASSET_UNAVAILABLE', 'This is not a registered work asset.');
       await options.authorize(request.conversationId, request.signal);
-      const record = options.store.read(namespace, request.assetId);
+      const pathAsset = request.assetId.startsWith('work-path-');
+      const record = options.store.read(pathAsset ? pathNamespace : namespace, request.assetId);
       assert(record, 'WORK_ASSET_UNAVAILABLE', 'The work asset is unavailable.');
       const value = object(record.value);
       const parent = typeof value.parentSessionId === 'string' ? options.parent(value.parentSessionId) : null;
       assert(value.schema === 1 && value.accountId === options.accountId && value.conversationId === request.conversationId
         && value.parentSessionId === request.sessionId && value.generation === request.generation && parent?.generation === request.generation
-        && parent.conversationId === request.conversationId && value.kind === request.type && Number(value.expiresAt) > clock(),
+        && parent.conversationId === request.conversationId && value.kind === request.type
+        && (pathAsset ? validWorkPath(value.descriptor) && value.descriptor.expiresAt > clock() : Number(value.expiresAt) > clock()),
       'WORK_ASSET_SCOPE_MISMATCH', 'The attachment belongs to a different or expired work scope.');
+      if (pathAsset) {
+        assert(validWorkPath(value.descriptor), 'WORK_PATH_INVALID', 'The path descriptor is invalid.');
+        const descriptor = value.descriptor;
+        await inspectWorkPath({ path: descriptor.path, roots: [descriptor.root], expected: descriptor, signal: request.signal, now: clock() });
+        await options.authorize(request.conversationId, request.signal);
+        assert(options.parent(String(value.parentSessionId))?.generation === request.generation,
+          'WORK_PARENT_UNAVAILABLE', 'The original work parent changed.');
+        request.signal.throwIfAborted();
+        assert(descriptor.expiresAt > clock(), 'WORK_ASSET_EXPIRED', 'The path registration expired during verification.');
+        return { file: descriptor.path };
+      }
       const filename = join(directory, request.assetId);
       const data = await bytes(filename, Number(value.bytes), String(value.hash));
       await options.authorize(request.conversationId, request.signal);

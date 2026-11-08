@@ -12,7 +12,7 @@ export interface WorkJournalRecord {
   readonly schema: 1
   readonly fingerprint: string
   readonly address: { readonly id: string; readonly parentSessionId: string; readonly childId: string; readonly generation: number }
-  readonly target: { readonly fullAccess?: boolean; readonly modelProvider: string; readonly model: string; readonly agentPreset: string; readonly reasoningEffort?: string; readonly timeoutMs: number | null }
+  readonly target: { readonly attachmentTransport?: 'path-v1'; readonly fullAccess?: boolean; readonly modelProvider: string; readonly model: string; readonly agentPreset: string; readonly reasoningEffort?: string; readonly timeoutMs: number | null }
   readonly usage?: readonly WorkUsageStep[]
   readonly progress?: readonly WorkProgress[]
   readonly permissionVerified?: boolean
@@ -47,6 +47,7 @@ function valid(value: unknown): value is WorkJournalRecord {
     || 'progress' in value && !validWorkProgress(value.progress)
     || 'permissionVerified' in value && value.permissionVerified !== undefined && typeof value.permissionVerified !== 'boolean'
     || 'permissionVerified' in value && value.permissionVerified === true && target.fullAccess !== true
+    || target.attachmentTransport !== undefined && target.attachmentTransport !== 'path-v1'
     || target.fullAccess !== undefined && typeof target.fullAccess !== 'boolean'
     || ![target.modelProvider, target.model, target.agentPreset].every(validIdentifier)
     || target.reasoningEffort !== undefined && !validIdentifier(target.reasoningEffort)

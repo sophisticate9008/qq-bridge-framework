@@ -14,7 +14,7 @@ import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { BRIDGE_PLUGIN_PROTOCOL, RECEIPT_LIMITS, createClaimReceiptJournal, type ClaimReceiptQuery } from './receipts.js'
 import { createDshToolScopeReader, type DshToolScopeRequest } from './tool-scope.js'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { createMigrationJournal } from './migration-journal.js'
 import { MIGRATION_PROTOCOL, type ForkPreviewRequest, type ForkWithPresetRequest } from './migration-protocol.js'
@@ -22,6 +22,7 @@ import { prepareSdkMigration } from './migration-runtime.js'
 import { createFrameworkToolChannel, type FrameworkToolInstall, type FrameworkToolCompletion } from './framework-tools.js'
 import { createWorkJournal } from './work-journal.js'
 import { createWorkChannel, type WorkAddress, type WorkStart, type WorkTarget } from './work.js'
+import { createWorkPathRegistry } from './work-path-registry.js'
 import { installWorkAttachmentTool } from './work-attachments.js'
 import { createReplyDecisionRepair } from './reply-decision-repair.js'
 import { createPluginModelChannel } from './plugin-model.js'
@@ -65,7 +66,16 @@ export default class BridgePlugin extends TypertRemoteService {
       const current = service.current.bind(service)
       return { set, current }
     }
+    const pathRegistry = createWorkPathRegistry(join(resolveDshHome(), 'storages', 'qbf-work-paths'),
+      () => {
+        const deploymentDirectory = ctx.get('workingDirectory')?.defaultDirectory
+        return [...(deploymentDirectory ? [basename(deploymentDirectory) === 'workspace' ? deploymentDirectory : join(deploymentDirectory, 'workspace')] : []), join(resolveDshHome(), 'sessions')]
+      })
+    const maintenance = setInterval(() => { void pathRegistry.maintenance().catch(() => {}) }, 3600000)
+    maintenance.unref(); ctx.effect(() => async () => { clearInterval(maintenance); await pathRegistry.close() })
+    void pathRegistry.maintenance().catch(() => {})
     this.work = createWorkChannel({
+      readPath: (address, asset, signal) => pathRegistry.resolve(address, asset.attachmentId, signal),
       recover: (record, signal) => recoverSdkWork(ctx, record, signal),
       fullAccessAvailable: () => { try { fullAccessService(); return true } catch { return false } },
       applyFullAccess: agent => {
@@ -109,6 +119,10 @@ export default class BridgePlugin extends TypertRemoteService {
         assertLease: () => {
           if (!this.work.hasAttachmentLease(agent.session.id) || ctx.agents.get(agent.id) !== agent)
             throw new TypeError('The work attachment lease is unavailable')
+        },
+        pathRegistration: {
+          enabled: () => this.work.attachmentAddress(agent.session.id).attachmentTransport === 'path-v1',
+          register: (path, signal) => pathRegistry.register(this.work.attachmentAddress(agent.session.id), path, signal),
         },
         commit: asset => this.work.registerAttachment(agent.session.id, asset),
       }))
@@ -173,12 +187,12 @@ export default class BridgePlugin extends TypertRemoteService {
       migrationProtocol: MIGRATION_PROTOCOL, migrationApiVersion: 2,
       frameworkToolProtocol: 'qq-bridge-framework.tools/1',
       sessionEventsProtocol: SESSION_EVENTS_PROTOCOL,
-      workProtocol: 'qq-bridge-framework.work/1', executionEvidenceProtocol: DSH_EXECUTION_EVIDENCE_PROTOCOL,
+      workProtocol: 'qq-bridge-framework.work/1', workPathProtocol: 'qq-bridge-framework.work-path/1', executionEvidenceProtocol: DSH_EXECUTION_EVIDENCE_PROTOCOL,
       methods: ['bridgePlugin/inspectToolInventory', 'bridgePlugin/describe', 'bridgePlugin/inspectScope', 'bridgePlugin/claimReceipts',
         'bridgePlugin/forkPreview', 'bridgePlugin/forkWithPreset', 'bridgePlugin/inspectMigration',
         'bridgePlugin/installFrameworkTools', 'bridgePlugin/withdrawFrameworkTools',
         'bridgePlugin/pollFrameworkTools', 'bridgePlugin/completeFrameworkTool', 'bridgePlugin/inspectFrameworkTools',
-        'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkAsset', 'bridgePlugin/inspectExecution', 'bridgePlugin/cancelExecution', 'bridgePlugin/inspectSessionStorage',
+        'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkAsset', 'bridgePlugin/readWorkPath', 'bridgePlugin/inspectExecution', 'bridgePlugin/cancelExecution', 'bridgePlugin/inspectSessionStorage',
         'bridgePlugin/preparePluginModelSession', 'bridgePlugin/pluginModels', 'bridgePlugin/createPluginModelSession', 'bridgePlugin/inspectPluginModelSession', 'bridgePlugin/startPluginModel', 'bridgePlugin/waitPluginModelIdle', 'bridgePlugin/inspectPluginModelRun', 'bridgePlugin/followSessionEvents'],
       claimMeaning: 'inbox-claimed-not-completed', durableReceipts: false, externalToolAuthorizationVerified: false }
   }
@@ -283,6 +297,13 @@ export default class BridgePlugin extends TypertRemoteService {
 
   @Remote('inspectWork')
   inspectWork(request: WorkAddress) { const invocation = this.assertOperator(); return this.work.inspect(request, invocation.signal) }
+
+  @Remote('readWorkPath')
+  readWorkPath(request: WorkAddress & { kind: 'image' | 'file'; attachmentId: string }) {
+    const invocation = this.assertOperator()
+    if (Object.keys(request).some(key => !['issuerEpoch', 'id', 'parentSessionId', 'childId', 'generation', 'kind', 'attachmentId'].includes(key))) throw new TypeError('Invalid path reference request')
+    return this.work.readPath(request, invocation.signal)
+  }
 
   @Remote('readWorkAsset')
   readWorkAsset(request: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; offset: number; limit: number }) {

@@ -1,3 +1,4 @@
+import type { WorkPathDescriptor } from './work-path.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentActivation, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -17,6 +18,7 @@ export interface WorkAddress {
   readonly generation: number
 }
 export interface WorkTarget {
+  readonly attachmentTransport?: 'path-v1'
   readonly fullAccess?: boolean
   readonly parentSessionId: string
   readonly modelProvider: string
@@ -61,6 +63,7 @@ export function createWorkChannel(options: {
   readonly applyFullAccess?: (agent: Agent) => void
   readonly journal?: WorkJournal
   readonly recover?: (record: WorkJournalRecord, signal: AbortSignal) => Promise<{ result: NonNullable<WorkJournalRecord['result']>; evidence: NonNullable<WorkJournalRecord['recoveryEvidence']> } | null>
+  readonly readPath?: (address: WorkAddress, asset: WorkMediaReference, signal: AbortSignal) => Promise<WorkPathDescriptor>
   readonly readAsset?: (asset: WorkMediaReference, signal: AbortSignal) => Promise<Uint8Array>
 }) {
   const entries = new Map<string, Entry>()
@@ -69,6 +72,8 @@ export function createWorkChannel(options: {
     if (closed || value !== options.issuerEpoch) throw new TypeError('Work channel epoch changed')
   }
   async function target(request: WorkTarget) {
+    if (request.attachmentTransport !== undefined && request.attachmentTransport !== 'path-v1') throw new TypeError('Invalid attachment transport')
+    if (request.attachmentTransport === 'path-v1' && !options.readPath) throw new TypeError('Path attachments are unavailable')
     if (request.fullAccess !== undefined && typeof request.fullAccess !== 'boolean') throw new TypeError('Invalid work permission')
     if (![request.parentSessionId, request.modelProvider, request.model, request.agentPreset].every(validIdentifier)
       || request.reasoningEffort !== undefined && !validIdentifier(request.reasoningEffort)) throw new TypeError('Invalid work target')
@@ -84,7 +89,7 @@ export function createWorkChannel(options: {
     const request = entry.request
     return { schema: 1, fingerprint: entry.fingerprint,
       address: { id: request.id, parentSessionId: request.parentSessionId, childId: request.childId, generation: request.generation },
-      target: { ...(request.fullAccess === undefined ? {} : { fullAccess: request.fullAccess }), modelProvider: request.modelProvider, model: request.model, agentPreset: request.agentPreset, timeoutMs: request.timeoutMs, ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }) },
+      target: { ...(request.attachmentTransport ? { attachmentTransport: request.attachmentTransport } : {}), ...(request.fullAccess === undefined ? {} : { fullAccess: request.fullAccess }), modelProvider: request.modelProvider, model: request.model, agentPreset: request.agentPreset, timeoutMs: request.timeoutMs, ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }) },
       state: entry.state, result: entry.result, error: entry.error, permissionVerified: entry.permissionVerified === true, usage: entry.usage ?? [], progress: entry.progress ?? [],
       attachments: entry.attachments, ...(entry.recoveryEvidence ? { recoveryEvidence: entry.recoveryEvidence } : {}),
       acceptedMessageId: entry.acceptedMessageId, followupRequestId: entry.followupRequestId }
@@ -175,14 +180,19 @@ export function createWorkChannel(options: {
       return !closed && [...entries.values()].some(entry => entry.request.childId === childId
         && (entry.state === 'starting' || entry.state === 'running') && !entry.controller.signal.aborted)
     },
-    registerAttachment(childId: string, asset: WorkMediaReference): void {
+    attachmentAddress(childId: string): WorkStart {
+      const entry = [...entries.values()].find(value => value.request.childId === childId);
+      if (closed || !entry || !['starting', 'running'].includes(entry.state) || entry.controller.signal.aborted) throw new TypeError('Work lease unavailable');
+      return entry.request;
+    },
+    registerAttachment(childId: string, asset: WorkMediaReference): Promise<void> {
       const entry = [...entries.values()].find(value => value.request.childId === childId)
       if (closed || !entry || !['starting', 'running'].includes(entry.state) || entry.controller.signal.aborted || !validWorkOutput(asset))
         throw new TypeError('The work attachment lease is unavailable')
-      if (entry.attachments.some(value => value.kind === asset.kind && value.attachmentId === asset.attachmentId)) return
+      if (entry.attachments.some(value => value.kind === asset.kind && value.attachmentId === asset.attachmentId)) return entry.persistence
       if (entry.attachments.length >= 3) throw new TypeError('A work result accepts at most three attachments')
       entry.attachments.push(Object.freeze({ ...asset }))
-      void persist(entry).catch(() => {})
+      return persist(entry)
     },
     recordClaim(childId: string, requestId: string): void {
       for (const entry of entries.values()) if (entry.request.childId === childId) entry.pendingFollowups.delete(requestId)
@@ -200,7 +210,7 @@ export function createWorkChannel(options: {
       epoch(request.issuerEpoch)
       return { schema: 1 as const, issuerEpoch: options.issuerEpoch, available: (await target(request)).available,
         provider: 'spawn', continuable: true, continuousWorkSupported: true, externalToolAuthorizationVerified: false,
-        childFullAccessSupported: options.fullAccessAvailable?.() === true }
+        pathAttachmentsSupported: options.readPath !== undefined, childFullAccessSupported: options.fullAccessAvailable?.() === true }
     },
     async start(request: WorkStart, signal: AbortSignal) {
       epoch(request.issuerEpoch)
@@ -263,6 +273,17 @@ export function createWorkChannel(options: {
         parentSessionId: address.parentSessionId, childId: address.childId, generation: address.generation,
         state: 'unknown' as const, result: null, error: 'WORK_RECORD_UNAVAILABLE' }
     },
+    async readPath(address: WorkAddress & { kind: 'image' | 'file'; attachmentId: string }, signal: AbortSignal) {
+      const entry = await locate(address);
+      if (!entry || !options.readPath) throw new TypeError('Work path is unavailable');
+      await entry.persistence;
+      const asset = [...entry.attachments, ...(entry.result?.output ?? [])].find((block): block is WorkMediaReference => block.type === 'media-reference'
+        && block.storage === 'path' && block.kind === address.kind && block.attachmentId === address.attachmentId);
+      if (!asset) throw new TypeError('Path reference does not belong to this work');
+      const descriptor = await options.readPath(entry.request, asset, signal);
+      signal.throwIfAborted(); epoch(address.issuerEpoch);
+      return { schema: 1 as const, ...address, asset, descriptor };
+    },
     async readAsset(address: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; offset: number; limit: number }, signal: AbortSignal) {
       const entry = await locate(address)
       if (!entry || !options.readAsset || !['image', 'file'].includes(address.kind)
@@ -271,7 +292,7 @@ export function createWorkChannel(options: {
       await entry.persistence
       const asset = entry.result?.output.find((block): block is WorkMediaReference => block.type === 'media-reference'
         && block.kind === address.kind && block.attachmentId === address.attachmentId)
-      if (!asset || address.offset >= asset.bytes) throw new TypeError('Attachment does not belong to this work result')
+      if (!asset || asset.storage === 'path' || address.offset >= asset.bytes) throw new TypeError('Attachment does not belong to this work result')
       signal.throwIfAborted()
       const bytes = await options.readAsset(asset, signal)
       signal.throwIfAborted()

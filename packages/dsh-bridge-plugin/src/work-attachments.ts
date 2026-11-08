@@ -1,3 +1,6 @@
+import type { WorkPathDescriptor } from './work-path.js';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-fs';
@@ -16,12 +19,16 @@ function imageType(data: Uint8Array): 'image/png' | 'image/jpeg' | 'image/webp' 
 
 /** Installed only on a child reserved by the authenticated work channel. No protocol send capability. */
 export function installWorkAttachmentTool(agent: Agent, options: {
+  readonly pathRegistration?: {
+    readonly enabled: () => boolean;
+    readonly register: (path: string, signal: AbortSignal) => Promise<{ id: string; descriptor: WorkPathDescriptor }>;
+  };
   readonly assertLease: () => void;
-  readonly commit: (asset: WorkMediaReference) => void;
+  readonly commit: (asset: WorkMediaReference) => void | Promise<void>;
 }): () => void {
   return agent.ctx.tools.register(defineTool({
     name: 'qbf_work_attach',
-    description: '将本次工作的现有图片或文件登记为结果附件，工作完成后由宿主回传原QQ会话。path按当前工作目录解析；kind=image发送图片，kind=file发送文件，省略时根据真实文件字节识别图片。每项最多8MiB，本次工作最多3个不同附件。调用成功只表示已登记，不代表QQ已送达。最终回复描述结果，不要把本机路径当作已经发送。',
+    description: '将本次工作的现有图片或文件登记为结果附件，工作完成后由宿主回传原QQ会话。path按当前工作目录解析；kind=image发送图片，kind=file发送文件，省略时根据真实文件字节识别图片。共享本机文件系统时优先登记受控路径（工作目录的workspace/或DSH会话目录），保留24小时，请勿修改已登记文件；不支持路径时使用每项最多8MiB的字节附件。本次工作最多3个不同附件。调用成功只表示已登记，不代表QQ已送达。最终回复描述结果，不要把本机路径当作已经发送。',
     parameters: {
       path: { type: 'string', required: true, description: '当前工作生成或选定的现有普通文件路径。' },
       kind: { type: 'string', enum: ['image', 'file'], description: '图片或文件；省略时自动识别。' },
@@ -41,6 +48,32 @@ export function installWorkAttachmentTool(agent: Agent, options: {
       const entry = await fs.lstat(args.path, { cwd }, exec.signal);
       if (entry?.type !== 'file') throw new TypeError('Work attachments require an existing regular file');
       const target = await fs.resolve(args.path, { cwd, signal: exec.signal });
+      if (options.pathRegistration?.enabled()) {
+        const registered = await options.pathRegistration.register(fs.processPath(target), exec.signal);
+        options.assertLease(); exec.signal.throwIfAborted();
+        const name = basename(registered.descriptor.path).replace(/[/\\\p{Cc}]/gu, '-').slice(0, 160);
+        if (!name) throw new TypeError('Invalid work attachment name');
+        // Raster validation stays bounded; file delivery never loads the whole file.
+        let image: WorkMediaReference['mediaType'];
+        if (args.kind !== 'file' && registered.descriptor.bytes <= 8 * 1024 * 1024) {
+          const handle = await open(registered.descriptor.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+          let mediaType: WorkMediaReference['mediaType'];
+          try { const header = Buffer.alloc(16); await handle.read(header, 0, header.length, 0); mediaType = imageType(header) ?? undefined; }
+          finally { await handle.close(); }
+          if (mediaType) {
+            const data = await fs.readBytes(target, exec.signal, 8 * 1024 * 1024);
+            await attachments.validateImage({ data, mediaType, name }); image = mediaType;
+          }
+        }
+        if (args.kind === 'image' && !image) throw new TypeError('Work image must be a supported raster of at most 8MiB');
+        const asset: WorkMediaReference = image
+          ? { type: 'media-reference', storage: 'path', kind: 'image', attachmentId: registered.id, bytes: registered.descriptor.bytes,
+            name, mediaType: image }
+          : { type: 'media-reference', storage: 'path', kind: 'file', attachmentId: registered.id, bytes: registered.descriptor.bytes, name };
+        if (!validWorkOutput(asset)) throw new TypeError('Invalid registered work path');
+        options.assertLease(); exec.signal.throwIfAborted(); await options.commit(asset);
+        return { registered: true, sent: false, storage: 'path', kind: asset.kind, name, bytes: asset.bytes, expiresAt: registered.descriptor.expiresAt };
+      }
       const info = await fs.stat(target, exec.signal);
       if (info?.type !== 'file' || info.size !== undefined && (info.size < 1 || info.size > 8 * 1024 * 1024))
         throw new TypeError('Work attachment must be a nonempty file of at most 8MiB');
@@ -78,7 +111,7 @@ export function installWorkAttachmentTool(agent: Agent, options: {
       }
       options.assertLease(); exec.signal.throwIfAborted();
       if (!validWorkOutput(asset)) throw new TypeError('Stored work attachment exceeds delivery limits');
-      options.commit(asset);
+      await options.commit(asset);
       return { registered: true, sent: false, kind: asset.kind, name: asset.name ?? null, bytes: asset.bytes };
     },
   }));

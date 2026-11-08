@@ -23,6 +23,7 @@ export type { NativeDeploymentPresetBinding as DshPresetBinding } from '../contr
 import type { NativeDeploymentPresetBinding as DshPresetBinding } from '../contracts/native-deployment.ts'
 
 export interface DshJsonRpcOptions {
+  readonly sharedWorkFilesystem?: boolean
   readonly endpoint: string
   readonly auth?: string
   readonly authenticationProvider?: (mode: 'none' | 'answer', signal: AbortSignal) => Promise<string>
@@ -184,7 +185,7 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
     const result = await rpc(method, snapshot(request) as JsonObject, signal)
     if (!result.ok) throw failure('DSH_WORK_CHANNEL_UNAVAILABLE')
     return result.value
-  })
+  }, { sharedFilesystem: options.sharedWorkFilesystem ?? ['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname) })
   const pluginModels = createDshPluginModelBackend({ client: {
     createSession: request => port.createSession(request), prompt: request => port.prompt(request),
     follow: request => pluginFollow(request), cancel: request => port.cancel(request),

@@ -81,6 +81,7 @@ Docker 用户可下载同版本 `docker-amd64` 或 `docker-arm64` 镜像归档�
 | 插件能力分层与会话服务设计 | [设计文档](docs/PLUGIN_CAPABILITIES_AND_SESSIONS.md) |
 | 框架服务契约、依赖与生命周期 | [服务规范](docs/SERVICE_CONVENTIONS.md) |
 | 插件热重载与完整示例 | [热重载服务](docs/RELOADABLE_SERVICES.md) · [示例](examples/reloadable-plugin/README.md) |
+| 助手结果附件与路径安全 | [助手附件](docs/WORK_ATTACHMENTS.md) |
 | 编写扩展及使用 SDK | [扩展开发](docs/EXTENDING.md) · [SDK](packages/framework-sdk/README.md) |
 | 插件调度与业务示例 | [持久定时任务](docs/TRIGGERS.md) · [可选扩展示例](examples/README.md) |
 | 理解目标、接口与模块职责 | [目标](docs/GOALS.md) · [契约](docs/CONTRACTS.md) · [架构](docs/ARCHITECTURE.md) |

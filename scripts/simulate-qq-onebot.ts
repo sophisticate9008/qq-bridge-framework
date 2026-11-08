@@ -146,7 +146,33 @@ export async function startSimulatedOneBot(options: {
       const path = await realpath(source)
       if (!path.startsWith(options.directory + sep)) throw new Error('simulation_outbound_path_outside_run')
       const information = await lstat(path)
-      if (!information.isFile() || information.size > 8 * 1024 * 1024) throw new Error('simulation_outbound_asset_invalid')
+      if (!information.isFile()) throw new Error('simulation_outbound_asset_invalid')
+      if (information.size > 8 * 1024 * 1024) {
+        if (kind !== 'file' || information.size > 512 * 1024 * 1024) throw new Error('simulation_outbound_asset_too_large')
+        // Large file uploads are captured on disk, never retained in the in-memory fixture library.
+        const directory = join(options.directory, 'outbound-assets')
+        await mkdir(directory, { recursive: true, mode: 0o700 })
+        const filename = join(directory, `${messageId}-${index}.bin`)
+        const input = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+        try {
+          const output = await open(filename, 'wx', 0o600)
+          try {
+            const hash = createHash('sha256'), before = await input.stat()
+            let size = 0
+            for await (const part of input.createReadStream({ highWaterMark: 256 * 1024, autoClose: false })) {
+              size += part.length
+              if (size > before.size || size > 512 * 1024 * 1024) throw new Error('simulation_outbound_asset_changed')
+              hash.update(part); await output.writeFile(part)
+            }
+            const after = await input.stat(), named = await lstat(path)
+            if (size !== before.size || before.ino !== named.ino || before.dev !== named.dev || named.isSymbolicLink()
+              || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || before.size !== after.size)
+              throw new Error('simulation_outbound_asset_changed')
+            await output.sync()
+            return { filename, fileId: randomBytes(16).toString('hex'), size, sha256: hash.digest('hex') }
+          } finally { await output.close() }
+        } finally { await input.close() }
+      }
       bytes = await readFile(path)
     } else {
       const key = source.startsWith(endpoint + '/assets/') ? source.slice((endpoint + '/assets/').length) : source

@@ -1102,7 +1102,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             if (!binding || binding.sessionId !== request.sessionId || binding.generation !== request.generation) failure('SESSION_STALE')
             return media.resolveOutgoing(request)
           }
-          if (request.assetId.startsWith('work-asset-')) {
+          if (request.assetId.startsWith('work-asset-') || request.assetId.startsWith('work-path-')) {
             if (!workAssets) failure('WORK_ASSET_UNAVAILABLE')
             return workAssets.resolve(request)
           }
