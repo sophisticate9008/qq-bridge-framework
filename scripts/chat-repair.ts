@@ -220,7 +220,9 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     const intent = await repository.readRunningIntent()
     await backup(join(backups, 'running-intent.json'), intent.value)
     await ports.guardian()
-    const guardianDeadline = Date.now() + 15_000
+    // The separate guardian loads and validates the installed host before registering.
+    // Cold startup must fit within the handshake without relaxing the live identity check.
+    const guardianDeadline = Date.now() + 60_000
     while (true) {
       const guarded = (await storage.read()).value.records.find(entry => entry.operation.id === operationId)
       if (guarded?.guardian && guarded.guardianRecoveryComplete !== true && await chatRepairProcessAlive(guarded.guardian)) break
