@@ -106,6 +106,6 @@ test('path reference bounds preserve the byte limit and explicit transport negot
 
 
 test('independently packaged DSH and host use the same path integrity rules', async () => {
-  assert.equal(await readFile(new URL('../src/storage/work-path.ts', import.meta.url), 'utf8'),
-    await readFile(new URL('../packages/dsh-bridge-plugin/src/work-path.ts', import.meta.url), 'utf8'));
+  assert.equal(await readFile(join(process.cwd(), 'src/storage/work-path.ts'), 'utf8'),
+    await readFile(join(process.cwd(), 'packages/dsh-bridge-plugin/src/work-path.ts'), 'utf8'));
 });

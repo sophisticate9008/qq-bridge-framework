@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,7 +27,11 @@ try {
   const filename = object(packed[0]).filename
   assert(typeof filename === 'string' && /^[A-Za-z0-9_.-]+\.tgz$/.test(filename))
   const files = object(packed[0]).files
-  assert(Array.isArray(files) && files.length <= 64)
+  const publicFiles = ['package.json', 'README.md', 'LICENSE', 'NOTICE.md']
+  const modules = (await readdir(join(root, 'src'))).filter(name => /^[a-z0-9-]+\.ts$/.test(name)).map(name => name.slice(0, -3))
+  const expectedFiles = [...publicFiles, ...modules.flatMap(name => [`dist/${name}.js`, `dist/${name}.d.ts`])].sort()
+  assert(Array.isArray(files))
+  assert.deepEqual(files.map(file => object(file).path).sort(), expectedFiles, 'The tarball must match its complete public module inventory')
   assert(files.every(file => {
     const path = object(file).path
     return typeof path === 'string' && (['package.json', 'README.md', 'LICENSE', 'NOTICE.md'].includes(path) || /^dist\/[a-z0-9-]+\.(?:js|d\.ts)$/.test(path))
