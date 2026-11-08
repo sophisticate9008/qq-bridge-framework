@@ -11,7 +11,8 @@ const expected = sums.find(line => line.endsWith(`  ${name}`))?.split(' ')[0]; a
 assert.equal(createHash('sha256').update(await readFile(join(directory, name))).digest('hex'), expected);
 await mkdir('private/maintenance/work-platform', { recursive: true });
 const temporary = await mkdtemp(resolve('private/maintenance/work-platform/component-'));
-execFileSync('tar', ['-xzf', join(directory, name), '-C', temporary], { stdio: 'inherit' });
+const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'tar.exe') : 'tar';
+execFileSync(tar, ['-xzf', join(directory, name), '-C', temporary], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', 'packages/dsh-bridge-plugin/test/work-platform.test.ts'], {
   env: { ...process.env, QBF_WORK_PLATFORM_PACKAGE: join(temporary, 'package') }, stdio: 'inherit' });
 await writeFile('work-path-platform-result.json', JSON.stringify({ platform: process.platform, arch: process.arch, version,
