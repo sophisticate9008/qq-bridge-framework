@@ -1,3 +1,4 @@
+import { createProtocolMediaFileUploadPort, validProtocolMediaBytes } from './onebot-protocol-media.ts'
 import { isRecord } from '../core/values.ts'
 import { isAssetRejectionCode } from '../core/delivery.ts'
 import { createOneBotFileUploadPort, validOneBotUploadSource } from './onebot-files.ts'
@@ -272,6 +273,7 @@ async function readBoundedJson(response: Response, signal: AbortSignal): Promise
 
 export function createOneBotTransport(options: OneBotTransportOptions): TransportAdapter {
   const files = createOneBotFileUploadPort(options)
+  const protocolFiles = createProtocolMediaFileUploadPort(options)
   const sendPrivateUrl = actionUrl(options.endpoint, 'send_private_msg')
   const sendGroupUrl = actionUrl(options.endpoint, 'send_group_msg')
   const sendPrivateForwardUrl = actionUrl(options.endpoint, 'send_private_forward_msg')
@@ -321,10 +323,13 @@ export function createOneBotTransport(options: OneBotTransportOptions): Transpor
         try {
           const resolved = await waitWithSignal(options.resolveAsset({ ...selection, type: 'file', name: first.name, assetId: first.assetId, signal }), signal)
           const file = resolvedFile(resolved)
-          if (!validOneBotUploadSource(file)) return { status: 'rejected' }
+          if (typeof file !== 'string') return { status: 'rejected' }
+          const protocolMedia = !/^work-(?:path|asset)(?:-|$)/.test(first.assetId) && validProtocolMediaBytes(file)
+          if (!protocolMedia && !validOneBotUploadSource(file)) return { status: 'rejected' }
+          const uploader = protocolMedia ? protocolFiles : files
           return target.action === 'send_private_msg'
-            ? files.uploadPrivate({ userId: String(target.value), file, name: first.name, signal })
-            : files.uploadGroup({ groupId: String(target.value), file, name: first.name, signal })
+            ? uploader.uploadPrivate({ userId: String(target.value), file, name: first.name, signal })
+            : uploader.uploadGroup({ groupId: String(target.value), file, name: first.name, signal })
         } catch (error) {
           if (!signal.aborted && isRecord(error) && isAssetRejectionCode(error.code)) return { status: 'rejected', errorCode: error.code }
           return { status: signal.aborted ? 'unknown' : 'rejected' }

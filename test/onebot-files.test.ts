@@ -84,3 +84,14 @@ test('feature engine retains explicit file confirmation through the ordinary mes
   assert.equal(calls, 1)
   await engine.stop()
 })
+
+test('existing protocol-media bytes remain isolated from every assistant resource namespace', async () => {
+  let uploads = 0;
+  const transport = createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset: () => 'base64://aGVsbG8=',
+    async fetch() { uploads++; return Response.json({ status: 'ok', retcode: 0, data: { file_id: 'protocol-file' } }); } });
+  const file = (assetId: string) => ({ ...request, content: [{ type: 'file' as const, assetId, name: 'report.txt' }] });
+  assert.equal((await transport.send(file(`media-${'a'.repeat(64)}`))).status, 'confirmed');
+  assert.equal((await transport.send(file('extension-existing-file'))).status, 'confirmed');
+  for (const prefix of ['work-path-', 'work-asset-']) assert.deepEqual(await transport.send(file(prefix + 'b'.repeat(64))), { status: 'rejected' });
+  assert.equal(uploads, 2);
+});

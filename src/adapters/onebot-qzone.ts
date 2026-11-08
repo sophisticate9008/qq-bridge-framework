@@ -1,3 +1,4 @@
+import { validProtocolMediaBytes } from './onebot-protocol-media.ts';
 import { fileURLToPath } from 'node:url';
 import type { JsonObject } from '../contracts/data.ts';
 import type { QzoneAction, QzonePort, QzonePublishRequest, QzoneResult } from '../contracts/qzone.ts';
@@ -23,7 +24,7 @@ export function qzoneReference(value: unknown): value is string {
 
 function imageSource(value: unknown): value is string {
   if (typeof value !== 'string') return false;
-  if (value.startsWith('base64://')) return validOneBotUploadSource(value);
+  if (value.startsWith('base64://')) return validProtocolMediaBytes(value);
   if (value.length > 8192 || /[\x00-\x1f\x7f]/.test(value)) return false;
   try {
     const url = new URL(value);
