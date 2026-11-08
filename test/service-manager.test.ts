@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import test from 'node:test';
 import { selectServiceProcesses } from '../scripts/service-processes.ts';
 
@@ -16,8 +17,9 @@ function fixture() {
   copyFileSync(new URL(`../scripts/service-manager.${extension}`, import.meta.url), entry);
   copyFileSync(new URL(`../scripts/runtime-configuration.${extension}`, import.meta.url), join(directory, `scripts/runtime-configuration.${extension}`));
   copyFileSync(new URL(`../scripts/service-processes.${extension}`, import.meta.url), join(directory, `scripts/service-processes.${extension}`));
+  copyFileSync(new URL(`../scripts/service-lifecycle.${extension}`, import.meta.url), join(directory, `scripts/service-lifecycle.${extension}`));
   const service = (id: string, extra: Record<string, unknown> = {}) => ({
-    command: process.execPath, args: [], cwd: directory, screen: `qbf-scope-${id}`,
+    command: process.execPath, args: [], cwd: directory, screen: `qbf-scope-${basename(directory)}-${id}`,
     group: 'core', ...extra,
   });
   const configuration = {
@@ -78,4 +80,50 @@ test('named lifecycle commands and protocol switching cannot take over external 
     assert.match(result.stderr, /目标协议端未登记/);
     assert.equal(result.stdout, '');
   } finally { rmSync(values.directory, { recursive: true, force: true }); }
+});
+
+test('real restart restores stopped framework processes when a later worker cannot be stopped', {
+  skip: process.platform !== 'linux' || !existsSync('/usr/bin/screen') || !existsSync('/usr/bin/flock'),
+  timeout: 90_000,
+}, async () => {
+  const values = fixture();
+  const external = createServer();
+  try {
+    await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve));
+    const address = external.address();
+    assert(address && typeof address !== 'string');
+    const originalPids = new Map<string, string>();
+    for (const id of ['framework-gateway', 'framework-admin'] as const) {
+      const marker = join(values.directory, `${id}.pid`);
+      Object.assign(values.configuration.services[id], { args: ['-e',
+        'const fs=require("node:fs"), file=process.argv[1]; fs.writeFileSync(file,String(process.pid));'
+        + 'process.on("SIGTERM",()=>{fs.unlinkSync(file);process.exit(0)});setInterval(()=>{},1000)', marker],
+        ready: { kind: 'command', command: process.execPath, args: ['-e', 'process.exit(require("node:fs").existsSync(process.argv[1])?0:1)', marker] },
+      });
+    }
+    Object.assign(values.configuration.services.auxiliary, { managed: true, port: { host: '127.0.0.1', port: address.port } });
+    // Reverse shutdown reaches this occupied, unowned worker after the two real services.
+    Object.assign(values.configuration, { order: ['auxiliary', 'framework-gateway', 'framework-admin'] });
+    Object.assign(values.configuration.services.dsh, { managed: false });
+    values.save();
+    for (const id of ['framework-gateway', 'framework-admin']) {
+      const started = values.run('start', id);
+      assert.equal(started.status, 0, started.stderr);
+      originalPids.set(id, readFileSync(join(values.directory, `${id}.pid`), 'utf8'));
+    }
+    const result = values.run('restart');
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /无法安全停止/);
+    assert.match(result.stderr, /恢复已确认停止/);
+    for (const id of ['framework-gateway', 'framework-admin']) {
+      const pid = readFileSync(join(values.directory, `${id}.pid`), 'utf8');
+      assert.notEqual(pid, originalPids.get(id));
+      assert.doesNotThrow(() => process.kill(Number(pid), 0));
+    }
+    assert.equal(external.listening, true);
+  } finally {
+    for (const id of ['framework-admin', 'framework-gateway']) values.run('stop', id);
+    await new Promise<void>(resolve => external.close(() => resolve()));
+    rmSync(values.directory, { recursive: true, force: true });
+  }
 });

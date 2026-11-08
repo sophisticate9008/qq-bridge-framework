@@ -7,6 +7,7 @@ import { createConnection } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectServiceProcesses, type ServiceProcessIdentity as ProcessIdentity } from './service-processes.ts';
+import { runServiceLifecycle, serviceLifecycleTimeout } from './service-lifecycle.ts';
 
 type Protocol = 'napcat' | 'snowluma';
 type Group = 'core' | Protocol | 'optional';
@@ -460,8 +461,12 @@ async function lockAndRun(config: Configuration, argumentsList: string[]): Promi
   const file = await open(config.lockFile, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
   await file.chmod(0o600);
   await file.close();
+  const [action, id] = argumentsList;
+  const timeout = ['start', 'stop', 'restart'].includes(action ?? '')
+    ? serviceLifecycleTimeout(action === 'start' ? 0 : id ? 1 : selected(config, true).length,
+      action === 'stop' ? 0 : id ? 1 : selected(config).length) : 300_000;
   const result = await execute('/usr/bin/flock', ['--exclusive', ...(argumentsList[0] === 'repair-services-rescue' ? ['--wait', '90'] : ['--nonblock']), '--conflict-exit-code', '75', '--close', config.lockFile, process.execPath, ...(argumentsList[0] === 'maintenance' ? ['--max-old-space-size=128'] : []), entry, ...argumentsList], {
-    env: { ...process.env, QQ_BRIDGE_FRAMEWORK_OPS_LOCKED: '1' }, inherit: true, timeout: 300000,
+    env: { ...process.env, QQ_BRIDGE_FRAMEWORK_OPS_LOCKED: '1' }, inherit: true, timeout,
   });
   if (result.code === 75) fail('另一项运维操作正在运行，请稍后查看状态。');
   process.exitCode = result.code;
@@ -602,15 +607,16 @@ async function main(): Promise<void> {
   if (action === 'run') { if (!id) fail('内部启动命令缺少组件。'); await supervise(config, id); return; }
   if (action === 'protocol') { await switchProtocol(config, rest[0] as Protocol); return; }
   if (action === 'start' || action === 'stop' || action === 'restart') {
-    if (action !== 'start') {
-      const deadline = Date.now() + 30000;
-      for (const target of id ? [id] : selected(config, true).toReversed()) await stopOne(config, target, deadline);
-    }
+    await runServiceLifecycle({ action,
+      stopTargets: id ? [id] : selected(config, true).toReversed(),
+      startTargets: id ? [id] : selected(config),
+      stop: (target, deadline) => stopOne(config, target, deadline),
+      start: (target, deadline) => startOne(config, target, deadline),
+      report: message => console.error(message),
+    });
     if (action !== 'stop') {
-      const deadline = Date.now() + 90000;
-      for (const target of id ? [id] : selected(config)) await startOne(config, target, deadline);
       if (!id && config.accountCheck) {
-        const result = await execute(config.accountCheck.command, config.accountCheck.args, { cwd: config.accountCheck.cwd ?? root, timeout: Math.max(1, Math.min(8000, deadline - Date.now())) });
+        const result = await execute(config.accountCheck.command, config.accountCheck.args, { cwd: config.accountCheck.cwd ?? root, timeout: 8000 });
         console.log(result.code === 0 ? 'QQ 账号在线。' : '服务已启动，QQ 账号尚未在线；请查看协议端控制台。');
       }
     }
