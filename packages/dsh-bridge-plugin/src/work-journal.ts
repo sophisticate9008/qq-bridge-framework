@@ -1,3 +1,4 @@
+import { canonicalPathMatches, privatePermissions, secureNewPath, readOnlyFlags, noFollow } from './file-security.js';
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises'
@@ -12,7 +13,7 @@ export interface WorkJournalRecord {
   readonly schema: 1
   readonly fingerprint: string
   readonly address: { readonly id: string; readonly parentSessionId: string; readonly childId: string; readonly generation: number }
-  readonly target: { readonly attachmentTransport?: 'path-v1'; readonly fullAccess?: boolean; readonly modelProvider: string; readonly model: string; readonly agentPreset: string; readonly reasoningEffort?: string; readonly timeoutMs: number | null }
+  readonly target: { readonly accountId?: string; readonly attachmentTransport?: 'path-v1'; readonly fullAccess?: boolean; readonly modelProvider: string; readonly model: string; readonly agentPreset: string; readonly reasoningEffort?: string; readonly timeoutMs: number | null }
   readonly usage?: readonly WorkUsageStep[]
   readonly progress?: readonly WorkProgress[]
   readonly permissionVerified?: boolean
@@ -67,29 +68,29 @@ function valid(value: unknown): value is WorkJournalRecord {
 export function createWorkJournal(directory: string) {
   if (!isAbsolute(directory) || resolve(directory) !== directory) throw new TypeError('Work storage must use a canonical absolute directory')
   async function ready(): Promise<void> {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const created = await mkdir(directory, { recursive: true, mode: 0o700 })
+    if (created) await secureNewPath(directory, 0o700)
     const metadata = await lstat(directory)
-    if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o700
-      || metadata.uid !== process.getuid?.() || await realpath(directory) !== directory) throw new TypeError('Work storage is unavailable')
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || !await privatePermissions(directory, metadata, 0o700) || !canonicalPathMatches(await realpath(directory), directory)) throw new TypeError('Work storage is unavailable')
   }
   const filename = (id: string) => join(directory, `${createHash('sha256').update(id).digest('hex')}.json`)
   async function syncDirectory(): Promise<void> {
-    const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    if (process.platform === 'win32') return
+    const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | noFollow)
     try { await handle.sync() } finally { await handle.close() }
   }
   async function read(id: string): Promise<WorkJournalRecord | null> {
     if (!validIdentifier(id)) throw new TypeError('Invalid work identity')
     await ready()
     for (let attempt = 0; attempt < 3; attempt++) {
-      const handle = await open(filename(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(error => {
+      const handle = await open(filename(id), readOnlyFlags).catch(error => {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null
         throw error
       })
       if (!handle) return null
       try {
         const before = await handle.stat()
-        if (!before.isFile() || before.size > 512 * 1024 || (before.mode & 0o777) !== 0o600
-          || before.uid !== process.getuid?.()) throw new TypeError('Work journal is unavailable')
+        if (!before.isFile() || before.size > 512 * 1024 || !await privatePermissions(filename(id), before, 0o600)) throw new TypeError('Work journal is unavailable')
         const text = await handle.readFile('utf8')
         const after = await handle.stat()
         const path = await lstat(filename(id))
@@ -107,8 +108,8 @@ export function createWorkJournal(directory: string) {
       if (!valid(record)) throw new TypeError('Invalid durable work record')
       await ready()
       if ((await readdir(directory)).filter(name => /^[a-f0-9]{64}\.json$/.test(name)).length >= 10000) throw new TypeError('Durable work retention capacity is occupied')
-      const handle = await open(filename(record.address.id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-      try { await handle.writeFile(JSON.stringify(record)); await handle.sync() } finally { await handle.close() }
+      const handle = await open(filename(record.address.id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600)
+      try { await secureNewPath(filename(record.address.id), 0o600); await handle.writeFile(JSON.stringify(record)); await handle.sync() } finally { await handle.close() }
       await syncDirectory()
     },
     async write(record: WorkJournalRecord): Promise<void> {
@@ -118,8 +119,9 @@ export function createWorkJournal(directory: string) {
       const temporary = `${filename(record.address.id)}.${randomUUID()}.tmp`
       let owned = false
       try {
-        const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+        const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600)
         owned = true
+        await secureNewPath(temporary, 0o600)
         try { await handle.writeFile(JSON.stringify(record)); await handle.sync() } finally { await handle.close() }
         await rename(temporary, filename(record.address.id)); owned = false
         await syncDirectory()

@@ -1149,7 +1149,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           sources: () => messageSources?.reader, authorize: (conversationId, signal) => guard(conversationId, signal, true, 'resource') })
         const reminderService = reminders.service()
         const taskEffects = createConversationTaskEffects({ runtime: () => conversationTasks, sources: () => messageSources?.reader, host: () => host })
-        const workEffects = createNativeWorkEffects({ executor: () => work, sources: () => messageSources?.reader })
+        const workEffects = createNativeWorkEffects({ executor: () => work, resources: () => workAssets, sources: () => messageSources?.reader })
         const conversationEffects = createNativeConversationService({
           port: createOneBotConversationPort({ endpoint: configuration.adapters.onebotHttp.endpoint,
             ...(configuration.adapters.onebotHttp.secret ? { accessToken: configuration.adapters.onebotHttp.secret } : {}) }),
@@ -1390,6 +1390,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
         executions = createNativeExecutionController({ store, cancelIsRequestScoped: () => requestScopedCancellation, policy: configuration.execution, onFault: executionFault,
           onReleased(execution) {
             sessionTurns?.releaseReconciled(execution.binding.sessionId, execution.requestId)
+            void workAssets?.closeToolChannels(execution.binding).catch(() => {})
             // Completion still travels through the attributed event handler. Cancellation/failure
             // must close only this request's watchdog even when no further event will arrive.
             if (execution.deadlineReached || execution.status === 'unknown' || execution.cancelStatus !== 'not-requested'
@@ -1539,7 +1540,8 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             onMaintenanceFault(code) { lastError = code; activity.record('error') },
             parent(sessionId) { const binding = bindingForSession(sessionId); return binding ?? null },
             authorize: (conversationId, signal) => guard(conversationId, signal, true, 'resource') })
-          const createBackend = (resolveBackendTarget: Parameters<typeof createDshNativeWorkBackend>[0]['resolveTarget']) => createDshNativeWorkBackend({ port: workPort, issuerEpoch: pluginEpoch!,
+          await workAssets.maintenance()
+          const createBackend = (resolveBackendTarget: Parameters<typeof createDshNativeWorkBackend>[0]['resolveTarget']) => createDshNativeWorkBackend({ accountId: selfId, port: workPort, issuerEpoch: pluginEpoch!,
             generation: sessionId => bindingForSession(sessionId)?.generation ?? null,
             resolveTarget: resolveBackendTarget, registerResultAsset: workAssets!.register,
             recordUsage(observed) {
@@ -1600,6 +1602,9 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
             },
             onProgress: view => workFeedback?.progress(view),
             onResult: createNativeWorkDelivery({ host: workHost, store, persona: outgoingPersona,
+              delivered: (content, signal) => workAssets!.delivered(content, signal),
+              unconfirmed: (content, signal) => workAssets!.unconfirmed(content, signal),
+              onCleanupFault: code => activity.record('error', null, undefined, {}, code),
               present: (result, signal) => workFeedback ? workFeedback.result(result, signal) : Promise.resolve({ status: 'rejected' }),
               owner: () => active?.access.owner ?? null,
               guard: (conversationId, signal) => guard(conversationId, signal, true, 'delivery') }),

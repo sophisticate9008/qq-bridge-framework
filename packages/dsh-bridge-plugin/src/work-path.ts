@@ -1,5 +1,5 @@
+import { canonicalPathMatches, readOnlyFlags } from './file-security.ts';
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 
@@ -7,7 +7,7 @@ export interface WorkPathIdentity { readonly path: string; readonly dev: number;
 export interface WorkPathDescriptor {
   readonly path: string; readonly root: string; readonly bytes: number;
   readonly mtimeMs: number; readonly ctimeMs: number; readonly dev: number; readonly ino: number;
-  readonly sha256: string; readonly createdAt: number; readonly expiresAt: number;
+  readonly sha256: string; readonly createdAt: number; readonly expiresAt: number | null;
   readonly parents: readonly WorkPathIdentity[];
 }
 export function validWorkPath(value: unknown): value is WorkPathDescriptor {
@@ -17,8 +17,8 @@ export function validWorkPath(value: unknown): value is WorkPathDescriptor {
     && typeof v.path === 'string' && typeof v.root === 'string' && controlledRoot(v.root)
     && isAbsolute(v.path) && resolve(v.path) === v.path && v.path.length <= 4096 && !/[\x00-\x1f\x7f]/.test(v.path)
     && within(v.root, v.path) && v.path !== v.root
-    && ['bytes', 'dev', 'ino', 'createdAt', 'expiresAt'].every(k => Number.isSafeInteger(v[k]) && Number(v[k]) >= 0)
-    && Number(v.bytes) > 0 && Number(v.expiresAt) === Number(v.createdAt) + 86400000
+    && ['bytes', 'dev', 'ino', 'createdAt'].every(k => Number.isSafeInteger(v[k]) && Number(v[k]) >= 0)
+    && Number(v.bytes) > 0 && (v.expiresAt === null || Number.isSafeInteger(v.expiresAt) && Number(v.expiresAt) > Number(v.createdAt))
     && ['mtimeMs', 'ctimeMs'].every(k => typeof v[k] === 'number' && Number.isFinite(v[k]))
     && typeof v.sha256 === 'string' && /^[a-f0-9]{64}$/.test(v.sha256)
     && Array.isArray(v.parents) && v.parents.length > 0 && v.parents.length <= 128
@@ -33,10 +33,10 @@ function within(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
-function fail(): never { throw new TypeError('WORK_PATH_CHANGED_OR_UNSAFE'); }
+function fail(): never { throw new TypeError('WORK_PATH_INVALIDATED: 文件已失效或路径不安全'); }
 async function parents(root: string, path: string): Promise<WorkPathIdentity[]> {
   if (!controlledRoot(root) || !isAbsolute(path) || resolve(path) !== path || !within(root, path) || root === path
-    || await realpath(root) !== root || await realpath(path) !== path) return fail();
+    || !canonicalPathMatches(await realpath(root), root) || !canonicalPathMatches(await realpath(path), path)) return fail();
   const paths: string[] = [];
   let current = dirname(path);
   while (within(root, current)) {
@@ -54,19 +54,19 @@ async function parents(root: string, path: string): Promise<WorkPathIdentity[]> 
   return result;
 }
 /** Bounded memory; full SHA256, no content sampling. No user files are created or removed. */
-export async function inspectWorkPath(input: { readonly path: string; readonly roots: readonly string[];
+async function inspect(input: { readonly path: string; readonly roots: readonly string[];
   readonly expected?: WorkPathDescriptor; readonly signal: AbortSignal; readonly now?: number }): Promise<WorkPathDescriptor> {
   input.signal.throwIfAborted();
   const root = input.roots.find(item => controlledRoot(item) && within(item, input.path) && item !== input.path);
   if (!root) return fail();
   const chain = await parents(root, input.path);
-  const handle = await open(input.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const handle = await open(input.path, readOnlyFlags);
   try {
     const before = await handle.stat();
     if (!before.isFile() || before.nlink !== 1 || !Number.isSafeInteger(before.size) || before.size < 1) return fail();
     const metadata = { path: input.path, root, bytes: before.size, mtimeMs: before.mtimeMs, ctimeMs: before.ctimeMs,
       dev: before.dev, ino: before.ino, parents: chain };
-    if (input.expected && (!validWorkPath(input.expected) || input.expected.expiresAt <= (input.now ?? Date.now())
+    if (input.expected && (!validWorkPath(input.expected) || input.expected.expiresAt !== null && input.expected.expiresAt <= (input.now ?? Date.now())
       || Object.entries(metadata).some(([key, value]) => JSON.stringify(value) !== JSON.stringify(input.expected![key as keyof WorkPathDescriptor])))) return fail();
     const hash = createHash('sha256');
     const buffer = Buffer.alloc(256 * 1024);
@@ -89,8 +89,16 @@ export async function inspectWorkPath(input: { readonly path: string; readonly r
     if (input.expected && sha256 !== input.expected.sha256) return fail();
     input.signal.throwIfAborted();
     const createdAt = input.expected?.createdAt ?? input.now ?? Date.now();
-    const result = { ...metadata, sha256, createdAt, expiresAt: createdAt + 86400000 };
-    if (!validWorkPath(result) || result.expiresAt <= (input.now ?? Date.now())) return fail();
+    const result = { ...metadata, sha256, createdAt, expiresAt: input.expected?.expiresAt ?? null };
+    if (!validWorkPath(result) || result.expiresAt !== null && result.expiresAt <= (input.now ?? Date.now())) return fail();
     return result;
   } finally { await handle.close(); }
+}
+
+/** The trusted filesystem host owns all path checks; missing files have an explicit error. */
+export async function inspectWorkPath(input: Parameters<typeof inspect>[0]): Promise<WorkPathDescriptor> {
+  try { return await inspect(input); } catch (error) {
+    if (input.signal.aborted) throw error;
+    throw new TypeError('WORK_PATH_INVALIDATED: 文件已失效或路径不安全', { cause: error });
+  }
 }

@@ -21,7 +21,7 @@ function WorkDetail({ api, connected, id }: { readonly api: ApiClient; readonly 
       {record.status === 'unknown' && <p>结果尚未核实，不会从网页重新执行或恢复。请在所属 QQ 会话查看并处理。</p>}
       {record.result ? <div><strong>已记录执行结果</strong><p>结束原因：{record.result.stopReason}</p><div className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border p-2">{record.result.output.map(workContentSummary).join('\n\n') || '没有可展示的结果内容。'}</div></div> : <p>尚无已确认的执行结果。</p>}
       {record.lateResult && <section><h3 className="font-medium">迟到结果（未自动替代当前结果）</h3><div className="max-h-64 overflow-auto whitespace-pre-wrap break-words">{record.lateResult.output.map(workContentSummary).join('\n\n')}</div></section>}
-      <section><h3 className="font-medium">回传与技术记录</h3><div className="grid gap-1 break-all"><p>结果标识：{record.resultId ?? '无'}</p><p>回传标识：{record.deliveryId ?? '无'}</p><p>QQ 消息回执：{record.deliveryMessageId ?? '未取得'}</p><p>文件上传回执：{record.deliveryFileId ?? '未取得'}</p><p>执行错误：{record.lastError ?? '无'}</p><p>回传错误：{record.deliveryError ?? '无'}</p></div></section>
+      <section><h3 className="font-medium">回传与技术记录</h3><div className="grid gap-1 break-all"><p>结果标识：{record.resultId ?? '无'}</p><p>回传标识：{record.deliveryId ?? '无'}</p><p>QQ 消息回执：{record.deliveryMessageId ?? '未取得'}</p><p>文件上传回执：{record.deliveryFileId ?? '未取得'}</p><p>执行错误：{record.lastError ?? '无'}</p><p>回传错误：{record.deliveryError === 'WORK_PATH_INVALIDATED' ? '文件已失效，附件尚未上传。' : record.deliveryError === 'WORK_BYTE_ATTACHMENTS_REMOVED' ? '旧附件已失效，需要重新登记路径。' : record.deliveryError ?? '无'}</p></div></section>
     </> : <p>{detail.loading ? '正在读取工作详情…' : '尚未取得工作详情。'}</p>}
   </div>;
 }

@@ -149,6 +149,8 @@ export function createDshUnaryTransport(options: { readonly base: URL; readonly 
             }
             if (['remote-access/denied', 'bridgePlugin/operator-required'].includes(result.error.code)) throw failure('DSH_PLUGIN_AUTH_REJECTED')
           }
+          if (['bridgePlugin/readWorkPath', 'bridgePlugin/releaseWorkPath'].includes(method)
+            && ['bridgePlugin/work-path-not-this-work', 'bridgePlugin/work-path-invalidated', 'bridgePlugin/work-stream-unavailable'].includes(result.error.code)) return rejected(result.error.code)
           if (!new Set([
             'gateway/bad-request', 'gateway/input-invalid', 'gateway/arguments-invalid', 'gateway/method-not-found',
             'session/not-found', 'session/agent-busy', 'session/model-unavailable', 'session/attachment-invalid',

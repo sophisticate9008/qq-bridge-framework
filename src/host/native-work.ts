@@ -273,7 +273,7 @@ export function createNativeWorkExecutor(options: NativeWorkExecutorOptions) {
           parentSessionId: view.parentSessionId, conversationId: view.conversationId, generation: view.generation }, signal) }))
       update(entry, { delivery: receipt.status, deliveryId,
         deliveryMessageId: deliveryMessageId(receipt), deliveryFileId: isFileUploadReceipt(receipt) ? receipt.fileId : null,
-        deliveryError: receipt.status === 'confirmed' ? null : 'NATIVE_WORK_DELIVERY_UNCONFIRMED' })
+        deliveryError: receipt.status === 'confirmed' ? null : receipt.status === 'rejected' && receipt.errorCode ? receipt.errorCode : 'NATIVE_WORK_DELIVERY_UNCONFIRMED' })
     } catch (error) {
       update(entry, { delivery: 'unknown', deliveryId, deliveryError: errorCode(error, 'NATIVE_WORK_DELIVERY_UNKNOWN') })
       fault(error)

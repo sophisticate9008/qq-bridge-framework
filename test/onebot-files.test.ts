@@ -18,7 +18,7 @@ test('single scoped file uses the correct upload action with controlled bytes an
   const calls: { url: string; body: unknown }[] = []
   const selections: unknown[] = []
   const transport = createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset(value) {
-    selections.push({ ...value, signal: undefined }); return { file: 'base64://aGVsbG8=' }
+    selections.push({ ...value, signal: undefined }); return { file: '/controlled/report.txt' }
   }, async fetch(url, init) { calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
     return Response.json({ status: 'ok', retcode: 0, data: { file_id: 'real-file-id' } }) } })
   assert(transport.capabilities?.().contentTypes.includes('file'))
@@ -26,7 +26,7 @@ test('single scoped file uses the correct upload action with controlled bytes an
   assert.deepEqual(await transport.send({ ...request, conversationId: 'private:456' }), fileReceipt)
   assert(calls[0].url.endsWith('/upload_group_file'))
   assert(calls[1].url.endsWith('/upload_private_file'))
-  assert.deepEqual(calls[0].body, { group_id: 123, file: 'base64://aGVsbG8=', name: 'report.txt', upload_file: true })
+  assert.deepEqual(calls[0].body, { group_id: 123, file: '/controlled/report.txt', name: 'report.txt', upload_file: true })
   assert.deepEqual(selections[0], { assetId: 'scoped-file', type: 'file', name: 'report.txt', conversationId: 'group:123',
     persona: 'demo@1', sessionId: 'parent', generation: 3, signal: undefined })
   assert.equal(deliveryMessageId(fileReceipt), null)
@@ -40,7 +40,7 @@ test('file upload evidence survives outbox recovery and unknown or failed upload
     const store = createSqliteStore({ filename: ':memory:' })
     let calls = 0
     try {
-      const transport = createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset: () => 'base64://aGVsbG8=',
+      const transport = createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset: () => '/controlled/report.txt',
         async fetch() { calls++; if (outcome === 'unknown') throw new Error('Reply lost after acceptance')
           return Response.json(outcome === 'confirmed' ? { status: 'ok', retcode: 0, data: { file_id: 'real-file-id' } }
             : { status: 'failed', retcode: 1403 }) } })
@@ -58,11 +58,11 @@ test('malformed upload success and uncontrolled sources cannot manufacture a QQ 
   let calls = 0
   const transport = (source: string) => createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset: () => source,
     async fetch() { calls++; return Response.json({ status: 'ok', retcode: 0, data: { message_id: 999 } }) } })
-  assert.deepEqual(await transport('base64://aGVsbG8=').send(request), { status: 'unknown' })
+  assert.deepEqual(await transport('/controlled/report.txt').send(request), { status: 'unknown' })
   assert.deepEqual(await transport('https://uncontrolled.invalid/file').send(request), { status: 'rejected' })
   assert.deepEqual(await transport('base64://invalid').send(request), { status: 'rejected' })
   assert.equal(calls, 1)
-  const stalled = createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset: () => 'base64://aGVsbG8=',
+  const stalled = createOneBotTransport({ endpoint: 'http://onebot.invalid', resolveAsset: () => '/controlled/report.txt',
     timeoutMs: 20, fetch: () => new Promise<Response>(() => {}) })
   // Keep the test alive independently of AbortSignal.timeout's unref timer.
   const guard = setTimeout(() => {}, 1000)

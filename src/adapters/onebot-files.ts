@@ -17,11 +17,10 @@ export interface OneBotFileUploadPort {
 export function validOneBotUploadSource(file: unknown): file is string {
   if (typeof file !== 'string' || file.length < 1 || /[\x00-\x1f\x7f]/.test(file)) return false
   if (isAbsolute(file)) return file.length <= 4096
-  if (!file.startsWith('base64://')) return false
-  const data = file.slice(9)
-  return data.length > 0 && data.length <= Math.ceil(8 * 1024 * 1024 / 3) * 4
-    && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)
-    && Buffer.byteLength(data, 'base64') <= 8 * 1024 * 1024 && Buffer.from(data, 'base64').toString('base64') === data
+  try {
+    const url = new URL(file)
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && /^\/qbf-work-stream\/[a-f0-9]{64}$/.test(url.pathname) && !url.search && !url.hash
+  } catch { return false }
 }
 
 function waitFor<Value>(operation: Promise<Value>, signal: AbortSignal): Promise<Value> {
@@ -34,7 +33,7 @@ function waitFor<Value>(operation: Promise<Value>, signal: AbortSignal): Promise
   })
 }
 
-/** The resolver supplies controlled bytes or a server-readable absolute path. */
+/** The resolver supplies a server-readable path or trusted streaming URL. */
 export function createOneBotFileUploadPort(options: { readonly endpoint: string; readonly accessToken?: string;
   readonly fetch?: typeof globalThis.fetch; readonly timeoutMs?: number }): OneBotFileUploadPort {
   const base = new URL(options.endpoint)

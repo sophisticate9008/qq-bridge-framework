@@ -3,7 +3,10 @@
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2023", "ESNext.Decorators"],
+    "lib": [
+      "ES2023",
+      "ESNext.Decorators"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -12,7 +15,12 @@
     "declaration": true,
     "rootDir": "src",
     "outDir": "dist",
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "rewriteRelativeImportExtensions": true
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

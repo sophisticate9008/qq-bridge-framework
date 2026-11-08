@@ -13,7 +13,7 @@ import { createDshBridgePluginPort } from './dsh-tool-scope.ts'
 import type { DshBridgePluginPort } from './dsh-tool-scope.ts'
 import { createDshSessionMigrationPort, type DshSessionMigrationPort } from './dsh-session-migration.ts'
 import { createDshFrameworkToolPort, type DshFrameworkToolPort, type DshFrameworkToolMethod } from './dsh-framework-tools.ts'
-import { createDshWorkPort, type DshWorkPort, type DshWorkMethod } from './dsh-work.ts'
+import { createDshWorkPort, dshWorkRpcError, type DshWorkPort, type DshWorkMethod } from './dsh-work.ts'
 import { prepareDshPromptContent, type DshPromptImageResolver } from './dsh-prompt-content.ts'
 import { createDshPluginModelBackend } from './dsh-plugin-model.ts'
 import type { PluginModelBackend } from '../contracts/plugin-model.ts'
@@ -183,9 +183,9 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
   })
   const work = createDshWorkPort(async (method, request, signal) => {
     const result = await rpc(method, snapshot(request) as JsonObject, signal)
-    if (!result.ok) throw failure('DSH_WORK_CHANNEL_UNAVAILABLE')
+    if (!result.ok) throw dshWorkRpcError(result.error.code)
     return result.value
-  }, { sharedFilesystem: options.sharedWorkFilesystem ?? ['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname) })
+  }, { currentEpoch: async signal => (await bridgePlugin.describe(signal)).issuerEpoch, streamBase: base.href, sharedFilesystem: options.sharedWorkFilesystem ?? ['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname) })
   const pluginModels = createDshPluginModelBackend({ client: {
     createSession: request => port.createSession(request), prompt: request => port.prompt(request),
     follow: request => pluginFollow(request), cancel: request => port.cancel(request),

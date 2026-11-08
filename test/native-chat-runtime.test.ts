@@ -1,3 +1,4 @@
+import { inspectWorkPath } from '../packages/dsh-bridge-plugin/src/work-path.ts'
 import type { AccountScope } from '../src/contracts/account-scope.ts'
 import { isRecord } from '../src/core/values.ts'
 import { awaitCondition } from './fixtures/await-condition.ts'
@@ -191,7 +192,9 @@ async function fixture(context: TestContext, options: {
   const toolLeases = new Map<string, { sessionId: string; generation: number; leaseId: string; names: string[] }>()
   const works = new Map<string, DshWorkSnapshot>()
   const migrations = new Map<string, Record<string, unknown>>()
-  const workAsset = { type: 'media-reference' as const, kind: 'file' as const, attachmentId: 'report', bytes: 11, name: 'report.txt' }
+  const workPath = join(directory, 'report.txt'); await writeFile(workPath, 'file report', { mode: 0o600 });
+  const workDescriptor = await inspectWorkPath({ path: workPath, roots: [directory], signal: context.signal });
+  const workAsset = { type: 'media-reference' as const, storage: 'path' as const, kind: 'file' as const, attachmentId: `work-path-ref-${'a'.repeat(64)}`, bytes: 11, name: 'report.txt' }
   let creates = 0
   let checkpointSettled = false
   let heldCreate: { response: ServerResponse; rpcId: string } | undefined
@@ -281,14 +284,21 @@ async function fixture(context: TestContext, options: {
     else if (options.frameworkToolChannel && envelope.method === 'bridgePlugin/completeFrameworkTool') {
       toolResults.set(String(input.ticket), input.result as FrameworkToolResult); value = { schema: 1, accepted: true }
     } else if (options.workChannel && envelope.method === 'bridgePlugin/verifyWork') value = { schema: 1, issuerEpoch: input.issuerEpoch,
-      available: true, provider: 'spawn', continuable: true, externalToolAuthorizationVerified: false }
+      available: true, pathAttachmentsSupported: true, provider: 'spawn', continuable: true, externalToolAuthorizationVerified: false }
     else if (options.workChannel && envelope.method === 'bridgePlugin/startWork') {
       const work: DshWorkSnapshot = { schema: 1, issuerEpoch: String(input.issuerEpoch), id: String(input.id), childId: String(input.childId),
         parentSessionId: String(input.parentSessionId), generation: Number(input.generation), state: 'running', result: null, error: null }
       works.set(work.id, work); value = work
     } else if (options.workChannel && envelope.method === 'bridgePlugin/inspectWork') value = works.get(String(input.id))
-    else if (options.workChannel && envelope.method === 'bridgePlugin/readWorkAsset') value = {
-      schema: 1, ...input, asset: workAsset, offset: 0, data: Buffer.from('file report').toString('base64'), nextOffset: null }
+    else if (options.workChannel && envelope.method === 'bridgePlugin/readWorkPath') {
+      try {
+        await inspectWorkPath({ path: workPath, roots: [directory], expected: workDescriptor, signal: context.signal });
+        value = { schema: 1, ...input, asset: workAsset, descriptor: workDescriptor };
+      } catch {
+        response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: false, error: { code: 'bridgePlugin/work-path-invalidated', message: '文件已失效', details: {} } } })); return;
+      }
+    }
+    else if (options.workChannel && envelope.method === 'bridgePlugin/releaseWorkPath') value = { released: true }
     else if (options.workChannel && envelope.method === 'bridgePlugin/followupWork') {
       const prior = works.get(String(input.id))!; works.set(prior.id, { ...prior, state: 'running', result: null }); value = { messageId: 'followup-accepted' }
     } else if (options.workChannel && envelope.method === 'bridgePlugin/interruptWork') {
@@ -1942,7 +1952,7 @@ test('native child questions use QQ owner replies while the main conversation co
 })
 
 
-test('native work file result is registered from SDK bytes and records a real upload receipt without a fake message id', async context => {
+for (const deletedBeforeUpload of [false, true]) test(`native work file result preserves scoped path delivery and explicit invalidation (${deletedBeforeUpload ? 'deleted' : 'live'})`, async context => {
   const fake = await fixture(context, { frameworkToolChannel: true, workChannel: true })
   await fake.configure()
   const current = await invoke(fake.routes(), 'GET', '/api/chat/tool-permissions')
@@ -1963,13 +1973,21 @@ test('native work file result is registered from SDK bytes and records a real up
   fake.works.set(id, { ...work, state: 'completed', result: { stopReason: 'completed', output: [
     { type: 'text', text: '报告见文件' }, fake.workAsset ] } })
   await until(() => fake.rpc.filter(call => call.method === 'session/prompt').length === 2)
+  if (deletedBeforeUpload) await rm(join(fake.directory, 'report.txt'));
   fake.rawFinal(2)
-  await until(() => fake.runtime().readWork(id)?.delivery === 'confirmed')
+  await until(() => fake.runtime().readWork(id)?.delivery === (deletedBeforeUpload ? 'rejected' : 'confirmed')).catch(error => { const v = fake.runtime().readWork(id); throw new Error(JSON.stringify({ status: v?.status, delivery: v?.delivery, deliveryError: v?.deliveryError, lastError: v?.lastError, sends: fake.sends.length, rpc: fake.rpc.slice(-4).map(r => r.method) }), { cause: error }); })
+  if (deletedBeforeUpload) {
+    assert.equal(fake.runtime().readWork(id)?.deliveryError, 'WORK_PATH_INVALIDATED');
+    assert.equal(fake.sends.length, 1, 'The invalidated attachment must never reach protocol upload');
+    await fake.restart();
+    assert.equal(fake.runtime().readWork(id)?.deliveryError, 'WORK_PATH_INVALIDATED');
+    assert.equal(fake.sends.length, 1); return;
+  }
   const result = fake.runtime().readWork(id)!
   assert.equal(result.deliveryMessageId, null)
   assert.equal(result.deliveryFileId, 'uploaded-report')
   assert.equal(fake.sends.length, 2)
-  assert.equal(fake.sends[1].file, 'base64://' + Buffer.from('file report').toString('base64'))
+  assert.equal(fake.sends[1].file, join(fake.directory, 'report.txt'))
   assert.equal(fake.sends[1].name, 'report.txt')
   assert.equal(fake.sends[1].user_id, 123)
   await fake.restart()

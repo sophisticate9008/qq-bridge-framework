@@ -13,7 +13,7 @@ import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent';
 
 const address = { issuerEpoch: 'epoch', id: 'work', parentSessionId: 'parent', childId: 'child', generation: 1 };
 
-test('DSH path registration persists scoped metadata, expires and cleans only registrations with separate capacity', async t => {
+test('DSH path registration persists scoped metadata, has no fixed TTL or byte quota', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-work-path-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = join(directory, 'workspace'); await mkdir(root);
@@ -31,17 +31,10 @@ test('DSH path registration persists scoped metadata, expires and cleans only re
   await assert.rejects(first.register(address, outside, t.signal));
   const link = join(root, 'escape'); await symlink(outside, link);
   await assert.rejects(first.register(address, link, t.signal));
-  // Fill metadata slots without creating or copying a large source file.
-  const raw: unknown = JSON.parse(await readFile(join(store, registered.id), 'utf8'));
-  assert(raw && typeof raw === 'object');
-  const text = JSON.stringify({ ...raw, scope: 'another-work-scope' });
-  for (let index = 1; index < 512; index++) await writeFile(join(store, `work-path-ref-${index.toString(16).padStart(64, '0')}`), text, { mode: 0o600 });
+  now += 30 * 86400000;
+  assert.deepEqual(await restored.resolve(address, registered.id, t.signal), registered.descriptor);
   assert.equal((await first.register(address, path, t.signal)).id, registered.id);
-  await assert.rejects(first.register({ ...address, id: 'another' }, path, t.signal), /CAPACITY/);
-  now += 86400001; await assert.rejects(restored.resolve(address, registered.id, t.signal));
-  assert.equal(await restored.maintenance(), 0); assert.deepEqual(await readdir(store), []);
-  const fresh = await restored.register(address, path, t.signal); assert.notEqual(fresh.id, registered.id);
-  await assert.rejects(restored.resolve(address, registered.id, t.signal));
+  assert.equal(await restored.maintenance(), 1);
   const retained = await open(path, 'r'); try { assert.equal((await retained.stat()).size, 100 * 1024 * 1024); } finally { await retained.close(); }
 });
 
@@ -61,7 +54,7 @@ test('attachment tool defaults even small files to paths and security denial nev
     commit(asset) { assert.equal(asset.storage, 'path'); commits++; } });
   assert(tool);
   const exec = { agent, signal: t.signal } as Parameters<typeof tool.execute>[1];
-  const result = await tool.execute({ path, kind: 'file' }, exec);
+  const result = await tool.execute({ path, filename: 'named.txt' }, exec);
   assert.equal((result as { storage: string }).storage, 'path'); assert.equal(commits, 1); assert.equal(byteReads, 0);
   deny = true; await assert.rejects(Promise.resolve(tool.execute({ path, kind: 'file' }, exec)), /UNSAFE/);
   assert.equal(commits, 1); assert.equal(byteReads, 0);
@@ -98,20 +91,91 @@ test('work journal recovery retains opaque path references and read RPC rejects 
   await assert.rejects(restored.readAsset({ ...request, offset: 0, limit: 100 }, t.signal));
 });
 
-test('explicit unsupported path transport retains the original small-file byte attachment tool', async t => {
-  let tool: ToolDefinition | undefined; let saved = 0;
-  const data = Buffer.from('byte compatibility');
+test('unsupported path transport fails explicitly and never saves bytes', async t => {
+  let tool: ToolDefinition | undefined;
   const agent = { ctx: { tools: { register(value: ToolDefinition) { tool = value; return () => {}; } }, get(name: string) {
     if (name === 'workingDirectory') return { ensure: async () => '/controlled/workspace' };
-    if (name === 'fs') return { lstat: async () => ({ type: 'file' }), resolve: async () => ({ displayPath: '/controlled/workspace/small.txt' }),
-      stat: async () => ({ type: 'file', size: data.length, version: 'same' }), readBytes: async () => data };
-    if (name === 'attachments') return { async saveFile() { saved++; return { attachmentId: 'sdk-file', bytes: data.length, name: 'small.txt' }; } };
+    if (name === 'fs') return { lstat: async () => ({ type: 'file' }), resolve: async () => ({ displayPath: '/controlled/workspace/small.txt' }) };
     return undefined;
   } } } as unknown as Agent;
   installWorkAttachmentTool(agent, { assertLease() {}, pathRegistration: { enabled: () => false,
-    async register(): Promise<never> { throw new Error('Path transport was not negotiated'); } },
-    commit(asset) { assert.equal(asset.storage, undefined); assert.equal(asset.attachmentId, 'sdk-file'); } });
+    async register(): Promise<never> { throw new Error('Not negotiated'); } }, commit() { throw new Error('No fallback'); } });
   assert(tool);
-  await tool.execute({ path: 'small.txt', kind: 'file' }, { agent, signal: t.signal } as Parameters<typeof tool.execute>[1]);
-  assert.equal(saved, 1);
+  await assert.rejects(Promise.resolve(tool.execute({ path: 'small.txt', kind: 'file' }, { agent, signal: t.signal } as Parameters<typeof tool.execute>[1])), /WORK_PATH_REQUIRED/);
+});
+
+test('remote raw HTTP stream delivers and hashes 100MiB with backpressure, consumes tickets and rejects deletion', async t => {
+  const { createServer } = await import('node:http');
+  const { createHash } = await import('node:crypto');
+  const { createWorkStreamChannel } = await import('../dist/work-stream.js');
+  const directory = await mkdtemp(join(tmpdir(), 'work-http-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = join(directory, 'workspace'); await mkdir(root);
+  const path = join(root, 'large.bin'); const handle = await open(path, 'wx');
+  try { await handle.truncate(100 * 1024 * 1024); } finally { await handle.close(); }
+  const registry = createWorkPathRegistry(join(directory, 'registry'), [root]);
+  const registered = await registry.register(address, path, t.signal);
+  const channel = createWorkStreamChannel();
+  const server = createServer((req, res) => { void channel.handle(req, res); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const bound = server.address(); assert(bound && typeof bound === 'object');
+  const base = `http://127.0.0.1:${bound.port}`;
+  t.after(async () => { channel.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await registry.close(); });
+  let verified = 0;
+  const issue = () => channel.issue(registered.descriptor, signal => { verified++; return registry.resolve(address, registered.id, signal); }, registered.id);
+  const stale = base + issue();
+  const url = base + issue(); assert.equal(channel.pending(), 1);
+  assert.equal((await fetch(stale)).status, 410);
+  const response = await fetch(url); assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-length'), String(100 * 1024 * 1024));
+  assert(response.body);
+  await new Promise(resolve => setTimeout(resolve, 100)); assert.equal(verified, 1, 'Paused consumer must apply backpressure before source is exhausted');
+  const hash = createHash('sha256'); let size = 0;
+  for await (const chunk of response.body) { size += chunk.byteLength; hash.update(chunk); }
+  assert.equal(size, registered.descriptor.bytes); assert.equal(hash.digest('hex'), registered.descriptor.sha256);
+  assert.equal((await fetch(url)).status, 410);
+  assert.equal((await fetch(`${base}/qbf-work-stream/${'a'.repeat(64)}`)).status, 410);
+  const interrupted = base + issue(); const reading = await fetch(interrupted); assert(reading.body);
+  const reader = reading.body.getReader(); await reader.read(); await reader.cancel();
+  for (let i = 0; i < 100 && channel.active(); i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(channel.active(), 0); assert.equal((await fetch(interrupted)).status, 410);
+  const owner = new AbortController();
+  const ownerUrl = base + channel.issue(registered.descriptor, signal => registry.resolve(address, registered.id, signal), registered.id, owner.signal);
+  owner.abort(); assert.equal(channel.pending(), 0); assert.equal((await fetch(ownerUrl)).status, 410);
+  const cancelled = base + issue(); channel.revoke(registered.id); assert.equal(channel.pending(), 0);
+  assert.equal((await fetch(cancelled)).status, 410);
+  const corrupt = base + issue(); await writeFile(path, 'changed'); assert.equal((await fetch(corrupt)).status, 410);
+  const changedScope = base + channel.issue(registered.descriptor, signal => registry.resolve({ ...address, generation: 2 }, registered.id, signal), registered.id);
+  assert.equal((await fetch(changedScope)).status, 410);
+  const deleted = base + issue(); await rm(path);
+  const missing = await fetch(deleted); assert.equal(missing.status, 410); assert.match(await missing.text(), /文件已失效/);
+});
+
+test('account binding, explicit release and legacy TTL never revive a resource', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'work-scope-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = join(directory, 'workspace'); await mkdir(root); const path = join(root, 'small'); await writeFile(path, 'small');
+  const registry = createWorkPathRegistry(join(directory, 'registry'), [root]); t.after(() => registry.close());
+  const owner = { ...address, accountId: 'account-one' };
+  const registered = await registry.register(owner, path, t.signal);
+  await assert.rejects(registry.resolve({ ...owner, accountId: 'account-two' }, registered.id, t.signal));
+  await registry.revoke(owner, registered.id);
+  await assert.rejects(registry.resolve(owner, registered.id, t.signal), /文件已失效/);
+  assert.equal(await readFile(path, 'utf8'), 'small');
+});
+
+test('optional empty/null fields preserve path-only semantics and never require work context', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'work-optional-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = join(directory, 'workspace'); await mkdir(root); const path = join(root, 'file'); await writeFile(path, 'small');
+  const registry = createWorkPathRegistry(join(directory, 'registry'), [root]); t.after(() => registry.close());
+  let tool: ToolDefinition | undefined; let committed = 0;
+  const agent = { ctx: { tools: { register(value: ToolDefinition) { tool = value; return () => {}; } },
+    get(name: string) { return name === 'fs' ? { lstat: async () => ({ type: 'file' }), resolve: async () => ({ displayPath: path }), processPath: () => path }
+      : name === 'workingDirectory' ? { ensure: async () => root } : undefined; } } } as unknown as Agent;
+  installWorkAttachmentTool(agent, { assertLease() {}, pathRegistration: { enabled: () => true, register: (target, signal) => registry.register(address, target, signal) },
+    commit() { committed++; } }); assert(tool);
+  for (const args of [{ path }, { path, kind: 'file' }, { path, filename: '', kind: 'file' }, { path, filename: null, kind: null }, { path, kind: '' }]) {
+    const result = await tool.execute(args, { agent, signal: t.signal } as Parameters<typeof tool.execute>[1]);
+    assert.equal((result as { registered: boolean }).registered, true);
+  }
+  assert.equal(committed, 5);
 });

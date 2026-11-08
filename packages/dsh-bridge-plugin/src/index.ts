@@ -1,9 +1,10 @@
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import { createWorkStreamChannel, WORK_STREAM_ROUTE } from './work-stream.js'
 import { inspectRegisteredToolInventory } from './tool-inventory.js'
 import { recoverSdkWork } from './work-recovery.js'
 import { createExecutionCancellation } from './execution-cancellation.js'
 import { inspectSdkExecution } from './execution-evidence.js'
 import { DSH_EXECUTION_EVIDENCE_PROTOCOL, type DshExecutionEvidenceRequest } from './execution-evidence-protocol.js'
-import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
@@ -39,6 +40,7 @@ export default class BridgePlugin extends TypertRemoteService {
   private readonly pluginModels
   private readonly executionCancellation
   private eventStreams = 0
+  private readonly workStreams = createWorkStreamChannel()
 
   constructor(ctx: Context) {
     super(ctx, 'bridgePlugin')
@@ -66,6 +68,10 @@ export default class BridgePlugin extends TypertRemoteService {
       const current = service.current.bind(service)
       return { set, current }
     }
+    ctx.inject(['webServer'], inner => {
+      inner.effect(() => inner.webServer.register({ kind: 'prefix', path: WORK_STREAM_ROUTE, handler: (req, res) => this.workStreams.handle(req, res) }))
+    })
+    ctx.effect(() => () => this.workStreams.close())
     const pathRegistry = createWorkPathRegistry(join(resolveDshHome(), 'storages', 'qbf-work-paths'),
       () => {
         const deploymentDirectory = ctx.get('workingDirectory')?.defaultDirectory
@@ -75,6 +81,7 @@ export default class BridgePlugin extends TypertRemoteService {
     maintenance.unref(); ctx.effect(() => async () => { clearInterval(maintenance); await pathRegistry.close() })
     void pathRegistry.maintenance().catch(() => {})
     this.work = createWorkChannel({
+      releasePath: (address, id) => pathRegistry.revoke(address, id),
       readPath: (address, asset, signal) => pathRegistry.resolve(address, asset.attachmentId, signal),
       recover: (record, signal) => recoverSdkWork(ctx, record, signal),
       fullAccessAvailable: () => { try { fullAccessService(); return true } catch { return false } },
@@ -82,33 +89,7 @@ export default class BridgePlugin extends TypertRemoteService {
         const service = fullAccessService(agent)
         service.set(agent.session, 'danger-full-access')
         if (service.current(agent.session) !== 'danger-full-access') throw new TypeError('The SDK child permission scope was not applied')
-      }, readAsset: async (asset, signal) => {
-      const attachments = ctx.get('attachments')
-      if (!attachments) throw new TypeError('SDK attachment storage is unavailable')
-      // GIF work images are stored byte-for-byte using the SDK file store; readImage
-      // addresses the separate normalized raster store and would lose the original animation.
-      if (asset.kind === 'image' && asset.mediaType !== 'image/gif') {
-        if (!asset.mediaType || !asset.width || !asset.height) throw new TypeError('SDK image metadata is unavailable')
-        return (await attachments.readImage({ attachmentId: AttachmentId(asset.attachmentId), bytes: asset.bytes,
-          mediaType: asset.mediaType, width: asset.width, height: asset.height, ...(asset.name ? { name: asset.name } : {}) }, signal)).data
-      }
-      if (!asset.name) throw new TypeError('SDK file metadata is unavailable')
-      const chunks: Buffer[] = []
-      let total = 0
-      for await (const chunk of attachments.readFileStream({ attachmentId: AttachmentId(asset.attachmentId), name: asset.name, bytes: asset.bytes }, signal)) {
-        signal.throwIfAborted(); total += chunk.length
-        if (total > asset.bytes || total > 8 * 1024 * 1024) throw new TypeError('SDK file exceeds its registered size')
-        chunks.push(Buffer.from(chunk))
-      }
-      const data = Buffer.concat(chunks)
-      if (asset.kind === 'image') {
-        if (asset.mediaType !== 'image/gif' || data.length !== asset.bytes || data.length < 13
-          || !['GIF87a', 'GIF89a'].includes(data.toString('ascii', 0, 6))
-          || data.readUInt16LE(6) !== asset.width || data.readUInt16LE(8) !== asset.height)
-          throw new TypeError('Stored work GIF metadata changed')
-      }
-      return data
-    }, journal: createWorkJournal(join(resolveDshHome(), 'storages', 'qbf-work')), issuerEpoch: this.journal.issuerEpoch, getAgent: id => ctx.agents.get(SessionId(id)),
+      }, journal: createWorkJournal(join(resolveDshHome(), 'storages', 'qbf-work')), issuerEpoch: this.journal.issuerEpoch, getAgent: id => ctx.agents.get(SessionId(id)),
       runtime: () => ctx.get('subagents'), hasPreset: async id => (await ctx.agentPresets.list()).some(preset => preset.id === id),
       continuationAvailable: () => ctx.get('sessionPersistence') !== undefined && ctx.get('sessionQuery') !== undefined })
     const attachmentTools = new Map<string, () => void>()
@@ -192,7 +173,7 @@ export default class BridgePlugin extends TypertRemoteService {
         'bridgePlugin/forkPreview', 'bridgePlugin/forkWithPreset', 'bridgePlugin/inspectMigration',
         'bridgePlugin/installFrameworkTools', 'bridgePlugin/withdrawFrameworkTools',
         'bridgePlugin/pollFrameworkTools', 'bridgePlugin/completeFrameworkTool', 'bridgePlugin/inspectFrameworkTools',
-        'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkAsset', 'bridgePlugin/readWorkPath', 'bridgePlugin/inspectExecution', 'bridgePlugin/cancelExecution', 'bridgePlugin/inspectSessionStorage',
+        'bridgePlugin/verifyWork', 'bridgePlugin/startWork', 'bridgePlugin/inspectWork', 'bridgePlugin/followupWork', 'bridgePlugin/interruptWork', 'bridgePlugin/readWorkPath', 'bridgePlugin/releaseWorkPath', 'bridgePlugin/inspectExecution', 'bridgePlugin/cancelExecution', 'bridgePlugin/inspectSessionStorage',
         'bridgePlugin/preparePluginModelSession', 'bridgePlugin/pluginModels', 'bridgePlugin/createPluginModelSession', 'bridgePlugin/inspectPluginModelSession', 'bridgePlugin/startPluginModel', 'bridgePlugin/waitPluginModelIdle', 'bridgePlugin/inspectPluginModelRun', 'bridgePlugin/followSessionEvents'],
       claimMeaning: 'inbox-claimed-not-completed', durableReceipts: false, externalToolAuthorizationVerified: false }
   }
@@ -299,10 +280,32 @@ export default class BridgePlugin extends TypertRemoteService {
   inspectWork(request: WorkAddress) { const invocation = this.assertOperator(); return this.work.inspect(request, invocation.signal) }
 
   @Remote('readWorkPath')
-  readWorkPath(request: WorkAddress & { kind: 'image' | 'file'; attachmentId: string }) {
+  async readWorkPath(request: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; transport?: 'stream' }) {
     const invocation = this.assertOperator()
-    if (Object.keys(request).some(key => !['issuerEpoch', 'id', 'parentSessionId', 'childId', 'generation', 'kind', 'attachmentId'].includes(key))) throw new TypeError('Invalid path reference request')
-    return this.work.readPath(request, invocation.signal)
+    if (Object.keys(request).some(key => !['issuerEpoch', 'id', 'parentSessionId', 'childId', 'generation', 'kind', 'attachmentId', 'transport'].includes(key))) throw new TypeError('Invalid path reference request')
+    try {
+      const { transport, ...address } = request
+      if (transport !== undefined && transport !== 'stream') throw new TypeError('Invalid work transport')
+      const result = await this.work.readPath(address, invocation.signal)
+      if (transport === 'stream') {
+        if (!this.ctx.get('webServer')) throw new RemoteError('bridgePlugin/work-stream-unavailable', '远程流通道不可用', {})
+        const streamPath = this.workStreams.issue(result.descriptor, async signal => (await this.work.readPath(address, signal)).descriptor, address.attachmentId, invocation.peer.signal)
+        return { ...result, streamPath }
+      }
+      return result
+    } catch (error) {
+      if (error instanceof RemoteError || invocation.signal.aborted) throw error
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'WORK_PATH_NOT_THIS_WORK')
+        throw new RemoteError('bridgePlugin/work-path-not-this-work', '编号不属于该工作或类型', {})
+      throw new RemoteError('bridgePlugin/work-path-invalidated', '文件已失效或工作归属发生变化', {})
+    }
+  }
+
+  @Remote('releaseWorkPath')
+  async releaseWorkPath(request: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; keepRegistration?: boolean; channelToken?: string }) {
+    const invocation = this.assertOperator();
+    const result = await this.work.releasePath(request, invocation.signal);
+    this.workStreams.revoke(request.attachmentId, request.channelToken); return result
   }
 
   @Remote('readWorkAsset')
@@ -380,6 +383,9 @@ export default class BridgePlugin extends TypertRemoteService {
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     'bridgePlugin/operator-required': Record<string, never>
+    'bridgePlugin/work-path-not-this-work': Record<string, never>
+    'bridgePlugin/work-path-invalidated': Record<string, never>
+    'bridgePlugin/work-stream-unavailable': Record<string, never>
     'bridgePlugin/session-events-failed': { readonly reason: string }
   }
 }

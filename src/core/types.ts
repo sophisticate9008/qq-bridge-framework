@@ -29,7 +29,8 @@ export interface OutboundScope {
 }
 export interface MessageDeliveryReceipt { status: 'confirmed'; messageId: string; kind?: never }
 export interface FileUploadReceipt { status: 'confirmed'; kind: 'file-upload'; fileId: string; name: string; messageId?: never }
-export type DeliveryReceipt = MessageDeliveryReceipt | FileUploadReceipt | { status: 'unknown' | 'rejected' };
+export type AssetRejectionCode = 'WORK_PATH_INVALIDATED' | 'WORK_ASSET_SCOPE_MISMATCH' | 'WORK_BYTE_ATTACHMENTS_REMOVED';
+export type DeliveryReceipt = MessageDeliveryReceipt | FileUploadReceipt | { status: 'unknown' | 'rejected'; errorCode?: AssetRejectionCode };
 export interface SendRequest {
   conversationId: string;
   content: readonly MessageContent[];

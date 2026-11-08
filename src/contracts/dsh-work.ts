@@ -43,6 +43,7 @@ export interface DshWorkAddress {
   readonly generation: number
 }
 export interface DshWorkTarget {
+  readonly accountId?: string
   readonly attachmentTransport?: 'path-v1'
   readonly continuous?: boolean
   /** Only the authenticated, owner-admitted child lease may request this scope. */
@@ -102,7 +103,7 @@ export function isDshWorkOutput(value: unknown): value is DshWorkOutput {
     || typeof block.attachmentId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$/.test(block.attachmentId)
     || block.storage !== undefined && block.storage !== 'path'
     || block.storage === 'path' && (typeof block.attachmentId !== 'string' || !/^work-path-ref-[a-f0-9]{64}$/.test(block.attachmentId))
-    || !Number.isSafeInteger(block.bytes) || Number(block.bytes) < 1 || block.storage !== 'path' && Number(block.bytes) > 8 * 1024 * 1024
+    || !Number.isSafeInteger(block.bytes) || Number(block.bytes) < 1
     || block.name !== undefined && (typeof block.name !== 'string' || block.name.length < 1 || block.name.length > 160 || /[/\\\p{Cc}]/u.test(block.name))) return false
   return block.kind === 'file'
     ? typeof block.name === 'string' && block.mediaType === undefined && block.width === undefined && block.height === undefined

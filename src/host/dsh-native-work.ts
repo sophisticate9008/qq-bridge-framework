@@ -8,6 +8,7 @@ import type { NativeWorkBackend, NativeWorkBackendAddress } from './native-work.
 import type { NativeWorkConfiguration } from './native-work-configuration.ts'
 
 export function createDshNativeWorkBackend(options: {
+  readonly accountId?: string
   readonly port: DshWorkPort
   readonly issuerEpoch: string
   readonly generation: (parentSessionId: string) => number | null
@@ -49,7 +50,7 @@ export function createDshNativeWorkBackend(options: {
     async verify(request) {
       assert(options.generation(request.parentSessionId) !== null, 'WORK_PARENT_UNAVAILABLE', 'The parent session is no longer current.')
       const target = await options.resolveTarget(request.configuration, request.signal)
-      assert(await options.port.verify({ issuerEpoch: options.issuerEpoch, parentSessionId: request.parentSessionId, ...target, fullAccess: request.configuration.fullAccess, continuous: request.configuration.timeoutMs === null }, request.signal),
+      assert(await options.port.verify({ issuerEpoch: options.issuerEpoch, parentSessionId: request.parentSessionId, ...target, ...(options.accountId ? { accountId: options.accountId } : {}), fullAccess: request.configuration.fullAccess, continuous: request.configuration.timeoutMs === null }, request.signal),
         'NATIVE_WORK_BACKEND_UNAVAILABLE', 'A continuable SDK spawn provider and selected preset are required.')
     },
     async start(request) {
@@ -61,7 +62,7 @@ export function createDshNativeWorkBackend(options: {
       const address: DshWorkAddress = { issuerEpoch: options.issuerEpoch, id: request.id, childId: request.childId,
         parentSessionId: request.parentSessionId, generation }
       assert(options.generation(request.parentSessionId) === generation, 'WORK_PARENT_UNAVAILABLE', 'The parent generation changed during preflight.')
-      const initial = await options.port.start({ ...address, ...target, fullAccess: request.configuration.fullAccess, task: request.task, context: request.context,
+      const initial = await options.port.start({ ...address, ...target, ...(options.accountId ? { accountId: options.accountId } : {}), fullAccess: request.configuration.fullAccess, task: request.task, context: request.context,
         timeoutMs: request.configuration.timeoutMs }, request.signal)
       const lifetime = new AbortController()
       const observedProgress = new Set<string>()

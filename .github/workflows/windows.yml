@@ -104,6 +104,8 @@ jobs:
           path: private/maintenance/releases
       - name: 安装与启动同一候选包
         run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
+      - name: 同批桥接组件原生附件路径与私有存储
+        run: node scripts/verify-work-path-release.ts 2>&1 | tee work-path-platform.log
       - name: 保存验收报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -112,5 +114,7 @@ jobs:
           path: |
             platform-result.json
             platform-verification.log
+            work-path-platform-result.json
+            work-path-platform.log
           if-no-files-found: ignore
           retention-days: 3

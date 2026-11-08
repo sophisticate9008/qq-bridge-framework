@@ -1,3 +1,5 @@
+import { isRecord } from '../core/values.ts'
+import { isAssetRejectionCode } from '../core/delivery.ts'
 import { createOneBotFileUploadPort, validOneBotUploadSource } from './onebot-files.ts'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http'
@@ -323,7 +325,10 @@ export function createOneBotTransport(options: OneBotTransportOptions): Transpor
           return target.action === 'send_private_msg'
             ? files.uploadPrivate({ userId: String(target.value), file, name: first.name, signal })
             : files.uploadGroup({ groupId: String(target.value), file, name: first.name, signal })
-        } catch { return { status: signal.aborted ? 'unknown' : 'rejected' } }
+        } catch (error) {
+          if (!signal.aborted && isRecord(error) && isAssetRejectionCode(error.code)) return { status: 'rejected', errorCode: error.code }
+          return { status: signal.aborted ? 'unknown' : 'rejected' }
+        }
       }
       if (first.type === 'forward') {
         if (!forward || !(target.action === 'send_private_msg' ? forward.private : forward.group)) return { status: 'rejected' }

@@ -9,6 +9,9 @@ import { digest, json, object } from './data.ts';
 export function createNativeWorkDelivery(options: {
   readonly host: ReturnType<typeof createBridgeHost>; readonly store: DurableStore; readonly persona: PersonaScope;
   readonly guard: (conversationId: string, signal: AbortSignal) => Promise<void>;
+  readonly onCleanupFault?: (code: string) => void;
+  readonly unconfirmed?: (content: MessageContent, signal: AbortSignal) => Promise<void>;
+  readonly delivered?: (content: MessageContent, signal: AbortSignal) => Promise<void>;
   readonly owner: () => string | null;
   readonly present?: (result: Readonly<NativeWorkResultDelivery>, signal: AbortSignal) => Promise<DeliveryReceipt>;
 }) {
@@ -51,6 +54,12 @@ export function createNativeWorkDelivery(options: {
           scope: { ...(options.host.accountScope ? { accountScope: options.host.accountScope } : {}), persona: options.persona, sessionId: result.parentSessionId, generation: result.generation } });
         options.store.write('native-work.deliveries', digest([result.deliveryId, index]), json({ schema: 1,
           deliveryId: result.deliveryId, workId: result.id, index, total: parts.length, receipt: last }), { expectedRevision: null });
+        for (const item of content) {
+          try {
+            if (last.status === 'confirmed') await options.delivered?.(item, signal);
+            else await options.unconfirmed?.(item, signal);
+          } catch { try { options.onCleanupFault?.('WORK_PATH_CLEANUP_FAILED'); } catch {} }
+        }
         if (last.status !== 'confirmed') return last;
       }
       return presented && presented.status !== 'confirmed' ? presented : last;

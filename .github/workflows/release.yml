@@ -41,6 +41,8 @@ jobs:
       - run: npm run release:pack
       - name: 全新目录安装、控制台资源、原生渲染与重启
         run: npm run test:release
+      - name: 同批桥接组件原生附件路径与私有存储
+        run: node scripts/verify-work-path-release.ts
       - name: 保存经过安装验证的发行包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -81,6 +83,8 @@ jobs:
           path: private/maintenance/releases
       - name: 验证同批正式附件
         run: node scripts/verify-framework-release.ts 2>&1 | tee platform-verification.log
+      - name: 同批桥接组件原生附件路径与私有存储
+        run: node scripts/verify-work-path-release.ts 2>&1 | tee work-path-platform.log
       - name: 保存小型平台验收报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -89,6 +93,8 @@ jobs:
           path: |
             platform-result.json
             platform-verification.log
+            work-path-platform-result.json
+            work-path-platform.log
           if-no-files-found: ignore
           retention-days: 3
 

@@ -1,187 +1,177 @@
-import { inspectWorkPath, validWorkPath } from '../storage/work-path.ts';
-import { privatePermissions, canonicalPathMatches } from '../storage/file-security.ts';
-import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
-import { open, readdir, lstat, realpath, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { validWorkPath } from '../storage/work-path.ts';
 import type { DshWorkAddress, DshWorkMediaReference } from '../contracts/dsh-work.ts';
+import type { EffectRequest } from '../core/types.ts';
 import type { MessageContent } from '../contracts/messages.ts';
 import type { OneBotAssetResolutionRequest } from '../adapters/onebot.ts';
 import type { DshWorkPort } from '../adapters/dsh-work.ts';
 import { assert, errorCode } from '../core/values.ts';
-import { ensurePrivateDirectory } from '../storage/private-json.ts';
 import type { DurableStore } from './types.ts';
 import { digest, json, object } from './data.ts';
 
-/** SDK attachments are a distinct source; their opaque IDs never become protocol paths. */
+/** Metadata and chat authorization only. The filesystem host signs and revalidates files. */
 export function createNativeWorkAssets(options: {
   readonly directory: string; readonly store: DurableStore; readonly accountId: string;
-  readonly port: DshWorkPort;
-  readonly clock?: () => number;
-  readonly signal?: AbortSignal;
+  readonly port: DshWorkPort; readonly clock?: () => number; readonly signal?: AbortSignal;
   readonly onMaintenanceFault?: (code: string) => void;
   readonly parent: (sessionId: string) => { conversationId: string; generation: number } | null;
   readonly authorize: (conversationId: string, signal: AbortSignal) => Promise<void>;
 }) {
-  const directory = join(options.directory, 'work-assets');
-  const namespace = 'native-work.assets';
-  const pathNamespace = 'native-work.paths';
-  let tail: Promise<unknown> = Promise.resolve();
-  const clock = options.clock ?? Date.now;
-  const ttl = 86400000;
+  const namespace = 'native-work.paths';
   let closed = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  function enqueue<T>(run: () => Promise<T>): Promise<T> {
-    const operation = tail.catch(() => undefined).then(() => {
-      assert(!closed && !options.signal?.aborted, 'WORK_ASSET_CLOSED', 'Work attachment storage is closed.');
-      return run();
-    });
-    tail = operation; return operation;
-  }
-  async function capacity(additionalBytes = 0) {
-    await ensurePrivateDirectory(directory);
-    assert(canonicalPathMatches(await realpath(directory), directory), 'WORK_ASSET_DIRECTORY_INVALID', 'A canonical private work asset directory is required.');
-    const files = await readdir(directory);
-    assert(files.length <= 1024, 'WORK_ASSET_BACKPRESSURE', 'The work asset directory exceeds its maintenance bound.');
-    let count = 0; let total = 0;
-    for (const [index, name] of files.entries()) {
-      if (index > 0 && index % 32 === 0) await new Promise(resolve => setTimeout(resolve, 10));
-      assert(/^work-asset-[a-f0-9]{64}$/.test(name), 'WORK_ASSET_DIRECTORY_INVALID', 'The work asset directory contains an unknown entry.');
-      const filename = join(directory, name);
-      const info = await lstat(filename);
-      assert(info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && privatePermissions(join(directory, name), info, 0o600),
-        'WORK_ASSET_DIRECTORY_INVALID', 'The work asset directory contains an invalid file.');
-      const row = options.store.read(namespace, name);
-      const value = row ? object(row.value) : null;
-      if (value) assert(value.accountId === options.accountId && value.assetId === name && Number.isSafeInteger(value.expiresAt),
-        'WORK_ASSET_DIRECTORY_INVALID', 'The work asset metadata is invalid.');
-      const expired = value ? Number(value.expiresAt) <= clock() : info.mtimeMs + ttl <= clock();
-      if (expired) {
-        await unlink(filename);
-        // Retain the identity beyond byte expiry, including legacy rows without a store TTL.
-        if (row && value && row.expiresAt === null) options.store.write(namespace, name, row.value,
-          { expectedRevision: row.revision, expiresAt: Number(value.expiresAt) + 6 * ttl });
-      } else { count++; total += info.size; }
-    }
-    assert(count + (additionalBytes > 0 ? 1 : 0) <= 512 && total + additionalBytes <= 128 * 1024 * 1024,
-      'WORK_ASSET_BACKPRESSURE', 'The work asset count or byte limit was reached.');
-  }
-  async function pathCapacity(additional = 0) {
-    const records = options.store.list(pathNamespace, { limit: 513 });
-    assert(records.length + additional <= 512, 'WORK_PATH_BACKPRESSURE', 'The path registration count limit was reached.');
-  }
-  const maintenance = () => enqueue(async () => { await capacity(); await pathCapacity(); });
-  function schedule(delay: number) {
-    if (closed || options.signal?.aborted) return;
-    timer = setTimeout(() => { void maintenance().catch(error => {
-      try { options.onMaintenanceFault?.(errorCode(error, 'WORK_ASSET_MAINTENANCE_FAILED')); } catch {}
-    }).finally(() => schedule(60 * 60 * 1000)); }, delay);
-    timer.unref();
-  }
-  options.signal?.addEventListener('abort', stopTimer, { once: true });
-  function stopTimer() { clearTimeout(timer); }
-  schedule(5000);
-  async function bytes(filename: string, size: number, hash: string): Promise<Buffer> {
-    const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try {
-      const stat = await handle.stat();
-      assert(stat.isFile() && stat.nlink === 1 && privatePermissions(filename, stat, 0o600) && stat.size === size && size <= 8 * 1024 * 1024,
-        'WORK_ASSET_INVALID', 'The registered attachment file is invalid.');
-      const value = await handle.readFile();
-      assert(createHash('sha256').update(value).digest('hex') === hash, 'WORK_ASSET_CHANGED', 'The registered attachment bytes changed.');
-      return value;
-    } finally { await handle.close(); }
-  }
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  const openChannels = new Set<string>();
+  const toolChannels = new Map<string, { assetId: string; token: string }[]>();
+  const scopeKey = (scope: { conversationId: string; sessionId?: string; generation?: number }) => digest([scope.conversationId, scope.sessionId, scope.generation]);
+  options.store.createIndex?.({ namespace, field: 'resourceId' });
   function binding(address: DshWorkAddress) {
-    const current = options.parent(address.parentSessionId);
-    assert(current?.generation === address.generation, 'WORK_PARENT_UNAVAILABLE', 'The original work parent is no longer current.');
-    return current;
+    const parent = options.parent(address.parentSessionId);
+    assert(!closed && !options.signal?.aborted, 'WORK_ASSET_CLOSED', 'Attachment resolver is closed.');
+    assert(parent?.generation === address.generation, 'WORK_PARENT_UNAVAILABLE', '原工作会话已失效。');
+    return parent;
   }
-  return Object.freeze({
-    maintenance,
-    async close() { closed = true; stopTimer(); options.signal?.removeEventListener('abort', stopTimer); await Promise.allSettled([tail]); },
-    register(request: { readonly address: DshWorkAddress; readonly asset: DshWorkMediaReference; readonly signal: AbortSignal }): Promise<MessageContent> {
-      const operation = enqueue(async () => {
-        const { address, asset, signal } = request;
-        const parent = binding(address);
-        await options.authorize(parent.conversationId, signal);
-        if (asset.storage === 'path') {
-          assert(options.port.readPath, 'WORK_PATH_READER_UNAVAILABLE', 'The path attachment reader is unavailable.');
-          const resolved = await options.port.readPath({ ...address, attachmentId: asset.attachmentId, kind: asset.kind }, signal);
-          assert(digest(resolved.asset) === digest(asset) && validWorkPath(resolved.descriptor)
-            && resolved.descriptor.bytes === asset.bytes, 'WORK_PATH_INVALID', 'The registered path metadata changed.');
-          const descriptor = await inspectWorkPath({ path: resolved.descriptor.path, roots: [resolved.descriptor.root], expected: resolved.descriptor, signal, now: clock() });
-          signal.throwIfAborted(); binding(address); await options.authorize(parent.conversationId, signal);
-          const assetId = `work-path-${digest([options.accountId, parent.conversationId, address.id, address.childId, address.parentSessionId, address.generation, asset])}`;
-          const prior = options.store.read(pathNamespace, assetId);
-          if (!prior) {
-            await pathCapacity(1);
-            options.store.write(pathNamespace, assetId, json({ schema: 1, assetId, accountId: options.accountId,
-              conversationId: parent.conversationId, workId: address.id, childId: address.childId,
-              parentSessionId: address.parentSessionId, generation: address.generation, kind: asset.kind,
-              name: asset.name ?? null, descriptor }), { expectedRevision: null, expiresAt: descriptor.expiresAt });
-          } else assert(digest(object(prior.value).descriptor) === digest(descriptor), 'WORK_PATH_CHANGED', 'The registered path changed.');
-          return asset.kind === 'file' ? { type: 'file' as const, assetId, name: asset.name! } : { type: 'image' as const, assetId };
+  async function lookup(address: DshWorkAddress, asset: DshWorkMediaReference, signal: AbortSignal, metadataOnly = false) {
+    assert(asset.storage === 'path', 'WORK_BYTE_ATTACHMENTS_REMOVED', '旧字节附件已失效，请重新登记路径。');
+    assert(options.port.readPath, 'WORK_PATH_READER_UNAVAILABLE', '请配套升级宿主与桥接插件。');
+    const resolved = await options.port.readPath({ ...address, metadataOnly, kind: asset.kind, attachmentId: asset.attachmentId }, signal);
+    assert(digest(resolved.asset) === digest(asset) && validWorkPath(resolved.descriptor)
+      && resolved.descriptor.bytes === asset.bytes, 'WORK_PATH_INVALIDATED', '文件已失效，登记信息发生变化。');
+    return resolved;
+  }
+  function scheduleCleanup() {
+    if (closed || cleanupTimer) return;
+    cleanupTimer = setTimeout(() => { cleanupTimer = undefined; void api.maintenance().catch(() => scheduleCleanup()); }, 60000);
+    cleanupTimer.unref();
+  }
+  const api = Object.freeze({
+    async maintenance(): Promise<void> {
+      let after: string | undefined;
+      for (;;) {
+        const page = options.store.list(namespace, { limit: 128, ...(after ? { after } : {}) });
+        for (const row of page) {
+          const v = object(row.value);
+          if (v.schema === 2 && v.delivered === true) await api.delivered(v.kind === 'image'
+            ? { type: 'image', assetId: row.key } : { type: 'file', assetId: row.key, name: 'attachment' }, AbortSignal.timeout(10000));
         }
-        assert(options.port.readAsset, 'WORK_MEDIA_READER_UNAVAILABLE', 'The SDK attachment reader is unavailable.');
-        const resolved = await options.port.readAsset({ ...address, attachmentId: asset.attachmentId, kind: asset.kind }, signal);
-        signal.throwIfAborted(); binding(address);
-        await options.authorize(parent.conversationId, signal);
-        assert(digest(resolved.asset) === digest(asset) && resolved.data.byteLength === asset.bytes,
-          'WORK_ASSET_CHANGED', 'The SDK attachment metadata changed.');
-        const hash = createHash('sha256').update(resolved.data).digest('hex');
-        const assetId = `work-asset-${digest([options.accountId, parent.conversationId, address.id, address.childId,
-          address.parentSessionId, address.generation, asset, hash])}`;
-        const filename = join(directory, assetId);
-        const prior = options.store.read(namespace, assetId);
-        if (!prior) {
-          await capacity(resolved.data.byteLength);
-          const handle = await open(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-          try { await handle.writeFile(resolved.data); await handle.sync(); } finally { await handle.close(); }
-          signal.throwIfAborted(); binding(address);
-          options.store.write(namespace, assetId, json({ schema: 1, assetId, accountId: options.accountId,
-            conversationId: parent.conversationId, parentSessionId: address.parentSessionId, generation: address.generation,
-            kind: asset.kind, name: asset.name ?? null, bytes: asset.bytes, hash, createdAt: clock(), expiresAt: clock() + ttl }), { expectedRevision: null, expiresAt: clock() + 7 * ttl });
-        } else {
-          assert(Number(object(prior.value).expiresAt) > clock(), 'WORK_ASSET_EXPIRED', 'The work attachment has expired.');
-          await bytes(filename, asset.bytes, hash);
-        }
-        return asset.kind === 'file' ? { type: 'file' as const, assetId, name: asset.name! } : { type: 'image' as const, assetId };
-      });
-      tail = operation;
-      return operation;
-    },
-    resolve(request: OneBotAssetResolutionRequest) { return enqueue(async () => {
-      assert(/^work-(?:asset|path)-[a-f0-9]{64}$/.test(request.assetId), 'WORK_ASSET_UNAVAILABLE', 'This is not a registered work asset.');
-      await options.authorize(request.conversationId, request.signal);
-      const pathAsset = request.assetId.startsWith('work-path-');
-      const record = options.store.read(pathAsset ? pathNamespace : namespace, request.assetId);
-      assert(record, 'WORK_ASSET_UNAVAILABLE', 'The work asset is unavailable.');
-      const value = object(record.value);
-      const parent = typeof value.parentSessionId === 'string' ? options.parent(value.parentSessionId) : null;
-      assert(value.schema === 1 && value.accountId === options.accountId && value.conversationId === request.conversationId
-        && value.parentSessionId === request.sessionId && value.generation === request.generation && parent?.generation === request.generation
-        && parent.conversationId === request.conversationId && value.kind === request.type
-        && (pathAsset ? validWorkPath(value.descriptor) && value.descriptor.expiresAt > clock() : Number(value.expiresAt) > clock()),
-      'WORK_ASSET_SCOPE_MISMATCH', 'The attachment belongs to a different or expired work scope.');
-      if (pathAsset) {
-        assert(validWorkPath(value.descriptor), 'WORK_PATH_INVALID', 'The path descriptor is invalid.');
-        const descriptor = value.descriptor;
-        await inspectWorkPath({ path: descriptor.path, roots: [descriptor.root], expected: descriptor, signal: request.signal, now: clock() });
-        await options.authorize(request.conversationId, request.signal);
-        assert(options.parent(String(value.parentSessionId))?.generation === request.generation,
-          'WORK_PARENT_UNAVAILABLE', 'The original work parent changed.');
-        request.signal.throwIfAborted();
-        assert(descriptor.expiresAt > clock(), 'WORK_ASSET_EXPIRED', 'The path registration expired during verification.');
-        return { file: descriptor.path };
+        if (page.length < 128) break; after = page.at(-1)!.key;
       }
-      const filename = join(directory, request.assetId);
-      const data = await bytes(filename, Number(value.bytes), String(value.hash));
+    },
+    async close() {
+      closed = true; clearTimeout(cleanupTimer);
+      for (const assetId of openChannels) await api.unconfirmed({ type: 'file', assetId, name: 'attachment' }, AbortSignal.timeout(10000));
+      openChannels.clear();
+      for (const key of toolChannels.keys()) await api.closeToolChannels(key);
+    },
+    async closeToolChannels(scope: string | { conversationId: string; sessionId: string; generation: number }) {
+      const key = typeof scope === 'string' ? scope : scopeKey(scope);
+      const channels = toolChannels.get(key) ?? []; toolChannels.delete(key);
+      for (const channel of channels) {
+        const row = options.store.read(namespace, channel.assetId); if (!row) continue;
+        const v = object(row.value); const asset = object(v.asset) as unknown as DshWorkMediaReference;
+        try { await options.port.releasePath?.({ ...object(v.address) as unknown as DshWorkAddress, kind: asset.kind,
+          attachmentId: asset.attachmentId, keepRegistration: true, channelToken: channel.token }, AbortSignal.timeout(10000)); }
+        catch { try { options.onMaintenanceFault?.('WORK_CHANNEL_RELEASE_FAILED'); } catch {} }
+      }
+    },
+    async register({ address, asset, signal }: { readonly address: DshWorkAddress; readonly asset: DshWorkMediaReference; readonly signal: AbortSignal }): Promise<MessageContent> {
+      const parent = binding(address);
+      await options.authorize(parent.conversationId, signal);
+      const resolved = await lookup(address, asset, signal, true);
+      binding(address); signal.throwIfAborted();
+      await options.authorize(parent.conversationId, signal);
+      const assetId = `work-path-${digest([options.accountId, parent.conversationId, address.id, address.childId, address.parentSessionId, address.generation, asset])}`;
+      const prior = options.store.read(namespace, assetId);
+      if (prior) assert(digest(object(prior.value).descriptor) === digest(resolved.descriptor), 'WORK_PATH_INVALIDATED', '文件已失效，登记内容发生变化。');
+      options.store.write(namespace, assetId, json({ schema: 2, assetId, accountId: options.accountId,
+        conversationId: parent.conversationId, parentSessionId: address.parentSessionId, generation: address.generation,
+        kind: asset.kind, resourceId: asset.attachmentId, address, asset, descriptor: resolved.descriptor }), { expectedRevision: prior?.revision ?? null });
+      return asset.kind === 'file' ? { type: 'file', assetId, name: asset.name! } : { type: 'image', assetId };
+    },
+    async delivered(content: MessageContent, signal: AbortSignal) {
+      if (!('assetId' in content) || !content.assetId.startsWith('work-path-')) return;
+      try {
+        const row = options.store.read(namespace, content.assetId);
+        if (!row) return;
+        const value = object(row.value);
+        options.store.write(namespace, content.assetId, json({ ...value, delivered: true }), { expectedRevision: row.revision });
+        const asset = object(value.asset) as unknown as DshWorkMediaReference;
+        await options.port.releasePath?.({ ...object(value.address) as unknown as DshWorkAddress,
+          kind: asset.kind, attachmentId: asset.attachmentId }, signal);
+        openChannels.delete(content.assetId);
+        options.store.delete(namespace, content.assetId);
+      } catch { scheduleCleanup(); try { options.onMaintenanceFault?.('WORK_PATH_RELEASE_FAILED'); } catch {} }
+    },
+    async unconfirmed(content: MessageContent, signal: AbortSignal) {
+      if (!('assetId' in content)) return;
+      const row = options.store.read(namespace, content.assetId);
+      if (!row) return;
+      const value = object(row.value); const asset = object(value.asset) as unknown as DshWorkMediaReference;
+      try { await options.port.releasePath?.({ ...object(value.address) as unknown as DshWorkAddress,
+        kind: asset.kind, attachmentId: asset.attachmentId, keepRegistration: true }, signal); }
+      catch { try { options.onMaintenanceFault?.('WORK_CHANNEL_RELEASE_FAILED'); } catch {} }
+      finally { openChannels.delete(content.assetId); }
+    },
+    async resolveResource(resourceId: string, scope: EffectRequest['scope'], signal: AbortSignal): Promise<{ resourceId: string; assetId: string; channel: { kind: string; path?: string; url?: string } }> {
+      assert(typeof scope.sessionId === 'string' && typeof scope.generation === 'number', 'WORK_ASSET_SCOPE_MISMATCH', '需要当前聊天会话上下文。');
+      assert(/^work-path-(?:ref-)?[a-f0-9]{64}$/.test(resourceId), 'WORK_PATH_INVALIDATED', '文件已失效，资源编号无效。');
+      let assetId = resourceId;
+      if (resourceId.startsWith('work-path-ref-')) {
+        let row = options.store.lookup?.({ namespace, field: 'resourceId', equals: resourceId, limit: 1 })[0];
+        if (!row) {
+          // The assistant may report a registered ID before its final result. Only this chat's works are candidates.
+          let after: string | undefined;
+          outer: for (;;) {
+            const page = options.store.list('native-work.executions', { limit: 128, ...(after ? { after } : {}) });
+            for (const work of page) {
+              const v = object(work.value);
+              if (v.conversationId !== scope.conversationId || v.parentSessionId !== scope.sessionId || v.generation !== scope.generation) continue;
+              const address: DshWorkAddress = { issuerEpoch: '', id: work.key, parentSessionId: String(v.parentSessionId), childId: String(v.childId), generation: Number(v.generation) };
+              binding(address); await options.authorize(scope.conversationId, signal);
+              for (const kind of ['file', 'image'] as const) try {
+                assert(options.port.readPath, 'WORK_PATH_READER_UNAVAILABLE', 'Attachment resolver is unavailable.');
+                const resolved = await options.port.readPath({ ...address, attachmentId: resourceId, kind, metadataOnly: true }, signal);
+                const registered = await api.register({ address, asset: resolved.asset, signal });
+                if ('assetId' in registered) row = options.store.read(namespace, registered.assetId) ?? undefined;
+                break outer;
+              } catch (error) { if (signal.aborted || errorCode(error) !== 'WORK_PATH_NOT_THIS_WORK') throw error; }
+            }
+            if (page.length < 128) break; after = page.at(-1)!.key;
+          }
+        }
+        assert(row, 'WORK_PATH_INVALIDATED', '文件已失效或不属于当前会话。');
+        assetId = row.key;
+      }
+      const saved = options.store.read(namespace, assetId); assert(saved, 'WORK_PATH_INVALIDATED', '文件已失效。');
+      const value = object(saved.value);
+      const resolved = await api.resolve({ assetId, type: value.kind === 'image' ? 'image' : 'file',
+        conversationId: scope.conversationId, sessionId: scope.sessionId, generation: scope.generation, signal });
+      if (resolved.file.startsWith('http://') || resolved.file.startsWith('https://')) {
+        const key = scopeKey(scope);
+        const prior = (toolChannels.get(key) ?? []).filter(c => c.assetId !== assetId);
+        prior.push({ assetId, token: new URL(resolved.file).pathname.split('/').at(-1)! }); toolChannels.set(key, prior);
+      }
+      return { resourceId, assetId, channel: resolved.file.startsWith('http://') || resolved.file.startsWith('https://')
+        ? { kind: 'http-stream', url: resolved.file } : { kind: 'path', path: resolved.file } };
+    },
+    async resolve(request: OneBotAssetResolutionRequest): Promise<{ file: string }> {
+      assert(!request.assetId.startsWith('work-asset-'), 'WORK_BYTE_ATTACHMENTS_REMOVED', '旧字节附件已失效，请重新登记路径。');
+      const row = options.store.read(namespace, request.assetId);
+      assert(row, 'WORK_PATH_INVALIDATED', '文件已失效，找不到登记记录。');
+      const value = object(row.value);
+      assert(value.schema === 2 && value.delivered !== true, 'WORK_PATH_INVALIDATED', '旧附件已失效，请重新登记路径。');
+      const address = object(value.address) as unknown as DshWorkAddress;
+      const parent = binding(address);
+      assert(value.accountId === options.accountId && value.conversationId === request.conversationId
+        && request.sessionId === address.parentSessionId && request.generation === address.generation
+        && parent.conversationId === request.conversationId && value.kind === request.type,
+      'WORK_ASSET_SCOPE_MISMATCH', '附件不属于当前账号、会话或代次。');
       await options.authorize(request.conversationId, request.signal);
-      assert(options.parent(String(value.parentSessionId))?.generation === request.generation, 'WORK_PARENT_UNAVAILABLE', 'The parent changed during asset reading.');
-      request.signal.throwIfAborted();
-      assert(Number(value.expiresAt) > clock(), 'WORK_ASSET_EXPIRED', 'The work attachment expired during reading.');
-      return { file: `base64://${data.toString('base64')}` };
-    }); }
+      const resolved = await lookup(address, object(value.asset) as unknown as DshWorkMediaReference, request.signal);
+      assert(digest(resolved.descriptor) === digest(value.descriptor), 'WORK_PATH_INVALIDATED', '文件已失效，登记内容发生变化。');
+      binding(address); request.signal.throwIfAborted();
+      await options.authorize(request.conversationId, request.signal);
+      if (resolved.file) openChannels.add(request.assetId);
+      return { file: resolved.file ?? resolved.descriptor.path };
+    },
   });
+  return api;
 }

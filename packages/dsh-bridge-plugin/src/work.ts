@@ -11,6 +11,7 @@ import { validIdentifier } from './receipts.js'
 import { workFingerprint, type WorkJournal, type WorkJournalRecord } from './work-journal.js'
 
 export interface WorkAddress {
+  readonly accountId?: string
   readonly issuerEpoch: string
   readonly id: string
   readonly parentSessionId: string
@@ -18,6 +19,7 @@ export interface WorkAddress {
   readonly generation: number
 }
 export interface WorkTarget {
+  readonly accountId?: string
   readonly attachmentTransport?: 'path-v1'
   readonly fullAccess?: boolean
   readonly parentSessionId: string
@@ -63,8 +65,8 @@ export function createWorkChannel(options: {
   readonly applyFullAccess?: (agent: Agent) => void
   readonly journal?: WorkJournal
   readonly recover?: (record: WorkJournalRecord, signal: AbortSignal) => Promise<{ result: NonNullable<WorkJournalRecord['result']>; evidence: NonNullable<WorkJournalRecord['recoveryEvidence']> } | null>
+  readonly releasePath?: (address: WorkAddress, id: string) => Promise<void>
   readonly readPath?: (address: WorkAddress, asset: WorkMediaReference, signal: AbortSignal) => Promise<WorkPathDescriptor>
-  readonly readAsset?: (asset: WorkMediaReference, signal: AbortSignal) => Promise<Uint8Array>
 }) {
   const entries = new Map<string, Entry>()
   let closed = false
@@ -74,6 +76,7 @@ export function createWorkChannel(options: {
   async function target(request: WorkTarget) {
     if (request.attachmentTransport !== undefined && request.attachmentTransport !== 'path-v1') throw new TypeError('Invalid attachment transport')
     if (request.attachmentTransport === 'path-v1' && !options.readPath) throw new TypeError('Path attachments are unavailable')
+    if (request.accountId !== undefined && !validIdentifier(request.accountId)) throw new TypeError('Invalid work account')
     if (request.fullAccess !== undefined && typeof request.fullAccess !== 'boolean') throw new TypeError('Invalid work permission')
     if (![request.parentSessionId, request.modelProvider, request.model, request.agentPreset].every(validIdentifier)
       || request.reasoningEffort !== undefined && !validIdentifier(request.reasoningEffort)) throw new TypeError('Invalid work target')
@@ -89,7 +92,7 @@ export function createWorkChannel(options: {
     const request = entry.request
     return { schema: 1, fingerprint: entry.fingerprint,
       address: { id: request.id, parentSessionId: request.parentSessionId, childId: request.childId, generation: request.generation },
-      target: { ...(request.attachmentTransport ? { attachmentTransport: request.attachmentTransport } : {}), ...(request.fullAccess === undefined ? {} : { fullAccess: request.fullAccess }), modelProvider: request.modelProvider, model: request.model, agentPreset: request.agentPreset, timeoutMs: request.timeoutMs, ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }) },
+      target: { ...(request.accountId ? { accountId: request.accountId } : {}), ...(request.attachmentTransport ? { attachmentTransport: request.attachmentTransport } : {}), ...(request.fullAccess === undefined ? {} : { fullAccess: request.fullAccess }), modelProvider: request.modelProvider, model: request.model, agentPreset: request.agentPreset, timeoutMs: request.timeoutMs, ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }) },
       state: entry.state, result: entry.result, error: entry.error, permissionVerified: entry.permissionVerified === true, usage: entry.usage ?? [], progress: entry.progress ?? [],
       attachments: entry.attachments, ...(entry.recoveryEvidence ? { recoveryEvidence: entry.recoveryEvidence } : {}),
       acceptedMessageId: entry.acceptedMessageId, followupRequestId: entry.followupRequestId }
@@ -189,7 +192,11 @@ export function createWorkChannel(options: {
       const entry = [...entries.values()].find(value => value.request.childId === childId)
       if (closed || !entry || !['starting', 'running'].includes(entry.state) || entry.controller.signal.aborted || !validWorkOutput(asset))
         throw new TypeError('The work attachment lease is unavailable')
-      if (entry.attachments.some(value => value.kind === asset.kind && value.attachmentId === asset.attachmentId)) return entry.persistence
+      const prior = entry.attachments.findIndex(value => value.kind === asset.kind && value.attachmentId === asset.attachmentId)
+      if (prior >= 0) {
+        if (JSON.stringify(entry.attachments[prior]) === JSON.stringify(asset)) return entry.persistence
+        entry.attachments[prior] = Object.freeze({ ...asset }); return persist(entry)
+      }
       if (entry.attachments.length >= 3) throw new TypeError('A work result accepts at most three attachments')
       entry.attachments.push(Object.freeze({ ...asset }))
       return persist(entry)
@@ -275,31 +282,29 @@ export function createWorkChannel(options: {
     },
     async readPath(address: WorkAddress & { kind: 'image' | 'file'; attachmentId: string }, signal: AbortSignal) {
       const entry = await locate(address);
-      if (!entry || !options.readPath) throw new TypeError('Work path is unavailable');
+      if (!entry || !options.readPath) throw Object.assign(new TypeError('编号不属于该工作'), { code: 'WORK_PATH_NOT_THIS_WORK' });
       await entry.persistence;
       const asset = [...entry.attachments, ...(entry.result?.output ?? [])].find((block): block is WorkMediaReference => block.type === 'media-reference'
         && block.storage === 'path' && block.kind === address.kind && block.attachmentId === address.attachmentId);
-      if (!asset) throw new TypeError('Path reference does not belong to this work');
+      if (!asset) throw Object.assign(new TypeError('编号不属于该工作或类型'), { code: 'WORK_PATH_NOT_THIS_WORK' });
       const descriptor = await options.readPath(entry.request, asset, signal);
       signal.throwIfAborted(); epoch(address.issuerEpoch);
       return { schema: 1 as const, ...address, asset, descriptor };
     },
+    async releasePath(address: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; keepRegistration?: boolean; channelToken?: string }, signal: AbortSignal) {
+      const entry = await locate(address);
+      if (!entry || !options.releasePath) throw new TypeError('WORK_PATH_INVALIDATED: 文件已失效');
+      const asset = [...entry.attachments, ...(entry.result?.output ?? [])].find(block => block.type === 'media-reference'
+        && block.storage === 'path' && block.kind === address.kind && block.attachmentId === address.attachmentId);
+      if (!asset) throw new TypeError('WORK_PATH_SCOPE');
+      signal.throwIfAborted();
+      if (address.keepRegistration !== undefined && typeof address.keepRegistration !== 'boolean') throw new TypeError('Invalid release mode');
+      if (address.channelToken !== undefined && (!address.keepRegistration || !/^[a-f0-9]{64}$/.test(address.channelToken))) throw new TypeError('Invalid channel token');
+      if (!address.keepRegistration) await options.releasePath(entry.request, address.attachmentId);
+      return { released: true };
+    },
     async readAsset(address: WorkAddress & { kind: 'image' | 'file'; attachmentId: string; offset: number; limit: number }, signal: AbortSignal) {
-      const entry = await locate(address)
-      if (!entry || !options.readAsset || !['image', 'file'].includes(address.kind)
-        || !Number.isSafeInteger(address.offset) || address.offset < 0
-        || !Number.isSafeInteger(address.limit) || address.limit < 1 || address.limit > 192 * 1024) throw new TypeError('Work attachment is unavailable')
-      await entry.persistence
-      const asset = entry.result?.output.find((block): block is WorkMediaReference => block.type === 'media-reference'
-        && block.kind === address.kind && block.attachmentId === address.attachmentId)
-      if (!asset || asset.storage === 'path' || address.offset >= asset.bytes) throw new TypeError('Attachment does not belong to this work result')
-      signal.throwIfAborted()
-      const bytes = await options.readAsset(asset, signal)
-      signal.throwIfAborted()
-      if (bytes.length !== asset.bytes || bytes.length > 8 * 1024 * 1024) throw new TypeError('Work attachment size changed')
-      return { schema: 1 as const, issuerEpoch: options.issuerEpoch, id: address.id, parentSessionId: address.parentSessionId,
-        childId: address.childId, generation: address.generation, asset, offset: address.offset, nextOffset: address.offset + address.limit >= asset.bytes ? null : address.offset + address.limit,
-        data: Buffer.from(bytes.subarray(address.offset, address.offset + address.limit)).toString('base64') }
+      throw new TypeError('WORK_BYTE_ATTACHMENTS_REMOVED: 旧附件已失效，请在原工作中重新登记路径');
     },
     async followup(address: WorkAddress & { requestId: string; text: string; delivery: 'queue' | 'steer' }, signal: AbortSignal) {
       const entry = await locate(address)

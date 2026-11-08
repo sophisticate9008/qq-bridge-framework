@@ -1,3 +1,4 @@
+import { canonicalPathMatches, privatePermissions, secureNewPath, readOnlyFlags, noFollow } from './file-security.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, unlink } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import type { WorkAddress } from './work.js';
 import { inspectWorkPath, validWorkPath, type WorkPathDescriptor } from './work-path.js';
 
 function scope(address: WorkAddress): string {
-  return createHash('sha256').update(JSON.stringify([address.id, address.parentSessionId, address.childId, address.generation])).digest('hex');
+  return createHash('sha256').update(JSON.stringify([('accountId' in address ? address.accountId : null), address.id, address.parentSessionId, address.childId, address.generation])).digest('hex');
 }
 /** Only operator-admitted work leases call register; RPC resolves opaque IDs only. */
 export function createWorkPathRegistry(directory: string, roots: readonly string[] | (() => readonly string[]), clock = Date.now) {
@@ -16,18 +17,18 @@ export function createWorkPathRegistry(directory: string, roots: readonly string
     const next = tail.catch(() => {}).then(() => { if (closed) throw new TypeError('WORK_PATH_CLOSED'); return run(); }); tail = next; return next;
   }
   async function ready() {
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const created = await mkdir(directory, { recursive: true, mode: 0o700 })
+    if (created) await secureNewPath(directory, 0o700);
     const stat = await lstat(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || await realpath(directory) !== directory
-      || stat.uid !== process.getuid?.() || (stat.mode & 0o777) !== 0o700) throw new TypeError('WORK_PATH_STORAGE_UNSAFE');
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !canonicalPathMatches(await realpath(directory), directory)
+      || !await privatePermissions(directory, stat, 0o700)) throw new TypeError('WORK_PATH_STORAGE_UNSAFE');
   }
   async function read(id: string) {
     if (!/^work-path-ref-[a-f0-9]{64}$/.test(id)) throw new TypeError('WORK_PATH_REFERENCE_INVALID');
-    const handle = await open(join(directory, id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const handle = await open(join(directory, id), readOnlyFlags).catch(() => { throw new TypeError('WORK_PATH_INVALIDATED: 文件已失效'); });
     try {
       const stat = await handle.stat();
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 65536 || stat.uid !== process.getuid?.()
-        || (stat.mode & 0o777) !== 0o600) throw new TypeError('WORK_PATH_STORAGE_UNSAFE');
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 65536 || !await privatePermissions(join(directory, id), stat, 0o600)) throw new TypeError('WORK_PATH_STORAGE_UNSAFE');
       const value: unknown = JSON.parse(await handle.readFile('utf8'));
       if (!value || typeof value !== 'object' || !('scope' in value) || typeof value.scope !== 'string'
         || !('descriptor' in value) || !validWorkPath(value.descriptor)) throw new TypeError('WORK_PATH_RECORD_INVALID');
@@ -37,11 +38,10 @@ export function createWorkPathRegistry(directory: string, roots: readonly string
   async function maintenance() {
     await ready();
     const names = await readdir(directory);
-    if (names.length > 512) throw new TypeError('WORK_PATH_CAPACITY');
     const live: { id: string; scope: string; descriptor: WorkPathDescriptor }[] = [];
     for (const id of names) {
       const value = await read(id);
-      if (value.descriptor.expiresAt <= clock()) await unlink(join(directory, id));
+      if (value.descriptor.expiresAt !== null && value.descriptor.expiresAt <= clock()) await unlink(join(directory, id));
       else live.push({ id, ...value });
     }
     return live;
@@ -58,20 +58,29 @@ export function createWorkPathRegistry(directory: string, roots: readonly string
       };
       const prior = live.find(value => value.scope === scope(address) && identity(value.descriptor) === identity(descriptor));
       if (prior) return { id: prior.id, descriptor: prior.descriptor };
-      if (live.length >= 512) throw new TypeError('WORK_PATH_CAPACITY');
       // A new explicit registration after expiry gets a fresh ID; an old reference never revives.
       const id = `work-path-ref-${randomBytes(32).toString('hex')}`;
       const text = JSON.stringify({ scope: scope(address), descriptor });
       if (Buffer.byteLength(text) > 65536) throw new TypeError('WORK_PATH_RECORD_TOO_LARGE');
-      const handle = await open(join(directory, id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try { await handle.writeFile(text); await handle.sync(); }
+      const handle = await open(join(directory, id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
+      try { await secureNewPath(join(directory, id), 0o600); await handle.writeFile(text); await handle.sync(); }
       finally { await handle.close(); }
       return { id, descriptor };
+    }),
+    revoke: (address: WorkAddress, id: string) => enqueue(async () => {
+      await ready();
+      const exists = await lstat(join(directory, id)).catch(error => {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null; throw error;
+      });
+      if (!exists) return;
+      const value = await read(id);
+      if (value.scope !== scope(address)) throw new TypeError('WORK_PATH_SCOPE');
+      await unlink(join(directory, id));
     }),
     resolve: (address: WorkAddress, id: string, signal: AbortSignal) => enqueue(async (): Promise<WorkPathDescriptor> => {
       await ready();
       const value = await read(id);
-      if (value.scope !== scope(address) || value.descriptor.expiresAt <= clock()) throw new TypeError('WORK_PATH_SCOPE_OR_TTL');
+      if (value.scope !== scope(address) || value.descriptor.expiresAt !== null && value.descriptor.expiresAt <= clock()) throw new TypeError('WORK_PATH_INVALIDATED: 文件已失效或不属于当前工作');
       return inspectWorkPath({ path: value.descriptor.path, roots: typeof roots === 'function' ? roots() : roots, expected: value.descriptor, signal, now: clock() });
     }),
   });
