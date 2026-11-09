@@ -94,6 +94,21 @@ async function fixture(context: TestContext) {
     assistant: () => ({ revision: revision(assistant), value: assistant }), setAssistant(value: ChatAssistantConfiguration) { assistant = value }, loaded(value: boolean) { loaded = value } }
 }
 
+test('configuration diagnostics reuse verified evidence without remote deployment checks while task admission still verifies live state', async context => {
+  const data = await fixture(context)
+  await data.target.apply(request(await data.target.prepare(data.assistant().revision, signal)), signal)
+  const calls = data.calls.length
+  assert.deepEqual(await data.target.configurationStatus(signal), { available: true, missingReasons: [] })
+  assert.equal(data.calls.length, calls, 'a status refresh must not re-run DSH deployment RPCs')
+  await data.target.prepare(data.assistant().revision, signal)
+  assert.deepEqual(await data.target.configurationStatus(signal), { available: true, missingReasons: [] }, 'a prepared operation does not revoke the unchanged applied target')
+  data.loaded(false)
+  assert.equal((await data.target.configurationStatus(signal)).available, true, 'diagnostics describe verified configuration, not model execution')
+  assert((await data.target.resolve(signal)).missingReasons.length > 0, 'actual task admission still checks loaded DSH state')
+  data.setAssistant({ ...data.assistant().value, reasoningEffort: 'high' })
+  assert.deepEqual((await data.target.configurationStatus(signal)).missingReasons, ['assistant_deployment_configuration_changed'])
+})
+
 test('moved dependency paths refresh verified assistant evidence without changing presets, credentials or sessions', async context => {
   const data = await fixture(context)
   const applied = await data.target.apply(request(await data.target.prepare(data.assistant().revision, signal)), signal)

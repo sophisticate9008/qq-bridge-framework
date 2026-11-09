@@ -375,11 +375,11 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
     if (!options.assistantTarget) return chatAssistantConfigurationResponse(revision, configuration)
     try {
       const target = await withDeadline({ signal, timeoutMs: 5_000, code: 'ASSISTANT_STATUS_TIMEOUT',
-        run: checkSignal => options.assistantTarget!.resolve(checkSignal) })
+        run: checkSignal => options.assistantTarget!.configurationStatus(checkSignal) })
       signal.throwIfAborted()
       const work = chatRuntime?.workStatus() ?? { available: false, missingReasons: ['assistant_runtime_not_connected'] }
       const missingReasons = [...new Set([...target.missingReasons, ...work.missingReasons])]
-      const executionAvailable = target.configuration.enabled && work.available && missingReasons.length === 0
+      const executionAvailable = target.available && work.available && missingReasons.length === 0
       return { revision, configuration, executionAvailable,
         missingReasons: executionAvailable ? [] : missingReasons.length > 0 ? missingReasons : ['assistant_target_unavailable'] }
     } catch {

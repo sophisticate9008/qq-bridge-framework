@@ -58,7 +58,7 @@ import { FrameworkError } from '../core/values.ts';
 import { createNativePackageConfigurationRegistry } from '../host/native-package-configuration.ts';
 import { readNativeRuntimeProjection } from '../host/native-runtime-projection.ts';
 
-const FRAMEWORK_VERSION = '1.13.6';
+const FRAMEWORK_VERSION = '1.13.7';
 const PROBE_TIMEOUT_MS = 2_500;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 

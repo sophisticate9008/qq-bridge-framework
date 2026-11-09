@@ -313,6 +313,22 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     }
   }
   return Object.freeze({
+    /** Read-only diagnostics reuse the verified journal; work admission still calls prepareWork/resolve. */
+    async configurationStatus(signal: AbortSignal): Promise<{ readonly available: boolean; readonly missingReasons: readonly string[] }> {
+      try {
+        if (busy) fail('ASSISTANT_DEPLOYMENT_BUSY')
+        const current = await selected(signal)
+        const document = await readJournal()
+        if (unresolved(document.value)) fail('ASSISTANT_DEPLOYMENT_RECONCILIATION_REQUIRED')
+        if (!document.value.applied) fail('ASSISTANT_DEPLOYMENT_NOT_APPLIED')
+        if (document.value.applied.configurationRevision !== current.configurationRevision) fail('ASSISTANT_DEPLOYMENT_CONFIGURATION_CHANGED')
+        signal.throwIfAborted()
+        return { available: true, missingReasons: [] }
+      } catch (error) {
+        signal.throwIfAborted()
+        return { available: false, missingReasons: [reason(error)] }
+      }
+    },
     /** Refresh verified evidence without writing the external profile or replaying an uncertain operation. */
     async synchronizeVerified(signal: AbortSignal): Promise<NativeAssistantDeploymentSnapshot> {
       return exclusive(async () => {

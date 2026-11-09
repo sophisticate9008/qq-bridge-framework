@@ -113,11 +113,10 @@ test('health coalesces read-only assistant verification and detects configuratio
   const settings = { schema: 1, mode: 'chat-assistant', provider: 'provider', model: 'model', nickname: 'Helper', reasoningEffort: 'off' }
   await writeFile(filename, JSON.stringify(settings), { mode: 0o600 })
   let checks = 0, change = false
-  const routes = createNativeChatHealthRoutes(fake.directory, fake.runtime(), { async resolve() {
+  const routes = createNativeChatHealthRoutes(fake.directory, fake.runtime(), { async configurationStatus() {
     checks++
     if (change) await writeFile(filename, JSON.stringify({ ...settings, nickname: 'Changed' }), { mode: 0o600 })
-    return { configuration: DEFAULT_NATIVE_WORK_CONFIGURATION, externalProvider: null, agentPreset: null,
-      assistantRevision: 'a'.repeat(64), configurationRevision: 'b'.repeat(64), missingReasons: ['assistant_deployment_configuration_changed'] }
+    return { available: false, missingReasons: ['assistant_deployment_configuration_changed'] }
   } })
   const [first, second] = await Promise.all([invoke(routes, 'GET', '/api/chat/health'), invoke(routes, 'GET', '/api/chat/health')])
   assert.equal(checks, 1)
