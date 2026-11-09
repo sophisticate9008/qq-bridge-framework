@@ -50,6 +50,10 @@ test('lost DSH binding observations can recover but actual configuration, login 
       layers: readyHealth.layers.map(layer => layer.id === 'send' ? { ...layer, state: 'unavailable', reason } : layer) };
     assert.equal(observeChatRecovery(readyStatus, health, true).fault, true);
     assert.equal(observeChatRecovery(readyStatus, health, false).eligible, false);
+    const protocolDown: ChatHealth = { ...health, layers: health.layers.map(layer => layer.id === 'receive'
+      ? { ...layer, state: 'unavailable', reason: 'onebot_protocol_not_connected' } : layer) };
+    assert.equal(observeChatRecovery({ ...readyStatus, chatReady: false, missingReasons: ['onebot_protocol_not_connected'] }, protocolDown, true).reason,
+      'protocol_service_unavailable', 'a missing external protocol service is not repaired by restarting DSH');
   }
   const assistant = { id: 'assistant' as const, state: 'recovering' as const, reason: 'assistant_status_timeout' };
   assert.equal(observeChatRecovery(readyStatus, { ...readyHealth, healthy: false, assistant }, true).fault, false);

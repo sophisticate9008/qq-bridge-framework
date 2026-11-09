@@ -45,9 +45,12 @@ export function observeChatRecovery(status: { readonly state: string; readonly c
   }
   // Offline accounts, a different HTTP identity and bad protocol credentials cannot be repaired by restarting DSH.
   const send = health?.layers.find(layer => layer.id === 'send');
+  const receive = health?.layers.find(layer => layer.id === 'receive');
   if (send && ['http_not_configured', 'http_account_offline', 'http_identity_mismatch', 'http_authentication_failed'].includes(send.reason ?? '')) {
     return blocked('protocol_configuration_or_login_required');
   }
+  if (receive && !['ready', 'idle'].includes(receive.state)
+    && send && ['http_connection_failed', 'http_timeout'].includes(send.reason ?? '')) return blocked('protocol_service_unavailable');
   if (!status.chatReady) {
     if (!managedRepair && !status.canStart) return blocked('managed_repair_unavailable');
     return { eligible: true, fault: true, reason: 'framework_unavailable' };
