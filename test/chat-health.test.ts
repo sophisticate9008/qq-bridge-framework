@@ -23,6 +23,9 @@ test('optional assistant health preserves legacy layers and prevents false overa
   assert.equal(parseChatHealth({ ...blocked, assistant: { ...blocked.assistant, reason: '/private/key' } }), null);
   assert.equal(chatHealthBadge(blocked, runtime), '后台助手需要恢复');
   assert.match(chatHealthGuidance(blocked.assistant!), /助手部署需要更新/);
+  const recovering = { ...blocked.assistant!, state: 'recovering' as const, reason: 'assistant_status_timeout' };
+  assert.equal(chatHealthBadge({ ...blocked, assistant: recovering }, runtime), '后台助手正在复核');
+  assert.match(chatHealthGuidance(recovering), /短暂超时.*自动复查/);
   assert(parseChatHealth({ ...ready, assistant: { id: 'assistant', state: 'idle', reason: 'assistant_disabled' } }));
 });
 

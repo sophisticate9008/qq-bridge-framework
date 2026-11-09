@@ -46,7 +46,7 @@ export function ChatRepairControl({ api, connected, compact = false, summary = f
       ? '最近一次修复已完成；当前聊天链路就绪。' : '最近一次修复已完成；当前状态请查看聊天诊断。'
       : operation?.state === 'failed' ? '修复未完成，可处理原因后再次点击。' : '自动恢复受管服务并启动聊天。';
   const automaticDescription = automatic.snapshot ? automatic.snapshot.enabled
-    ? '自动恢复已启用：持续故障达到 90 秒后尝试，每小时最多三次；主动停止和待应用配置会暂停恢复。'
+    ? '自动恢复已启用：后台检查聊天、DSH 与助手通道，持续故障达到 90 秒后尝试，每小时最多三次；主动停止和待应用配置会暂停恢复。'
     : '此部署已关闭自动恢复。' : '自动恢复状态暂未确认。';
   const explanation = '会短暂重启框架、DSH 及受管依赖，应用已保存设置并保留会话历史；协议端保持独立。未保存草稿不参与修复。';
   return <div className={compact || summary ? 'stack' : 'strip stack'} data-chat-repair>

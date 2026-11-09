@@ -40,12 +40,40 @@ import type { FrameworkToolPendingCall, FrameworkToolResult } from '../src/contr
 import { DEFAULT_PERSONA_WAKE } from '../src/contracts/persona-wake.ts'
 import { createNativeChatHealthRoutes } from '../src/admin/native-chat-health.ts'
 import { DEFAULT_NATIVE_WORK_CONFIGURATION } from '../src/host/native-work-configuration.ts'
+import { createAutomaticChatRecovery, observeChatRecovery } from '../src/admin/automatic-chat-recovery.ts'
+import { parseChatHealth } from '../src/contracts/chat-health.ts'
 
 const persona = { id: 'native', name: 'Native', identity: 'A test-only identity.', style: 'Concise.',
   wake: { ...DEFAULT_PERSONA_WAKE, groupWakeProbabilityPercent: 0 } }
 const plan = { id: 'daily', name: 'Daily', description: '', instructions: 'Test behavior.',
   personaId: 'native', provider: 'provider', model: 'model', reasoningEffort: 'off' as const,
   contextLimits: { group: 100_000, private: 120_000 } }
+
+test('watchdog consumes the console health path and dispatches recovery for a lost DSH path despite runtime readiness', async context => {
+  const options = { healthFails: false }
+  const fake = await fixture(context, options)
+  await fake.configure(); await fake.start()
+  const healthRoutes = createNativeChatHealthRoutes(fake.directory, fake.runtime())
+  let at = 1000, repairs = 0
+  const recovery = createAutomaticChatRecovery({ directory: fake.directory, now: () => at,
+    async observe() {
+      const status = await fake.runtime().status()
+      assert.equal(status.chatReady, true, 'an assembled runtime alone does not prove DSH health')
+      const health = parseChatHealth(await invoke(healthRoutes, 'GET', '/api/chat/health'))
+      assert(health)
+      return observeChatRecovery(status, health, true)
+    }, async repair() { repairs++; options.healthFails = false } })
+  options.healthFails = true
+  await recovery.tick(context.signal)
+  at += 90_000
+  await recovery.tick(context.signal)
+  assert.equal(repairs, 1)
+  await recovery.tick(context.signal)
+  const health = parseChatHealth(await invoke(healthRoutes, 'GET', '/api/chat/health'))
+  assert(health?.healthy)
+  assert.equal(fake.creates(), 0, 'read-only checks and recovery observations do not submit model work')
+  assert.equal(fake.sends.length, 0)
+})
 
 test('assistant synchronization runs once before input and independently unavailable assistant is visible in health', async context => {
   let synchronizations = 0
@@ -62,7 +90,7 @@ test('assistant synchronization runs once before input and independently unavail
   const health = await invoke(fake.routes(), 'GET', '/api/chat/health')
   assert.equal(health.healthy, false)
   assert(isRecord(health.assistant))
-  assert.equal(health.assistant.state, 'unknown')
+  assert.equal(health.assistant.state, 'recovering')
   assert.equal(health.assistant.reason, 'assistant_target_unavailable')
   assert.equal(synchronizations, 1, 'GET must not synchronize or apply deployment')
   assert(fake.rpc.slice(reads).every(row => !['session/create', 'session/prompt', 'bridgePlugin/startWork'].includes(row.method)))
@@ -155,6 +183,7 @@ async function fixture(context: TestContext, options: {
   protocolSelfId?: number
   deploymentDelayMs?: number
   authFails?: boolean
+  healthFails?: boolean
   wrongHttpIdentity?: boolean
   unknownSend?: boolean
   rejectedSend?: boolean
@@ -219,6 +248,8 @@ async function fixture(context: TestContext, options: {
         httpReads++
         response.end(JSON.stringify({ status: 'ok', retcode: 0,
           data: { user_id: options.wrongHttpIdentity ? 998 : options.protocolSelfId ?? 999 } }))
+      } else if (url.pathname === '/onebot/get_status') {
+        response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { online: true, good: true } }))
       } else if (url.pathname === '/onebot/get_version_info') {
         response.end(JSON.stringify({ status: 'ok', retcode: 0, data: { app_name: 'SyntheticOneBot', app_version: '1.0.0' } }))
       } else if (url.pathname === '/onebot/fetch_custom_face_detail') {
@@ -256,6 +287,7 @@ async function fixture(context: TestContext, options: {
     const envelope = JSON.parse(body) as { rpcId: string; method: string; payload: { args: { request?: Record<string, unknown> } } }
     const input: Record<string, unknown> = envelope.payload.args.request ?? envelope.payload.args
     rpc.push({ method: envelope.method, request: input })
+    if (envelope.method === 'settings/describe' && options.healthFails) { response.destroy(); return }
     if (envelope.method.startsWith('bridgePlugin/') && options.pluginMissing) {
       response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId,
         result: { ok: false, error: { code: 'unknown-method', message: 'Optional plugin is not installed.' } } }))

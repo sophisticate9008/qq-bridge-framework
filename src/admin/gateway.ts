@@ -33,7 +33,8 @@ import { createNativeDshRestartRoutes } from './native-dsh-restart.ts';
 import { createFrameworkUpdateRoutes } from './framework-update.ts';
 import { frameworkInstallationRoot, createFrameworkReleaseRoutes, createFrameworkReleaseService } from './framework-release.ts';
 import { readFrameworkUpdateState } from '../host/framework-update-state.ts';
-import { createAutomaticChatRecovery } from './automatic-chat-recovery.ts';
+import { createAutomaticChatRecovery, observeChatRecovery } from './automatic-chat-recovery.ts';
+import { parseChatHealth } from '../contracts/chat-health.ts';
 import { parseChatRepairSnapshot } from '../contracts/chat-repair.ts';
 import { createChatRepairRoutes } from './chat-repair.ts';
 import { createChatRepairStorage, projectChatRepair } from '../storage/chat-repair.ts';
@@ -57,7 +58,7 @@ import { FrameworkError } from '../core/values.ts';
 import { createNativePackageConfigurationRegistry } from '../host/native-package-configuration.ts';
 import { readNativeRuntimeProjection } from '../host/native-runtime-projection.ts';
 
-const FRAMEWORK_VERSION = '1.13.5';
+const FRAMEWORK_VERSION = '1.13.6';
 const PROBE_TIMEOUT_MS = 2_500;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 
@@ -767,44 +768,45 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
       if (registered.accounts.length > 0 || registered.legacy.adoptedBy !== null) throw new AdminRequestError(409, 'chat_repair_accounts_require_individual_recovery');
     } });
   routes.push(...repairRoutes);
+  const chatHealthRoute = routes.find(route => route.method === 'GET' && route.pathname === '/api/chat/health')!;
+  async function automaticRecoveryObservation(signal: AbortSignal) {
+    const blocked = (reason: string) => ({ eligible: false, fault: false, reason });
+    if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') {
+      const update = await readFrameworkUpdateState(frameworkInstallationRoot());
+      if (update && !['completed', 'failed', 'rolled-back'].includes(update.state)) return blocked('framework_update_busy');
+    }
+    const intent = await repository.readRunningIntent();
+    if (!intent.value.desiredRunning) return blocked('explicitly_stopped');
+    const registered = await accounts.read();
+    if (registered.accounts.length > 0 || registered.legacy.adoptedBy !== null) return blocked('individual_account_recovery');
+    const current = await repository.read();
+    if (!intent.value.revisions || Object.entries(intent.value.revisions).some(([key, value]) => current.revisions[key] !== value)) return blocked('configuration_changed');
+    const repair = parseChatRepairSnapshot(await repairRoutes[0].handle({ query: new URLSearchParams(), body: null, signal }));
+    if (repair?.operation?.state === 'running') return blocked('repair_running');
+    if (await dshRestart.unresolved()) return blocked('maintenance_unresolved');
+    const status = await chatRuntime.status();
+    const health = await Promise.resolve(chatHealthRoute.handle({ query: new URLSearchParams(), body: null, signal }))
+      .then(parseChatHealth).catch(() => null);
+    return observeChatRecovery(status, health, repair?.available === true);
+  }
   const automaticRecovery = createAutomaticChatRecovery({ directory,
     enabled: process.env.QQ_BRIDGE_FRAMEWORK_AUTO_RECOVERY !== '0',
-    async observe(signal) {
-      const blocked = (reason: string) => ({ eligible: false, fault: false, reason });
-      if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') {
-        const update = await readFrameworkUpdateState(frameworkInstallationRoot());
-        if (update && !['completed', 'failed', 'rolled-back'].includes(update.state)) return blocked('framework_update_busy');
-      }
-      const intent = await repository.readRunningIntent();
-      if (!intent.value.desiredRunning) return blocked('explicitly_stopped');
-      const registered = await accounts.read();
-      if (registered.accounts.length > 0 || registered.legacy.adoptedBy !== null) return blocked('individual_account_recovery');
-      const current = await repository.read();
-      if (!intent.value.revisions || Object.entries(intent.value.revisions).some(([key, value]) => current.revisions[key] !== value)) return blocked('configuration_changed');
-      const repair = parseChatRepairSnapshot(await repairRoutes[0].handle({ query: new URLSearchParams(), body: null, signal }));
-      if (repair?.operation?.state === 'running') return blocked('repair_running');
-      if (await dshRestart.unresolved()) return blocked('maintenance_unresolved');
-      const status = await chatRuntime.status();
-      if (status.chatReady) return { eligible: true, fault: false, reason: null };
-      if (!['stopped', 'error', 'running'].includes(status.state)) return blocked('lifecycle_busy');
-      const recoverable = new Set(['runtime_not_started', 'native_runtime_lease_blocked', 'native_runtime_lease_unknown',
-        'agent_follow_unavailable', 'framework_tool_channel_unavailable', 'interaction_channel_unavailable',
-        'host_not_ready', 'execution_controller_unavailable', 'execution_correlation_unavailable', 'onebot_protocol_not_connected']);
-      const other = status.missingReasons.find(reason => !recoverable.has(reason));
-      if (other) return blocked('configuration_or_external_service_unavailable');
-      if (!repair?.available && !status.canStart) return blocked('managed_repair_unavailable');
-      return { eligible: true, fault: true, reason: 'framework_unavailable' };
-    },
+    observe: automaticRecoveryObservation,
     async repair(operationId, signal) {
       const intent = await repository.readRunningIntent();
       const current = await repository.read();
       if (!intent.value.desiredRunning || !intent.value.revisions
         || Object.entries(intent.value.revisions).some(([key, value]) => current.revisions[key] !== value)) return;
+      // Recheck maintenance and live health immediately before dispatch, including manual recovery races.
+      const observation = await automaticRecoveryObservation(signal);
+      if (!observation.eligible || !observation.fault) return;
       // Recovery rechecks persisted intent, configuration revisions and unfinished operations.
       const status = await chatRuntime.status();
       if (status.canStart && status.state !== 'running') {
         await restoreNativeChatRunningIntent(directory, chatRuntime, signal).catch(() => undefined);
-        if ((await chatRuntime.status()).chatReady) return;
+        const health = await Promise.resolve(chatHealthRoute.handle({ query: new URLSearchParams(), body: null, signal }))
+          .then(parseChatHealth).catch(() => null);
+        if ((await chatRuntime.status()).chatReady && health?.healthy) return;
       }
       const route = repairRoutes.find(route => route.method === 'POST' && route.pathname === '/api/chat/repair')!;
       await route.handle({ query: new URLSearchParams(), body: { operationId }, signal });
@@ -917,7 +919,8 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
           if (bundle) tasks.push(() => bundle.recoverConnection(signal));
         }
         await Promise.allSettled(tasks.map(run => run()));
-        await automaticRecovery.tick(signal);
+        // A slow protocol reconnect must not consume the watchdog's independent observation budget.
+        await automaticRecovery.tick(AbortSignal.any([startupController.signal, AbortSignal.timeout(40_000)]));
       })().catch(() => undefined).finally(scheduleConnectionRecovery);
     }, 30_000);
     recoveryTimer.unref();

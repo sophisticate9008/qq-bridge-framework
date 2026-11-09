@@ -6,10 +6,13 @@ import type { NativeAssistantTarget } from '../host/native-assistant-target.ts';
 import { withDeadline } from '../host/deadlines.ts';
 import { NativeConfigurationRepository } from './native-configuration-repository.ts';
 import { AdminRequestError, type AdminRoute } from './server.ts';
+import { createAssistantHealthConfirmation } from './assistant-health.ts';
+import { errorCode } from '../core/values.ts';
 
 export function createNativeChatHealthRoutes(directory: string, runtime: NativeChatRuntime, assistantTarget?: Pick<NativeAssistantTarget, 'resolve'>): readonly AdminRoute[] {
   const repository = new NativeConfigurationRepository(directory);
   let pending: Promise<ChatHealth> | undefined;
+  const confirmAssistant = createAssistantHealthConfirmation();
   async function inspect(signal: AbortSignal): Promise<ChatHealth> {
     const configuration = await repository.readAdapterDocument();
     const assistantDocument = await repository.readAssistant();
@@ -60,17 +63,15 @@ export function createNativeChatHealthRoutes(directory: string, runtime: NativeC
     ];
     const work = runtime.workStatus();
     const resolved = assistantResult.status === 'fulfilled' ? assistantResult.value : undefined;
-    const missing = resolved === undefined ? 'assistant_target_unavailable'
+    const missing = assistantResult.status === 'rejected' && errorCode(assistantResult.reason, '') === 'ASSISTANT_STATUS_TIMEOUT'
+      ? 'assistant_status_timeout' : resolved === undefined ? 'assistant_target_unavailable'
       : resolved?.missingReasons[0] ?? work.missingReasons[0] ?? 'assistant_target_unavailable';
-    const assistantReasons = ['assistant_disabled', 'assistant_deployment_not_applied', 'assistant_deployment_configuration_changed',
-      'assistant_deployment_reconciliation_required', 'assistant_deployment_busy', 'assistant_deployment_target_unverified',
-      'assistant_model_unavailable', 'assistant_model_capabilities_unverified', 'assistant_reasoning_unsupported', 'assistant_local_target_unavailable'];
-    const assistant = layer('assistant', assistantDocument.value.mode === 'chat-only' ? 'idle'
+    const assistant = confirmAssistant(`${revisions}:${assistantDocument.revision}:${status.state}`, layer('assistant', assistantDocument.value.mode === 'chat-only' ? 'idle'
       : status.state !== 'running' ? 'stopped' : resolved?.configuration.enabled && work.available && !resolved.missingReasons.length ? 'ready'
       : resolved === undefined ? 'unknown' : 'unavailable',
     assistantDocument.value.mode === 'chat-only' ? 'assistant_disabled' : status.state !== 'running' ? 'runtime_not_started'
       : resolved?.configuration.enabled && work.available && !resolved.missingReasons.length ? null
-      : assistantReasons.includes(missing) ? missing : 'assistant_target_unavailable');
+      : /^[a-z][a-z0-9_]{0,95}$/.test(missing) ? missing : 'assistant_target_unavailable'));
     if (!stable) for (const item of layers) Object.assign(item, { state: 'unknown', reason: 'configuration_changed' });
     if (!stable) Object.assign(assistant, { state: 'unknown', reason: 'configuration_changed' });
     return { schema: 1, checkedAt: Date.now(), healthy: stable && status.chatReady
