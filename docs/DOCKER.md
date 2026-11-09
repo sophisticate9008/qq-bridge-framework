@@ -5,12 +5,12 @@ Release 提供 Linux x64（amd64）及 ARM64 的 `qq-bridge-framework-版本-doc
 下载对应架构的镜像归档并核对 `SHA256SUMS` 后：
 
 ```sh
-docker load -i qq-bridge-framework-1.13.4-docker-amd64.tar.gz
+docker load -i qq-bridge-framework-1.13.5-docker-amd64.tar.gz
 docker compose up -d
 docker compose logs -f framework
 ```
 
-`compose.yaml` 使用镜像标签 `qq-bridge-framework:1.13.4`，初始只将管理页面绑定到宿主回环 `http://127.0.0.1:3210`。首次启动自动初始化缺失的管理配置；已有配置、管理令牌和聊天数据直接复用。首次页面初始化后，管理令牌位于持久卷中，按页面提供的路径读取；不要将令牌写入 compose 文件。可通过 `docker compose exec framework cat /opt/qbf/data/admin/gateway-admin.token` 在自己的终端读取令牌。
+`compose.yaml` 使用镜像标签 `qq-bridge-framework:1.13.5`，初始只将管理页面绑定到宿主回环 `http://127.0.0.1:3210`。首次启动自动初始化缺失的管理配置；已有配置、管理令牌和聊天数据直接复用。首次页面初始化后，管理令牌位于持久卷中，按页面提供的路径读取；不要将令牌写入 compose 文件。可通过 `docker compose exec framework cat /opt/qbf/data/admin/gateway-admin.token` 在自己的终端读取令牌。
 
 新安装的 `framework-data` 卷挂载 `/opt/qbf/data` 保存配置、会话和业务状态，`framework-workspace` 挂载 `/opt/qbf/workspace` 保存任务脚本与成果，`framework-private` 挂载 `/opt/qbf/private` 保存私人扩展。
 
