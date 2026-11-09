@@ -385,7 +385,7 @@ test('assistant settings remain readable without DSH and failed explicit checks 
     loadAssistant: () => repository.readAssistant(),
     loadConfiguration: () => repository.read() })
   const routes = createNativeRuntimeRoutes({ directory, assistantTarget: { ...target,
-    async resolve() { checks++; throw new DOMException('Read timed out', 'TimeoutError') } } })
+    async configurationStatus() { checks++; throw new DOMException('Read timed out', 'TimeoutError') } } })
   const saved = await invoke(routes, 'GET', '/api/chat/assistant')
   assert.deepEqual(saved.configuration, configuration)
   assert.equal(saved.statusSource, 'configuration')
