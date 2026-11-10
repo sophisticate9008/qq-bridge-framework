@@ -12,6 +12,7 @@ export interface ChatRepairProcessIdentity { readonly pid: number; readonly star
 export interface ChatRepairRecord {
   readonly operation: ChatRepairOperation
   readonly applicationId?: string
+  readonly restartDsh?: boolean
   readonly worker: ChatRepairProcessIdentity | null
   readonly guardian?: ChatRepairProcessIdentity
   readonly guardianRecoveryComplete?: boolean
@@ -31,11 +32,13 @@ function validate(value: unknown): Journal {
     if (!operation || seen.has(operation.id) || entry.applicationId !== undefined && !isNativeApplicationId(entry.applicationId)
       || entry.worker !== null && !identity(entry.worker) || entry.guardian !== undefined && !identity(entry.guardian)
       || entry.guardianRecoveryComplete !== undefined && typeof entry.guardianRecoveryComplete !== 'boolean'
+      || entry.restartDsh !== undefined && typeof entry.restartDsh !== 'boolean'
       || entry.rescueAttempts !== undefined && (typeof entry.rescueAttempts !== 'number' || !Number.isSafeInteger(entry.rescueAttempts)
         || entry.rescueAttempts < 0 || entry.rescueAttempts > 2)) throw new Error('chat_repair_storage_invalid')
     seen.add(operation.id)
     return { operation, ...(entry.applicationId === undefined ? {} : { applicationId: entry.applicationId as string }), worker: entry.worker as ChatRepairRecord['worker'],
       ...(entry.guardian === undefined ? {} : { guardian: entry.guardian as ChatRepairProcessIdentity }),
+      ...(entry.restartDsh === undefined ? {} : { restartDsh: entry.restartDsh as boolean }),
       ...(entry.guardianRecoveryComplete === undefined ? {} : { guardianRecoveryComplete: entry.guardianRecoveryComplete as boolean }),
       ...(entry.rescueAttempts === undefined ? {} : { rescueAttempts: entry.rescueAttempts as number }) }
   })

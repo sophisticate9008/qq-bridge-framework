@@ -2,7 +2,7 @@ import { resolveLivePath } from './runtime-configuration.ts';
 import { setPriority } from 'node:os';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, chmod, lstat, mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -494,7 +494,7 @@ async function main(): Promise<void> {
         return record(value) && record(value.operation) && value.operation.id === id;
       },
       async start() {
-        const result = await execute(process.execPath, [entry, 'repair-services-rescue', id], { env: environment, detached: false, timeout: 270_000 });
+        const result = await execute(process.execPath, [entry, 'repair-services-rescue', id, '--config', filename], { env: environment, detached: false, timeout: 270_000 });
         if (result.code !== 0) throw new Error('chat_repair_services_not_restored');
       }
     });
@@ -510,17 +510,28 @@ async function main(): Promise<void> {
       if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
     }
     const { runChatRepair } = await import('./chat-repair.ts');
-    const command = async (value: string) => {
+    const command = async (value: string, restartDsh: boolean) => {
       const environment = { ...process.env };
       delete environment.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED;
       delete environment.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE;
       // Keep every stage in the detached repair session so stopping its former host protects the whole worker tree.
-      const result = await execute(process.execPath, [entry, value], { env: environment,
+      const result = await execute(process.execPath, [entry, value, ...(restartDsh ? ['--with-dsh'] : [])], { env: environment,
         timeout: value === 'repair-services-start' ? 300_000 : 180_000, detached: false });
       if (result.code !== 0) throw Object.assign(new Error('Managed repair stage failed.'), { code:
         value === 'repair-services-stop' ? 'chat_repair_stop_failed' : 'chat_repair_start_failed' });
     };
+    const dsh = config.services.dsh;
+    let dshTarget: { home: string; endpoint: string } | undefined;
+    if (dsh && managed(config, 'dsh') && dsh.enabled !== false && dsh.port && !['napcat', 'snowluma'].includes(dsh.group)) {
+      try {
+        if (dsh.env?.DSH_HOME && await realpath(dsh.env.DSH_HOME) === await realpath(config.dshHome)) {
+          const host = dsh.port.host === '::1' ? '[::1]' : dsh.port.host;
+          dshTarget = { home: config.dshHome, endpoint: `http://${host}:${dsh.port.port}` };
+        }
+      } catch { /* An unavailable DSH management target does not prevent framework-only recovery. */ }
+    }
     await runChatRepair(filename, id, {
+      dsh: dshTarget,
       async guardian() {
         await new Promise<void>((resolve, reject) => {
           const child = spawn(process.execPath, [entry, 'repair-chat-guardian', id, '--config', filename], { stdio: 'ignore', detached: false });
@@ -528,11 +539,13 @@ async function main(): Promise<void> {
           child.once('spawn', () => { child.unref(); resolve(); });
         });
       },
-      stop: () => command('repair-services-stop'), start: () => command('repair-services-start') });
+      stop: restartDsh => command('repair-services-stop', restartDsh), start: restartDsh => command('repair-services-start', restartDsh) });
     return;
   }
   if (['repair-services-stop', 'repair-services-start', 'repair-services-rescue'].includes(action)) {
-    if (action === 'repair-services-rescue' ? argumentsList.length !== 2 || !/^[a-f0-9-]{36}$/.test(argumentsList[1] ?? '') : argumentsList.length !== 1) fail('聊天修复参数无效。');
+    if (action === 'repair-services-rescue' ? !/^[a-f0-9-]{36}$/.test(argumentsList[1] ?? '')
+        || argumentsList.length !== 2 && (argumentsList.length !== 4 || argumentsList[2] !== '--config' || !absolute(argumentsList[3]))
+      : argumentsList.length !== 1 && (argumentsList.length !== 2 || argumentsList[1] !== '--with-dsh')) fail('聊天修复参数无效。');
     const config = await load();
     for (const id of ['framework-admin']) {
       const service = component(config, id, true);
@@ -540,9 +553,22 @@ async function main(): Promise<void> {
     }
     if (process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') { await lockAndRun(config, argumentsList); return; }
     if (action === 'repair-services-rescue') process.env.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE = argumentsList[1];
-    const { startRepairServices, frameworkRepairServiceIds } = await import('./repair-service-start.ts');
-    // Engine, protocol clients and auxiliary applications retain their independent lifecycle.
-    const targets = frameworkRepairServiceIds(ordered(config)).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
+    const { startRepairServices, chatRepairServiceIds } = await import('./repair-service-start.ts');
+    let restartDsh = argumentsList[1] === '--with-dsh';
+    if (action === 'repair-services-rescue') {
+      const { loadGatewayAdminConfiguration } = await import('../src/admin/gateway.ts');
+      const { createChatRepairStorage } = await import('../src/storage/chat-repair.ts');
+      const admin = loadGatewayAdminConfiguration(argumentsList[3] ?? resolveLivePath(root, 'framework-admin.json'));
+      const record = (await createChatRepairStorage(path.join(path.dirname(admin.tokenFile), 'runtime')).read()).value.records
+        .find(record => record.operation.id === argumentsList[1]);
+      if (!record) fail('未找到原聊天恢复记录。');
+      restartDsh = record.restartDsh === true;
+    }
+    if (restartDsh) {
+      const dsh = component(config, 'dsh', true);
+      if (dsh.enabled === false || ['napcat', 'snowluma'].includes(dsh.group)) fail('聊天恢复需要已启用的受管 DSH。');
+    }
+    const targets = chatRepairServiceIds(ordered(config), restartDsh).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
       && !['napcat', 'snowluma'].includes(config.services[id]!.group));
     if (action === 'repair-services-stop') {
       const deadline = Date.now() + 60_000;

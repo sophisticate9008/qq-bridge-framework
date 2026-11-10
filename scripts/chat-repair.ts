@@ -20,11 +20,13 @@ import { createNativeDshRestartStorage } from '../src/storage/native-dsh-restart
 import { nativeRuntimeIsQuiescent } from '../src/contracts/native-runtime-quiescence.ts'
 import { ensurePrivateDirectory, readDocument } from '../src/storage/private-json.ts'
 import { privatePermissions } from '../src/storage/file-security.ts'
+import { chatRepairNeedsDshRestart } from '../src/admin/chat-repair-dsh.ts'
 
 interface RepairPorts {
+  readonly dsh?: { readonly home: string; readonly endpoint: string }
   guardian(): Promise<void>
-  stop(): Promise<void>
-  start(): Promise<void>
+  stop(restartDsh: boolean): Promise<void>
+  start(restartDsh: boolean): Promise<void>
 }
 function fail(code: string): never { throw Object.assign(new Error('Chat repair did not complete.'), { code }) }
 const pause = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
@@ -164,6 +166,7 @@ export async function runChatRepair(configurationFilename: string, operationId: 
   const backups = join(directory, 'chat-repair-backups', operationId)
   let stopAttempted = false
   let servicesRestored = false
+  let restartDsh = false
   let token = ''
   async function call(path: string, body?: unknown): Promise<unknown> {
     signal.throwIfAborted()
@@ -203,14 +206,30 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     const configuration = await readNativeChatConfigurationUnlocked(directory)
     const adapter = configuration.adapters.dshAgent
     if (!adapter.enabled || !adapter.localCredentialsPath || !['localhost', '127.0.0.1', '[::1]'].includes(new URL(adapter.endpoint).hostname)) fail('chat_repair_local_dsh_required')
-    // DSH must already be available. Framework recovery never installs, starts or restarts its engine.
+    const credentialsPath = adapter.localCredentialsPath
+    const health = parseChatHealth(await call('/api/chat/health').catch(() => null))
+    restartDsh = chatRepairNeedsDshRestart(health)
+    if (restartDsh) {
+      if (!ports.dsh) fail('chat_repair_dsh_not_managed')
+      const expected = new URL(ports.dsh.endpoint), actual = new URL(adapter.endpoint)
+      const host = (value: string) => value === 'localhost' ? '127.0.0.1' : value
+      if (host(expected.hostname) !== host(actual.hostname) || expected.port !== actual.port || expected.protocol !== actual.protocol
+        || await realpath(credentialsPath) !== await realpath(join(ports.dsh.home, '.credentials.yaml'))) fail('chat_repair_dsh_target_mismatch')
+      // The guardian must know the exact recovery scope before any service can stop.
+      await storage.modify(journal => ({ ...journal, records: journal.records.map(entry => entry.operation.id === operationId
+        ? { ...entry, restartDsh: true } : entry) }))
+    }
     signal.throwIfAborted()
-    const target = await discoverLocalDshDeployment({ endpoint: adapter.endpoint, localCredentialsPath: adapter.localCredentialsPath, signal })
-    if (await realpath(target.credentialsPath) !== await realpath(adapter.localCredentialsPath)) fail('chat_repair_dsh_target_mismatch')
-    const resolved = await resolveLocalDshModelSettings(configuration, target, signal, directory)
-    const prepared = await createNativeDshDeploymentRuntime({ sessionDirectory: directory }).prepare({ ...configuration,
-      deployment: { ...configuration.deployment, target, modelSettings: resolved.modelSettings } })
-    if (prepared.state !== 'prepared') fail(prepared.missingReasons[0] ?? 'chat_repair_configuration_missing')
+    async function preflight() {
+      const target = await discoverLocalDshDeployment({ endpoint: adapter.endpoint, localCredentialsPath: credentialsPath, signal })
+      if (await realpath(target.credentialsPath) !== await realpath(credentialsPath)) fail('chat_repair_dsh_target_mismatch')
+      const resolved = await resolveLocalDshModelSettings(configuration, target, signal, directory)
+      const prepared = await createNativeDshDeploymentRuntime({ sessionDirectory: directory }).prepare({ ...configuration,
+        deployment: { ...configuration.deployment, target, modelSettings: resolved.modelSettings } })
+      if (prepared.state !== 'prepared') fail(prepared.missingReasons[0] ?? 'chat_repair_configuration_missing')
+    }
+    // An unreachable engine cannot pass live discovery until its managed process is restored.
+    if (!restartDsh) await preflight()
     if (!isDeepStrictEqual((await readNativeChatConfigurationUnlocked(directory)).revisions, configuration.revisions)) fail('chat_repair_configuration_changed')
     await assertSingleAccount()
     await ensurePrivateDirectory(join(directory, 'chat-repair-backups'))
@@ -230,9 +249,12 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     await update({ phase: 'stopping' })
     // This flag precedes the call: stop may have stopped the UI before another component fails.
     stopAttempted = true
-    await ports.stop()
+    await ports.stop(restartDsh)
     signal.throwIfAborted()
     await retireStoppedFrameworkLocks(directory, backups)
+    if (restartDsh) {
+      await retireStoppedDshWriterLock(`${adapter.localCredentialsPath}.lock`, backups)
+    }
     // Preserve original IDs, versions and phases in durable backups before interrupting only these configuration controllers.
     const applications = createNativeApplicationStorage(directory)
     const journal = await applications.read()
@@ -244,8 +266,10 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     }
     // Maintenance suspends framework startup through its repair journal, preserving the user's running intent.
     await update({ phase: 'starting-services' })
-    await ports.start()
+    await ports.start(restartDsh)
     servicesRestored = true
+    if (restartDsh) await preflight()
+    if (!isDeepStrictEqual((await readNativeChatConfigurationUnlocked(directory)).revisions, configuration.revisions)) fail('chat_repair_configuration_changed')
     let runtime: Record<string, unknown>
     while (true) {
       const value = await readWhenAvailable('/api/chat/runtime')
@@ -290,7 +314,7 @@ export async function runChatRepair(configurationFilename: string, operationId: 
       ? error.code : signal.aborted ? 'chat_repair_timeout' : 'chat_repair_failed']
     // Independent of the workflow timeout, a partial stop still gets one bounded UI restoration attempt.
     if (stopAttempted && !servicesRestored) {
-      try { await ports.start() } catch { reasons.push('chat_repair_services_not_restored') }
+      try { await ports.start(restartDsh) } catch { reasons.push('chat_repair_services_not_restored') }
     }
     await update({ state: 'failed', reasons })
   }

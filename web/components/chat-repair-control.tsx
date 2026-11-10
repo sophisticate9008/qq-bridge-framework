@@ -14,6 +14,7 @@ const labels: Readonly<Record<ChatRepairOperation['phase'], string>> = {
 const reasons: Readonly<Record<string, string>> = {
   chat_repair_local_dsh_required: '尚未连接本机 DSH，请在连接设置中自动连接本机服务。',
   chat_repair_dsh_maintenance_unresolved: 'DSH 存在未决维护操作，请先核对原操作；框架恢复不会覆盖其记录。',
+  chat_repair_dsh_not_managed: '检测到 DSH 需要恢复，但该实例尚未登记托管或未通过本机归属核验。请在 DSH 部署端恢复服务。',
   chat_repair_dsh_target_mismatch: '已连接的 DSH 与本机发现的实例不同，请在连接设置中选择本机 DSH。',
   chat_repair_guardian_unavailable: '恢复守护进程未能就绪，本次尚未停服；可以再次点击恢复。',
   chat_repair_application_unknown: '应用结果尚未确认，已保留原操作记录；可再次恢复并查看应用详情。',
@@ -27,7 +28,7 @@ const reasons: Readonly<Record<string, string>> = {
   chat_repair_not_received: '原修复请求未被受理，尚未执行；可以重新点击一键恢复。',
   chat_repair_accounts_require_individual_recovery: '当前部署包含多个账号，请先在各账号检查聊天状态；此恢复入口暂不支持统一重启多账号。',
   chat_repair_stop_failed: '受管组件未能全部停止；可以再次修复，并查看具体服务状态。',
-  chat_repair_start_failed: '框架组件未能启动，请查看框架服务状态后再次修复。',
+  chat_repair_start_failed: '受管组件未能启动，请查看框架及 DSH 服务状态后再次修复。',
   chat_repair_protocol_unavailable: 'QQ 协议端尚未连通或未登录。请在协议端恢复登录，再点一键恢复。',
   chat_repair_chat_not_ready: '聊天链路尚未就绪，请查看聊天运行卡片的异常原因后再次修复。',
   chat_repair_timeout: '修复未能在期限内完成，会话记录保留；可以再次修复。',
@@ -49,7 +50,7 @@ export function ChatRepairControl({ api, connected, compact = false, summary = f
   const automaticDescription = automatic.snapshot ? automatic.snapshot.enabled
     ? '自动恢复已启用：后台检查聊天、DSH 与助手通道，持续故障达到 90 秒后尝试，每小时最多三次；主动停止和待应用配置会暂停恢复。'
     : '此部署已关闭自动恢复。' : '自动恢复状态暂未确认。';
-  const explanation = '会短暂重启框架组件并重新连接已应用的聊天设置，保留会话历史。DSH 和 QQ 由各自管理；未保存草稿不参与修复。';
+  const explanation = '恢复框架组件并重新连接已应用的聊天设置；检测到 DSH 故障或需要重新加载时，同时重启明确受管的本机 DSH，保留会话历史。QQ 登录由协议端管理，未保存草稿不参与修复。';
   return <div className={compact || summary ? 'stack' : 'strip stack'} data-chat-repair>
     <div className="row"><Button size="sm" variant="outline" disabled={!connected || pending || repair.state.snapshot?.available !== true} onClick={() => void requestChatRepair(api)}>
       {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Wrench className="size-3.5" />}{pending ? '正在恢复聊天' : '一键恢复聊天'}

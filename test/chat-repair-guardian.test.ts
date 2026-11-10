@@ -89,6 +89,30 @@ test('guardian startup failures consume at most two rescue attempts and never ma
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
+test('a reachable administrator cannot conceal a failed DSH recovery from the guardian', linux, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'qbf-guardian-dsh-'))
+  const storage = createChatRepairStorage(directory)
+  const id = randomUUID(), at = Date.now()
+  let starts = 0
+  try {
+    await storage.modify(journal => ({ ...journal, records: [{ restartDsh: true,
+      operation: { id, state: 'failed', phase: 'starting-services', createdAt: at, updatedAt: at, reasons: ['chat_repair_start_failed'] },
+      worker: { pid: 1_000_000_000, started: null } }] }))
+    await runChatRepairGuardian({ directory, operationId: id, pollMs: 1 }, {
+      async ready() { return true },
+      async start() {
+        starts++
+        assert.equal((await storage.read()).value.records[0]?.restartDsh, true)
+      }
+    })
+    assert.equal(starts, 1)
+    const record = (await storage.read()).value.records[0]!
+    assert.equal(record.guardianRecoveryComplete, true)
+    assert.equal(record.operation.state, 'failed')
+    assert.deepEqual(record.operation.reasons, ['chat_repair_start_failed'])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
 test('stopped-only profile lock recovery retains live holders and recovers an empty orphan', linux, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'qbf-profile-empty-lock-'))
   const filename = join(directory, 'writer.lock'), backups = join(directory, 'backups')

@@ -130,7 +130,7 @@ test('real restart restores stopped framework processes when a later worker cann
 });
 
 
-test('chat repair leaves DSH, protocol clients and auxiliary listeners running even when explicitly managed', {
+test('framework-only repair leaves a healthy DSH, protocol clients and auxiliary listeners running even when explicitly managed', {
   skip: process.platform !== 'linux' || !existsSync('/usr/bin/screen'), timeout: 20_000,
 }, async () => {
   const values = fixture();
@@ -149,6 +149,57 @@ test('chat repair leaves DSH, protocol clients and auxiliary listeners running e
     assert.equal(result.status, 0, result.stderr);
     assert.equal(external.listening, true);
   } finally {
+    await new Promise<void>(resolve => external.close(() => resolve()));
+    rmSync(values.directory, { recursive: true, force: true });
+  }
+});
+
+test('DSH recovery really cycles only the managed engine and framework, retaining unrelated listeners', {
+  skip: process.platform !== 'linux' || !existsSync('/usr/bin/screen') || !existsSync('/usr/bin/flock'), timeout: 90_000,
+}, async () => {
+  const values = fixture();
+  const external = createServer();
+  try {
+    await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve));
+    const address = external.address();
+    assert(address && typeof address !== 'string');
+    for (const id of ['napcat', 'auxiliary'] as const) {
+      Object.assign(values.configuration.services[id], { managed: true, port: { host: '127.0.0.1', port: address.port } });
+    }
+    const original = new Map<string, string>();
+    for (const id of ['framework-admin', 'framework-gateway', 'dsh'] as const) {
+      const marker = join(values.directory, `${id}.pid`);
+      Object.assign(values.configuration.services[id], { args: ['-e',
+        'const fs=require("node:fs"),file=process.argv[1];fs.writeFileSync(file,String(process.pid));'
+        + 'process.on("SIGTERM",()=>{fs.unlinkSync(file);process.exit(0)});setInterval(()=>{},1000)', marker],
+        ready: { kind: 'command', command: process.execPath, args: ['-e', 'process.exit(require("node:fs").existsSync(process.argv[1])?0:1)', marker] } });
+    }
+    values.save();
+    for (const id of ['framework-admin', 'dsh', 'framework-gateway']) {
+      const result = values.run('start', id);
+      assert.equal(result.status, 0, result.stderr);
+      original.set(id, readFileSync(join(values.directory, `${id}.pid`), 'utf8'));
+    }
+    const stopped = values.run('repair-services-stop', '--with-dsh');
+    assert.equal(stopped.status, 0, stopped.stderr);
+    for (const id of original.keys()) assert.equal(existsSync(join(values.directory, `${id}.pid`)), false);
+    assert.equal(external.listening, true);
+    const restored = values.run('repair-services-start', '--with-dsh');
+    assert.equal(restored.status, 0, restored.stderr);
+    for (const [id, pid] of original) {
+      assert.notEqual(readFileSync(join(values.directory, `${id}.pid`), 'utf8'), pid);
+    }
+    assert.equal(external.listening, true);
+    Object.assign(values.configuration.services.dsh, { managed: false });
+    values.save();
+    const rejected = values.run('repair-services-stop', '--with-dsh');
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /未登记/);
+    assert.equal(existsSync(join(values.directory, 'framework-admin.pid')), true);
+  } finally {
+    Object.assign(values.configuration.services.dsh, { managed: true });
+    values.save();
+    for (const id of ['framework-admin', 'framework-gateway', 'dsh']) values.run('stop', id);
     await new Promise<void>(resolve => external.close(() => resolve()));
     rmSync(values.directory, { recursive: true, force: true });
   }

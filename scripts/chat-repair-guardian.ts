@@ -30,7 +30,7 @@ export async function runChatRepairGuardian(options: { readonly directory: strin
     if (record.operation.state === 'running' && await chatRepairProcessAlive(ownedWorker)) { await pause(); continue }
     const interrupted = record.operation.state === 'running'
     // A still-running stop stage may shut the UI after a successful probe. Rescue waits on its same operations lock first.
-    const disrupted = interrupted && record.operation.phase !== 'checking'
+    const disrupted = (interrupted || record.restartDsh === true) && record.operation.phase !== 'checking'
     let available = disrupted ? false : await ready()
     let attempts = record.rescueAttempts ?? 0
     while (!available && attempts < 2) {
