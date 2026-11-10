@@ -98,7 +98,7 @@ test('native runtime exposes empty editable resources without fabricating a conn
   assert.deepEqual(paths.sort(), [
     'GET /api/chat/assistant', 'GET /api/chat/assistant/status', 'POST /api/chat/assistant', 'GET /api/chat/model-capabilities',
     'POST /api/chat/model-capabilities', 'GET /api/chat/provider-model-capabilities',
-    'GET /api/chat/activity', 'GET /api/chat/extensions/reload', 'POST /api/chat/extensions/reload',
+    'GET /api/chat/activity', 'GET /api/chat/extensions/installed', 'GET /api/chat/extensions/reload', 'POST /api/chat/extensions/reload',
     'GET /api/chat/plans', 'POST /api/chat/plans', 'GET /api/chat/dsh/health',
     'GET /api/chat/personas', 'POST /api/chat/personas',
     'GET /api/chat/model', 'POST /api/chat/model',
@@ -117,6 +117,8 @@ test('native runtime exposes empty editable resources without fabricating a conn
     'GET /api/chat/packages/configuration', 'POST /api/chat/packages/configuration',
     'POST /api/chat/packages/configuration/migrate', 'GET /api/chat/interactions', 'GET /api/chat/tools',
   ].sort())
+  assert.deepEqual(await invoke(routes,'GET','/api/chat/extensions/installed'),{schema:1,observation:null})
+  await rejects(invoke(routes,'GET','/api/chat/extensions/installed',null,new URLSearchParams('reload=true')),400,'invalid_extension_query')
   const plans = await invoke(routes, 'GET', '/api/chat/plans')
   const personas = await invoke(routes, 'GET', '/api/chat/personas')
   const access = await invoke(routes, 'GET', '/api/chat/access')

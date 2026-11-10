@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { isRecord } from '../src/contracts/values.ts';
+import { readProductUpdate } from '../src/host/product-update.ts';
 
 // A real previous release is the upgrade fixture; never synthesize an older version by editing metadata.
 const previous = '1.12.0';
@@ -45,9 +46,15 @@ export async function verifyFrameworkUpgrade(candidate: string): Promise<void> {
       assert.equal(JSON.parse(await readFile(join(old, 'package.json'), 'utf8')).version, previous);
       assert.equal(await readFile(join(old, 'runtime/admin/config.json'), 'utf8'), config);
     }
-    const result = await run(process.execPath, [updater, '--target', old, ...(majorChanged ? ['--allow-major'] : [])],
+    await run(process.execPath, [updater, '--target', old, ...(majorChanged ? ['--allow-major'] : [])],
       { cwd: old, env, timeout: 360_000, maxBuffer: 1024 * 1024 });
-    assert.match(result.stdout, /已更新到/);
+    const operation = await readProductUpdate(old);
+    assert(operation, 'The upgrade must persist its product update receipt.');
+    assert.equal(operation.phase, 'completed');
+    assert.equal(operation.from, previous);
+    assert.equal(operation.to, expected.version);
+    assert.equal(operation.wasRunning, false);
+    assert.equal(operation.error, null);
     assert.equal(await readFile(join(old, 'runtime/admin/config.json'), 'utf8'), config);
     assert.equal(await readFile(join(old, 'private/extensions/custom/local.ts'), 'utf8'), 'export const retained = true;');
     assert.equal(await readFile(join(old, 'custom-settings.json'), 'utf8'), '{"retained":true}');
