@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-settings'
 import { createPluginModelContexts } from './plugin-model-context.js'
+import BasicCompaction from '@deepseek-ai/dsh-compaction-basic'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -84,6 +85,18 @@ export function createPluginModelChannel(ctx: Context) {
   const active = new Set<string>()
   const allocations = new Set<Promise<AgentHandle>>()
   const restorations = new Map<string, Promise<Agent>>()
+  const compacting = new WeakSet<Agent>()
+  const ensureCompaction = async (agent: Agent) => {
+    if (compacting.has(agent) || !isOwnedSession(agent.session.snapshotEvents())) return
+    // These sessions have no chat preset. Mount the SDK's ordinary policy in
+    // their own scope, including on cold resume and independently opened agents.
+    if (!agent.ctx.get('compaction')) {
+      const scope = agent.ctx.isolate('compaction')
+      await scope.plugin(BasicCompaction).inertia
+      if (!scope.get('compaction')) throw new TypeError('Plugin session compaction is unavailable')
+    }
+    compacting.add(agent)
+  }
   let closing = false
   const assertOpen = () => { if (closing) throw new TypeError('Plugin model channel is closing') }
   const allocate = async (sessionId: string, signal: AbortSignal, create: () => Promise<AgentHandle>) => {
@@ -132,6 +145,7 @@ export function createPluginModelChannel(ctx: Context) {
           if (raced) return raced
           try {
             const handle = await allocate(sessionId, signal, () => ctx.agents.resume({ resumeSessionId: SessionId(sessionId), signal,
+              setup: async (_scope, agent) => { await ensureCompaction(agent) },
               agentOptions: { provider, model: model.model,
                 ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(model.reasoningEffort) }) } }))
             return handle.agent
@@ -255,11 +269,12 @@ export function createPluginModelChannel(ctx: Context) {
         return ctx.agents.create({ sessionId: SessionId(request.sessionId), meta: { cwd: process.cwd() }, signal,
           agentOptions: { provider, model: model.model,
             ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(model.reasoningEffort) }) },
-          setup: (_scope, agent) => {
+          setup: async (_scope, agent) => {
             appendPluginRecord(agent.session, 'plugin:qbf/model-session', { owner: request.owner })
             agent.session.append('model/selection', { provider: model.provider, model: model.model,
               ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(model.reasoningEffort) }) })
             if (model.contextWindow !== undefined) appendPluginRecord(agent.session, 'plugin:qbf/model-context', { owner: request.owner, model })
+            await ensureCompaction(agent)
           } })
       })
       await persistence.flush()
@@ -287,6 +302,7 @@ export function createPluginModelChannel(ctx: Context) {
         if (agent.status !== 'idle' || agent.inbox.nextTurn.length || agent.inbox.nextStep.length) throw new TypeError('Plugin session is not idle')
         rejectionCode = 'PLUGIN_MODEL_CONTEXT_UNAVAILABLE'
         const ownContext = isOwnedSession(agent.session.snapshotEvents())
+        await ensureCompaction(agent)
         if (model?.contextWindow !== undefined && !ownContext) throw new TypeError('Context limits apply only to plugin-owned model sessions')
         const provider = model ? await contexts.ensure(model, signal) : undefined
         // restrict() alone masks global tools only. Assembly removes scoped schemas,
@@ -469,8 +485,12 @@ export function createPluginModelChannel(ctx: Context) {
         const state: 'running' | 'completed' | 'failed' | 'unknown' = terminal
           ? terminal.data.reason.kind === 'completed' ? 'completed' : 'failed'
           : claimedTurn !== null || active.has(request.sessionId) ? 'running' : 'unknown'
+        const reason = terminal?.data.reason
         return { sessionId: request.sessionId, requestId: request.requestId, owner: request.owner, state, idle,
-          usage: { usageSteps, usageComplete: usageComplete && usageSteps.length > 0, ...(claimedTurn === null ? {} : { turn: claimedTurn }) } }
+          usage: { usageSteps, usageComplete: usageComplete && usageSteps.length > 0, ...(claimedTurn === null ? {} : { turn: claimedTurn }),
+            ...(reason ? { reason: { kind: reason.kind,
+              ...(reason.kind === 'error' && reason.error.code === 'CONTEXT_WINDOW_EXCEEDED'
+                ? { error: { code: 'CONTEXT_WINDOW_EXCEEDED' } } : {}) } } : {}) } }
       } finally { observation[Symbol.dispose]() }
     },
     async close() {

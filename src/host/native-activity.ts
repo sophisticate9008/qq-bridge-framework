@@ -106,7 +106,12 @@ export function createNativeActivity({ now = Date.now }: { readonly now?: () => 
         if (!Object.hasOwn(descriptions, event)) return
         const at = now()
         if (!Number.isSafeInteger(at) || at < 0) return
-        const [level, type, summary] = descriptions[event]
+        const [level, type, defaultSummary] = descriptions[event]
+        const summary = (event === 'sticker_collection_failed' || event === 'sticker_index_failed')
+          && errorCode === 'PLUGIN_MODEL_CONTEXT_OVERFLOW'
+          ? '后台表情模型上下文超限，恢复未完成；旧会话记录已保留。'
+          : (event === 'sticker_collection_failed' || event === 'sticker_index_failed') && errorCode === 'PLUGIN_MODEL_OUTPUT_TRUNCATED'
+            ? '后台表情模型输出达到上限，结果不完整，本次未保存。' : defaultSummary
         if (level !== 'info' && correlation.requestId) {
           if (requestFailures.size >= 256) requestFailures.delete(requestFailures.values().next().value!)
           requestFailures.add(correlation.requestId)

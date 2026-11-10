@@ -2,6 +2,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createNativeActivity, nativeActivityContent } from '../src/host/native-activity.ts'
 
+test('sticker failures distinguish context overflow and incomplete output without exposing provider text', () => {
+  const activity = createNativeActivity()
+  activity.record('sticker_collection_failed', 'group:456', undefined, {}, 'PLUGIN_MODEL_CONTEXT_OVERFLOW')
+  assert.match(activity.read('running').items[0]!.summary, /上下文超限/)
+  activity.record('sticker_index_failed', undefined, undefined, {}, 'PLUGIN_MODEL_OUTPUT_TRUNCATED')
+  assert.match(activity.read('running').items[0]!.summary, /输出达到上限/)
+  activity.record('sticker_collection_failed', 'group:456', 'private upstream text', {}, 'PLUGIN_MODEL_FAILED')
+  assert(!JSON.stringify(activity.read('running')).includes('private upstream'))
+})
+
 test('native activity retains exactly the newest 100 observations in arrival order with immutable detached snapshots', () => {
   let now = 1000
   const activity = createNativeActivity({ now: () => now })

@@ -28,6 +28,15 @@ export interface PluginModelServiceOptions {
 
 function failure(code: string): never { throw new FrameworkError(code, '插件模型服务未能安全完成操作。') }
 function json(value: unknown): JsonValue { return snapshot(value) as JsonValue }
+function contextOverflow(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.reason) || value.reason.kind !== 'error' || !isRecord(value.reason.error)) return false
+  return value.reason.error.code === 'CONTEXT_WINDOW_EXCEEDED'
+}
+function modelFailure(data: JsonObject): string {
+  if (contextOverflow(data)) return 'PLUGIN_MODEL_CONTEXT_OVERFLOW'
+  if (isRecord(data.reason) && data.reason.kind === 'max-tokens') return 'PLUGIN_MODEL_OUTPUT_TRUNCATED'
+  return 'PLUGIN_MODEL_FAILED'
+}
 function runLimits(request: PluginModelRunRequest) {
   const timeout = request.timeoutMs === undefined ? 300_000 : request.timeoutMs
   const maxOutput = request.maxOutputChars ?? 32_000
@@ -158,10 +167,12 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
     const previous = options.store.read(EXECUTIONS, sessionId)
     if (previous && (!isRecord(previous.value) || !['completed', 'failed', 'rejected'].includes(String(previous.value.state)))) failure('PLUGIN_MODEL_EXECUTION_UNSETTLED')
   }
-  const create = async (owner: string, request: PluginModelBindingKey & { readonly model?: PluginModelSelection }, signal: AbortSignal, contextRestartedFrom?: string) => {
+  const create = async (owner: string, request: PluginModelBindingKey & { readonly model?: PluginModelSelection }, signal: AbortSignal,
+    contextRestartedFrom?: string, heldSession?: string) => {
     const current = read(owner, request)
     compareRevision(request.expectedRevision, current.row?.revision ?? null)
-    if (current.value && isBusy(current.value.sessionId)) failure('PLUGIN_MODEL_SESSION_BUSY')
+    if (current.value && (running.has(current.value.sessionId)
+      || current.value.sessionId !== heldSession && isBusy(current.value.sessionId))) failure('PLUGIN_MODEL_SESSION_BUSY')
     if (current.value && current.value.state !== 'ready') failure('PLUGIN_MODEL_CREATION_UNSETTLED')
     if (current.value) assertSettled(current.value.sessionId)
     if (listBindings().length >= MAX_BINDINGS && !current.value) failure('PLUGIN_MODEL_BINDING_LIMIT')
@@ -262,7 +273,7 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
           if (options.onUsage) await options.onUsage({ owner, requestId, sessionId: target.sessionId, conversationId: target.conversationId,
             status: event.type === 'completed' ? 'completed' : 'failed', data })
           if (outputExceeded) failure('PLUGIN_MODEL_OUTPUT_LIMIT')
-          if (event.type !== 'completed') failure('PLUGIN_MODEL_FAILED')
+          if (event.type !== 'completed') failure(modelFailure(data))
           const latest = read(owner, request)
           if (latest.value?.sessionId === target.sessionId && latest.row) write(latest.id,
             { ...latest.value, ...(model ? { model } : {}), updatedAt: Date.now(), lastUsedAt: Date.now() }, latest.row.revision)
@@ -278,6 +289,30 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
       }))
     } finally { if (timer !== undefined) clearTimeout(timer) }
   }
+  const replaceOverflowed = async (owner: string, request: PluginModelRunRequest, target: PluginModelBinding, signal: AbortSignal) =>
+    serial(`binding:${keyOf(owner, request).id}`, signal, async () => {
+      const current = read(owner, request).value
+      if (!current || current.sessionId !== target.sessionId) return current ?? target
+      const previous = options.store.read(EXECUTIONS, target.sessionId)
+      // Only our own, conclusively failed model-only context can be replaced.
+      // Shared bindings, cancellation, unknown submission and other failures keep
+      // their original identity and isolation. Old transcripts are never deleted.
+      if (current.source !== 'created' || current.state !== 'ready' || isBusy(current.sessionId)
+        || !previous || !isRecord(previous.value) || previous.value.state !== 'failed' || !contextOverflow(previous.value.usage)
+        || previous.value.owner !== owner || !pluginModelIdentifier(previous.value.requestId)) return current
+      const requestId = previous.value.requestId
+      return options.withSessionLease(current.sessionId, signal, async () => {
+        const latest = read(owner, request).value
+        if (!latest || latest.revision !== current.revision
+          || options.store.read(EXECUTIONS, current.sessionId)?.revision !== previous.revision) return latest ?? current
+        const observed = await options.backend.inspectRun({ sessionId: current.sessionId, owner,
+          requestId, signal })
+        if (!observed.idle || observed.state !== 'failed' || !contextOverflow(observed.usage)) return current
+        signal.throwIfAborted()
+        return create(owner, { ...request, expectedRevision: current.revision,
+          model: request.model ?? current.model ?? undefined }, signal, current.sessionId, current.sessionId)
+      })
+    })
   return Object.freeze({
     listBindings,
     listManagedSessions(owner?: string): readonly PluginModelManagedSession[] {
@@ -366,7 +401,7 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
             await options.backend.create({ sessionId: target.sessionId, owner, model, signal })
             return execute(owner, target, request, signal)
           }
-          const target = await serial(`binding:${keyOf(owner, request).id}`, signal, async () => {
+          let target = await serial(`binding:${keyOf(owner, request).id}`, signal, async () => {
             const existing = read(owner, request).value
             if (existing) {
               if (existing.state !== 'ready') failure('PLUGIN_MODEL_CREATION_UNSETTLED')
@@ -379,7 +414,18 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
             }
             return create(owner, request, signal)
           })
-          return execute(owner, target, request, signal)
+          target = await replaceOverflowed(owner, request, target, signal)
+          const startedAt = Date.now(), timeout = runLimits(request).timeout
+          try { return await execute(owner, target, request, signal) }
+          catch (error) {
+            if (!(error instanceof FrameworkError) || error.code !== 'PLUGIN_MODEL_CONTEXT_OVERFLOW') throw error
+            const replacement = await replaceOverflowed(owner, request, target, signal)
+            if (replacement.sessionId === target.sessionId) throw error
+            // A single bounded recovery of pure generation, after real idle.
+            const remaining = timeout === null ? null : timeout - Math.max(0, Date.now() - startedAt)
+            if (remaining !== null && remaining < 1000) failure('PLUGIN_MODEL_TIMEOUT')
+            return execute(owner, replacement, { ...request, timeoutMs: remaining }, signal)
+          }
         },
       })
     },

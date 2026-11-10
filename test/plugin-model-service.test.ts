@@ -11,6 +11,7 @@ function fixture(t: TestContext) {
   t.after(() => store.close())
   const host = new AbortController(), plugin = new AbortController(), caller = new AbortController()
   const sessions = new Set<string>()
+  const leased = new Set<string>()
   let created = 0, starts = 0, stops = 0
   let follower: Parameters<PluginModelBackend['follow']>[0] | undefined
   let started!: () => void
@@ -25,10 +26,18 @@ function fixture(t: TestContext) {
     async inspectRun() { return { state: 'running', idle: false, usage: {} } },
   }
   const service = createPluginModelService({ store, backend, signal: host.signal,
-    withSessionLease: async (_session, signal, operation) => { signal.throwIfAborted(); return operation() } })
+    isSessionBusy: sessionId => leased.has(sessionId),
+    withSessionLease: async (sessionId, signal, operation) => {
+      signal.throwIfAborted(); assert(!leased.has(sessionId)); leased.add(sessionId)
+      try { return await operation() } finally { leased.delete(sessionId) }
+    } })
   const client = service.forPlugin('fixture-plugin', plugin.signal)
-  return { store, host, plugin, caller, client, admitted, counts: () => ({ created, starts, stops }),
+  return { store, host, plugin, caller, client, backend, service, admitted, counts: () => ({ created, starts, stops }),
     signal: () => follower?.signal,
+    async fail(data: import('../src/contracts/data.ts').JsonObject) {
+      assert(follower)
+      await follower.onEvent({ sessionId: follower.sessionId, id: 'failure', type: 'failed', data })
+    },
     async complete(text: string) {
       assert(follower)
       const base = { sessionId: follower.sessionId }
@@ -37,6 +46,69 @@ function fixture(t: TestContext) {
       await follower.onEvent({ ...base, id: 'completed', type: 'completed' })
     } }
 }
+
+const overflow = { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED' } } } as const
+
+test('settled owned context overflow replaces the binding once, retains old evidence and resumes only pure generation', async t => {
+  const f = fixture(t)
+  f.backend.inspectRun = async () => ({ state: 'failed', idle: true, usage: overflow })
+  const pending = f.client.run({ prompt: 'Classify current image', name: 'collection', timeoutMs: null })
+  await f.admitted
+  const old = f.client.list()[0]!
+  await f.fail(overflow)
+  while (f.counts().starts < 2) await nextTurn()
+  const replacement = f.client.list()[0]!
+  assert.notEqual(replacement.sessionId, old.sessionId)
+  assert.equal(replacement.contextRestartedFrom, old.sessionId)
+  assert.equal(f.store.read('plugin-model.executions', old.sessionId)?.value &&
+    (f.store.read('plugin-model.executions', old.sessionId)!.value as { state: string }).state, 'failed')
+  await f.complete('classified')
+  assert.equal((await pending).text, 'classified')
+  assert.equal(f.service.listManagedSessions().length, 2)
+  assert.deepEqual(f.counts(), { created: 2, starts: 2, stops: 2 })
+})
+
+test('persisted overflow rotates before the next input, but a second overflow in the recovery attempt is not retried', async t => {
+  const f = fixture(t)
+  f.backend.inspectRun = async () => ({ state: 'failed', idle: true, usage: overflow })
+  const original = await f.client.create({ name: 'collection' })
+  f.store.write('plugin-model.executions', original.sessionId, { schema: 1, owner: 'fixture-plugin', requestId: 'old', state: 'failed', usage: overflow })
+  const pending = f.client.run({ prompt: 'New image', name: 'collection', timeoutMs: null })
+  const failed = assert.rejects(pending, { code: 'PLUGIN_MODEL_CONTEXT_OVERFLOW' })
+  await f.admitted
+  assert.notEqual(f.client.list()[0]!.sessionId, original.sessionId)
+  await f.fail(overflow)
+  while (f.counts().starts < 2) await nextTurn()
+  await f.fail(overflow)
+  await failed
+  assert.equal(f.counts().starts, 2)
+})
+
+test('overflow recovery never replaces shared sessions, non-idle executions, mismatched observations or arbitrary errors', async t => {
+  for (const kind of ['shared', 'busy', 'mismatch', 'other'] as const) await t.test(kind, async t => {
+    const f = fixture(t)
+    const original = await f.client.create()
+    if (kind === 'shared') await f.client.bind({ sessionId: original.sessionId })
+    f.backend.inspectRun = async () => ({ state: 'failed', idle: kind !== 'busy', usage: kind === 'mismatch' ? {} : overflow })
+    const pending = f.client.run({ prompt: 'One attempt', timeoutMs: null })
+    const failed = assert.rejects(pending, { code: kind === 'other' ? 'PLUGIN_MODEL_FAILED' : 'PLUGIN_MODEL_CONTEXT_OVERFLOW' })
+    await f.admitted
+    await f.fail(kind === 'other' ? { reason: { kind: 'error', error: { code: 'NETWORK_ERROR', message: 'CONTEXT_WINDOW_EXCEEDED' } } } : overflow)
+    await failed
+    assert.equal(f.client.list()[0]!.sessionId, original.sessionId)
+    assert.deepEqual(f.counts(), { created: 1, starts: 1, stops: 1 })
+  })
+})
+
+test('output truncation remains a failed generation with its own diagnostic and never changes the binding', async t => {
+  const f = fixture(t)
+  const pending = f.client.run({ prompt: 'Produce labels', timeoutMs: null })
+  const rejected = assert.rejects(pending, { code: 'PLUGIN_MODEL_OUTPUT_TRUNCATED' })
+  await f.admitted
+  await f.fail({ reason: { kind: 'max-tokens' } })
+  await rejected
+  assert.deepEqual(f.counts(), { created: 1, starts: 1, stops: 1 })
+})
 
 test('explicit null plugin generation timeout creates no timer and can finish beyond the normal deadline', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] })

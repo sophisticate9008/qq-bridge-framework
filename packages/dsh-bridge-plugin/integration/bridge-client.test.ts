@@ -1,6 +1,7 @@
 import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import type { WorkPathDescriptor } from '../dist/work-path.js'
 import assert from 'node:assert/strict'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, rm, mkdir, writeFile, open } from 'node:fs/promises'
@@ -201,7 +202,7 @@ test('official plugin entry and actual framework HTTP client isolate claims, per
   const clients: FrameworkClient[] = []
   try {
     const loader = ctx.plugin(Loader)
-    for (const plugin of [Agents, Sessions, Projections, SystemPrompt, Tools, Llm, Registry, RemoteAccess, Gateway]) ctx.plugin(plugin)
+    for (const plugin of [Agents, Sessions, Projections, SystemPrompt, Tools, Llm, TokenMeter, Registry, RemoteAccess, Gateway]) ctx.plugin(plugin)
     ctx.plugin(DefaultModel, { provider: 'safe-fixture', model: 'safe-model' })
     ctx.plugin(Presets, { default: 'chosen-group' })
     ctx.plugin(AgentLoop)

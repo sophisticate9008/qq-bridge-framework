@@ -10,22 +10,24 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Agents from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Presets from '@deepseek-ai/dsh-agent-preset-registry'
-import Llm, { LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import Llm, { LlmAdapter, LlmError, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Sessions, { pluginRecordOf, SessionId } from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import * as Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Query from '@deepseek-ai/dsh-session-query-sqlite'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { createPluginModelChannel } from '../dist/plugin-model.js'
 
 class ModelAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
   override async resolveModel(provider: string, model: string) {
     if (model === 'broken') throw new Error('Fixture model configuration unavailable')
-    return { provider, id: model, name: 'Fixture', inputModalities: model === 'vision' ? ['text' as const, 'image' as const] : ['text' as const], defaultMaxTokens: 128 }
+    return { provider, id: model, name: 'Fixture', context: { contextWindow: 131072 }, inputModalities: model === 'vision' ? ['text' as const, 'image' as const] : ['text' as const], defaultMaxTokens: 128 }
   }
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (options.model === 'overflow') throw new LlmError('PRIVATE_PROVIDER_DETAIL', 'CONTEXT_WINDOW_EXCEEDED')
     this.requests.push(options)
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'block-end', index: 0, block: { type: 'text', text: 'fixture answer' } }
@@ -64,13 +66,13 @@ test('SDK plugin sessions remain readable, resume history and exclude global com
   let channel: ReturnType<typeof createPluginModelChannel> | undefined
   try {
     const loader = ctx.plugin(Loader)
-    const fibers = [Agents, Sessions, Projections, SystemPrompt, Tools, Llm, FixtureAttachments].map(plugin => ctx.plugin(plugin))
+    const fibers = [Agents, Sessions, Projections, SystemPrompt, Tools, Llm, TokenMeter, FixtureAttachments].map(plugin => ctx.plugin(plugin))
     fibers.push(ctx.plugin(Presets, { default: 'fixture' }), ctx.plugin(AgentLoop), ctx.plugin(Query, { path: ':memory:', openAt: 'never' }))
     const persistence = ctx.plugin(Persistence, { root: join(directory, 'sessions'), compression: 'none' })
     await loader.inertia
     await Promise.all(fibers.map(fiber => fiber.inertia))
     await persistence.inertia
-    ctx.provide('settings', { describe: () => [{ ns: 'fixture-config', value: { models: [{ id: 'fixture-model' }, { id: 'vision' }, { id: 'broken' }] } }] })
+    ctx.provide('settings', { describe: () => [{ ns: 'fixture-config', value: { models: [{ id: 'fixture-model' }, { id: 'vision' }, { id: 'broken' }, { id: 'overflow' }] } }] })
     ctx.llm.registerAdapter(['fixture'], adapter)
     ctx.llm.registerConfigurableProviders([{ provider: 'fixture', displayName: 'Fixture', settingsNs: 'fixture-config', settingsPath: [] }])
     ctx.systemPrompt.section({ name: 'deployment-persona', order: 0, text: 'QQ_PERSONA_MUST_BE_ABSENT', complete: true })
@@ -146,6 +148,28 @@ test('SDK plugin sessions remain readable, resume history and exclude global com
     const failure = await channel.inspectRun({ sessionId, requestId: 'before-user-failure', owner: 'fixture-plugin' }, signal)
     assert.equal(failure.state, 'failed', 'inbox consumption proves the failed turn even before user/message admission')
     assert.equal(failure.idle, true)
+    const pressureSession = 'qbf-plugin-compaction-sdk'
+    await channel.create({ sessionId: pressureSession, owner: 'fixture-plugin', model: { provider: 'fixture', model: 'fixture-model' } }, signal)
+    for (let round = 0; round < 5; round++) {
+      assert.deepEqual(await channel.start({ sessionId: pressureSession, requestId: `pressure-${round}`, owner: 'fixture-plugin',
+        prompt: `Round ${round}: ` + 'bounded history '.repeat(7000) }, signal), { accepted: true })
+      await channel.waitIdle({ sessionId: pressureSession, requestId: `pressure-${round}` }, signal)
+      assert.equal((await channel.inspectRun({ sessionId: pressureSession, requestId: `pressure-${round}`, owner: 'fixture-plugin' }, signal)).state, 'completed')
+    }
+    const compacted = await ctx.sessionQuery.observeSession(SessionId(pressureSession), { signal })
+    try {
+      assert(compacted.events.some(event => String(event.type) === 'compaction/summary'), 'the ordinary SDK policy actually summarizes pressure across cold resumes')
+    } finally { compacted[Symbol.dispose]() }
+    assert.equal(ctx.get('compaction'), undefined, 'helper policy never changes the parent or QQ scope')
+    const overflowSession = 'qbf-plugin-overflow-sdk'
+    await channel.create({ sessionId: overflowSession, owner: 'fixture-plugin', model: { provider: 'fixture', model: 'overflow' } }, signal)
+    await channel.start({ sessionId: overflowSession, requestId: 'overflow-request', owner: 'fixture-plugin', prompt: 'Current input' }, signal)
+    await channel.waitIdle({ sessionId: overflowSession, requestId: 'overflow-request' }, signal)
+    const overflowEvidence = await channel.inspectRun({ sessionId: overflowSession, requestId: 'overflow-request', owner: 'fixture-plugin' }, signal)
+    assert.equal(overflowEvidence.state, 'failed')
+    assert.equal(overflowEvidence.idle, true)
+    assert.deepEqual(overflowEvidence.usage.reason, { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED' } })
+    assert(!JSON.stringify(overflowEvidence).includes('PRIVATE_PROVIDER_DETAIL'))
   } finally {
     await channel?.close()
     await ctx.fiber.dispose()
