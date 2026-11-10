@@ -31,6 +31,22 @@ test('installed extension tools are discovered on demand with owner checks and d
   const summaries = JSON.stringify(await catalog.execute(request({ category: 'extensions' })))
   assert(summaries.includes('extension.example.schedule')); assert(!summaries.includes('inputSchema'))
   assert(JSON.stringify(await catalog.execute(request({ id: 'extension.example.schedule' }))).includes('inputSchema'))
+  const stopPdf = registry.forPlugin('pdf-reader', lifetime.signal).register({ id: 'extract', description: '读取 PDF 文字与坐标',
+    permission: 'owner', readOnly: true, parameters: { type: 'object', additionalProperties: false, properties: {} },
+    async execute() { throw Error('Discovery must not invoke a tool') } })
+  const search = async (input: JsonValue) => {
+    const result = await catalog.execute(request(input))
+    assert(result && typeof result === 'object' && !Array.isArray(result) && Array.isArray(result.tools))
+    return result.tools.map(tool => { assert(tool && typeof tool === 'object' && !Array.isArray(tool)); return tool.id })
+  }
+  assert.deepEqual(await search({ query: ' PDF\t扩展 ' }), ['extension.pdf-reader.extract'])
+  assert.deepEqual(await search({ query: '已安装扩展 pdf' }), ['extension.pdf-reader.extract'])
+  assert.deepEqual(await search({ category: 'extensions', query: 'pdf 文字' }), ['extension.pdf-reader.extract'])
+  assert.deepEqual(await search({ query: 'pdf 不存在的能力' }), [])
+  assert.deepEqual(await search({ category: 'sessions', query: 'pdf' }), [])
+  assert.deepEqual(await search({ query: '   ' }), [])
+  stopPdf()
+  assert.deepEqual(await search({ query: 'pdf 扩展' }), [])
   const input = { id: 'extension.example.schedule', input: { label: 'today' } }
   await assert.rejects(async () => call.execute(request(input)), /owner required/); assert.equal(calls, 0)
   owner = true

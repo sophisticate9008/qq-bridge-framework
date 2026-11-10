@@ -25,7 +25,7 @@ function callInput(input: JsonValue): { id: string; input: JsonValue } {
 }
 export const NATIVE_DIRECTORY_TOOLS: readonly NativeToolContribution[] = [
   { definition: { name: 'qbf_capability_catalog', capability: 'native.capabilities.catalog', featureId: 'framework-tools', registrationSource: source, timeoutMs: 10000,
-    description: '按需查找能力，包括已安装扩展的任务与日程、空间说说、账号资料、好友和群管理、文件、协议运维、会话绑定管理。无参数返回分类；category或query只返回工具摘要；id返回该工具的完整参数和调用范围。找到后用qbf_capability_call调用。不需要先展开全部工具。',
+    description: '按需查找能力，包括已安装扩展的任务与日程、空间说说、账号资料、好友和群管理、文件、协议运维、会话绑定管理。无参数返回分类；category或query只返回工具摘要；query按空格分隔关键词，同时匹配工具名称、说明和分类；id返回该工具的完整参数和调用范围。找到后用qbf_capability_call调用。不需要先展开全部工具。',
     parameters: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', maxLength: 160 }, category: { type: 'string', maxLength: 160 }, query: { type: 'string', maxLength: 160 } } } }, validate: input => json(catalogInput(input)) },
   // Leave time for preparation around space publishing's 180-second protocol request.
   { definition: { name: 'qbf_capability_call', capability: 'native.capabilities.call', featureId: 'framework-tools', registrationSource: source, timeoutMs: 240000,
@@ -44,6 +44,8 @@ export function createNativeCapabilityDirectory(options: {
     return owner ? sources.requireOwner(request.scope, request.signal) : sources.lookup(request.scope, request.signal)
   }
   const supported = new Set(options.inventory?.supportedIds ?? [])
+  const categories = [...QQ_CAPABILITY_CATEGORIES, { id: 'sessions', label: '会话管理', description: '查询和切换QQ与插件会话绑定' },
+    { id: 'extensions', label: '已安装扩展', description: '插件任务、日程、状态与其他扩展能力，按需查看参数' }]
   // Raw account APIs are owner-only. Public/autonomous operations use scoped daily or directory wrappers.
   const entries = () => [
     ...options.tools().map(t => ({ id: t.tool.definition.name, category: t.category, description: t.tool.definition.description,
@@ -79,11 +81,16 @@ export function createNativeCapabilityDirectory(options: {
       await guard(request, false)
       const input = catalogInput(request.input), all = entries()
       if (input.id) { const entry = all.find(t => t.id === input.id); return entry ? json(entry) : { status: 'rejected', code: 'CAPABILITY_NOT_FOUND' } }
-      if (!input.category && !input.query) return json({ categories: [...QQ_CAPABILITY_CATEGORIES, { id: 'sessions', label: '会话管理', description: '查询和切换QQ与插件会话绑定' },
-        { id: 'extensions', label: '已安装扩展', description: '插件任务、日程、状态与其他扩展能力，按需查看参数' }]
+      if (!input.category && !input.query) return json({ categories: categories
         .map(c => ({ ...c, count: all.filter(t => t.category === c.id).length })).filter(c => c.count > 0) })
-      const matches = all.filter(t => (!input.category || t.category === input.category)
-        && (!input.query || `${t.id} ${t.description}`.toLocaleLowerCase().includes(input.query.toLocaleLowerCase())))
+      const terms = input.query?.toLocaleLowerCase().trim().split(/\s+/u)
+      const matches = all.filter(t => {
+        if (input.category && t.category !== input.category) return false
+        if (!terms) return true
+        const category = categories.find(candidate => candidate.id === t.category)
+        const searchable = `${t.id} ${t.description} ${t.category} ${category?.label ?? ''} ${category?.description ?? ''}`.toLocaleLowerCase()
+        return terms.every(term => term.length > 0 && searchable.includes(term))
+      })
       return json({ tools: matches.slice(0, 40).map(({ inputSchema: _schema, ...t }) => t), limited: matches.length > 40 })
     } } satisfies EffectAdapter,
     'native.capabilities.call': { execute } satisfies EffectAdapter,
