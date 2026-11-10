@@ -128,8 +128,10 @@ export async function runRuntimeMaintenance(root: string, apply = false) {
   }
   configuredPaths.push(...await configuredDshDependencies(live));
   const used = async (path: string) => {
-    active ??= [...await processPaths(), ...configuredPaths];
-    return active.some(text => text.includes(path + sep) || text.endsWith(path) || text.includes(path + '\n') || text.includes(path + '"'));
+    const references = (text: string) => text.includes(path + sep) || text.endsWith(path) || text.includes(path + '\n') || text.includes(path + '"');
+    if (configuredPaths.some(references)) return true;
+    active ??= await processPaths();
+    return active.some(references);
   };
   const result = { schema: 1, at: now, applied: apply, removedTrees: 0, removedFiles: 0, reclaimedBytes: 0, protectedTrees: 0, deferred: false, durationMs: 0, cpuMs: 0, peakRssBytes: 0 };
   async function removeTree(path: string) {

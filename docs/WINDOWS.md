@@ -25,3 +25,5 @@ JSON 使用独占锁、写临时文件、文件 flush、版本检查、同目录
 版本标签自动运行发行包安装工作流，在 Linux 构建并验收后，将同一批附件交给 Windows x64 和 Linux ARM64 安装验证；发行附件取自通过验证的 `release-packages`。开发阶段也可运行 `gh workflow run windows.yml --ref main`。工作流在 Linux 的干净提交上构建框架、网页与两个配套组件，生成同源 TAR、Windows ZIP 与 SHA-256；随后由 Windows x64、Linux x64 和真实 Linux ARM64 runner 安装同一候选内容。
 
 Windows 验收实际解压 ZIP，验证原生中文／公式排版、初始化、全套 WebUI 静态资源、首次令牌、启动器启动、正常退出、保留配置重启、缺失资源拒绝，以及 ACL 修改后的缓存失效、权限进程通信与退出、真实本地 WebSocket→DSH 适配器→持久出站→模拟 QQ HTTP 链路。Windows 定向链路使用候选包内的生产依赖与同提交源码执行，随后删除源目录验证实际编译后端；不重复安装测试依赖。测试不使用真实 QQ 登录或商业模型。包保留七天，小型报告保留三天，不上传依赖与运行目录。定位聊天问题时可追加 `-f source_only=true`，只跑 Windows 源码定向诊断，不构建或宣称安装包通过。
+
+首次解压后，可将包含 start-windows.cmd 的程序目录命名为固定的 qq-bridge-framework，再登记启动入口。后续更新覆盖该目录，下载 ZIP 的版本号不要求改变服务路径。已有安装按更新流程操作，不为更新重复初始化。

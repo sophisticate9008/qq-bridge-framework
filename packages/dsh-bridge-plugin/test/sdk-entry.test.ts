@@ -64,7 +64,7 @@ test('actual SDK loads entry, authenticates owner calls, observes real inbox cla
   assert.equal(row.id, 'qbf-bridge')
   assert.equal(row.name, '@qq-bridge-framework/dsh-bridge-plugin')
   const entryPath = import.meta.resolve('@qq-bridge-framework/dsh-bridge-plugin')
-  const entryId = await ctx.loader.create({ id: String(row.id), name: entryPath })
+  const entryId = await ctx.loader.create({ name: entryPath })
   await ctx.loader.await()
   await new Promise<void>(resolve => setImmediate(resolve))
   try {

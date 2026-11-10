@@ -22,8 +22,9 @@ AI许愿生成的，目前自用
 两种包均包含后端、WebUI、中文字体、启动入口、公开源码及配套组件包，附件由 `SHA256SUMS` 校验。
 
 ```sh
-tar -xzf qq-bridge-framework-1.13.7.tar.gz
-cd qq-bridge-framework-1.13.7
+mkdir qq-bridge-framework
+tar -xzf qq-bridge-framework-1.13.7.tar.gz --strip-components=1 -C qq-bridge-framework
+cd qq-bridge-framework
 npm ci --omit=dev
 npm run cli -- init
 npm run cli -- serve

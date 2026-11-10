@@ -49,7 +49,7 @@ function canonicalBase(value: unknown): string | null {
   } catch { return null }
 }
 
-async function readProfile(filename: string, signal?: AbortSignal): Promise<unknown> {
+async function readProfile(filename: string, signal?: AbortSignal, readOnlyLayer = false): Promise<unknown> {
   signal?.throwIfAborted()
   if (filename.length > 4_096 || !isAbsolute(filename) || resolve(filename) !== filename
     || /[\u0000-\u001f\u007f]/.test(filename) || await realpath(dirname(filename)) !== dirname(filename)) missing()
@@ -58,7 +58,7 @@ async function readProfile(filename: string, signal?: AbortSignal): Promise<unkn
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   try {
     const before = await handle.stat()
-    if (!before.isFile() || before.nlink !== 1 || before.size > 1_048_576 || (before.mode & 0o022) !== 0
+    if (!before.isFile() || before.nlink !== 1 && !readOnlyLayer || before.size > 1_048_576 || (before.mode & 0o022) !== 0
       || typeof process.getuid === 'function' && before.uid !== process.getuid()) missing()
     const bytes = Buffer.alloc(before.size + 1)
     let length = 0
@@ -126,7 +126,7 @@ export async function readLocalDshModelCapabilities(provider: NativeModelProvide
     const paths = [...target.layerPaths ?? [], target.profilePath]
     if (new Set(paths).size !== paths.length) return unavailable('local_dsh_metadata_unavailable')
     const layers: unknown[] = []
-    for (const filename of paths) layers.push(await readProfile(filename, signal))
+    for (const filename of paths) layers.push(await readProfile(filename, signal, filename !== target.profilePath))
     const composed = compose(layers)
     const generatedRoutes = managedConversationRoutes(composed)
     const entries = composed.filter(entry => entry.name === '@deepseek-ai/dsh-llm-pi-ai'
@@ -187,7 +187,7 @@ export async function readLocalDshModelMetadata(provider: NativeModelProvider, m
     const paths = [...target.layerPaths ?? [], target.profilePath]
     if (new Set(paths).size !== paths.length) missing()
     const layers: unknown[] = []
-    for (const filename of paths) layers.push(await readProfile(filename, signal))
+    for (const filename of paths) layers.push(await readProfile(filename, signal, filename !== target.profilePath))
     const composed = compose(layers)
     const generatedRoutes = managedConversationRoutes(composed)
     const entries = composed.filter(entry => entry.name === '@deepseek-ai/dsh-llm-pi-ai' && entry.disabled !== true)

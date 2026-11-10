@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { fork } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -88,6 +88,7 @@ test('actual model discovery and deployment use identical layered static data wi
       personaId: 'persona', provider: provider.id, model: 'model', reasoningEffort: 'off',
       contextLimits: { group: 64_000, private: 96_000 } }] },
     deployment: { ...defaults.deployment, target, modelSettings: null } }
+  await link(basePath, join(directory, 'package-store.patch.yml'))
   const settings = await resolveLocalDshModelSettings(configuration, target)
   assert.deepEqual(settings.modelSettings, { contextWindow: 128_000, maxTokens: 4096, reasoningEfforts: false })
   const observed = await readLocalDshModelCapabilities(provider, 'model', target)
@@ -170,7 +171,7 @@ test('model capabilities and deployment share API preference, fallback and confl
     ['model_reasoning_metadata_unknown'])
 })
 
-test('actual local process discovery validates composed layers before returning a writable target', { skip: process.platform !== 'linux', timeout: 15_000 }, async context => {
+test('actual local process discovery validates composed layers before returning a writable target', { skip: process.platform !== 'linux', timeout: 45_000 }, async context => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-static-discovery-'))
   context.after(() => rm(directory, { recursive: true, force: true }))
   const home = join(directory, 'home')
@@ -198,6 +199,11 @@ test('actual local process discovery validates composed layers before returning 
   const request = { endpoint: `http://127.0.0.1:${message.port}`, localCredentialsPath: credentialsPath, signal: new AbortController().signal }
   assert.deepEqual(await discoverLocalDshDeployment(request), { profilePath, credentialsPath,
     layerPaths: [join(bundle, 'base.patch.yml')], schemaVersion: '0.2.1-rc.2' })
+  await link(join(bundle, 'base.patch.yml'), join(directory, 'pnpm-store.patch.yml'))
+  assert.deepEqual((await discoverLocalDshDeployment(request)).layerPaths, [join(bundle, 'base.patch.yml')])
+  await link(profilePath, join(directory, 'unsafe-profile.patch.yml'))
+  await assert.rejects(discoverLocalDshDeployment(request), { code: 'LOCAL_DSH_DEPLOYMENT_PATCH_UNSAFE' })
+  await rm(join(directory, 'unsafe-profile.patch.yml'))
   await writeFile(profilePath, '- id: not-in-base\n  config: {}\n', { mode: 0o600 })
   await assert.rejects(discoverLocalDshDeployment(request), { code: 'LOCAL_DSH_DEPLOYMENT_PATCH_INVALID' })
 })

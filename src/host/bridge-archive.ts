@@ -48,6 +48,17 @@ export function bridgeArchiveChecksum(manifest: string, name: string): string {
   if (matches.length !== 1 || !/^[a-f0-9]{64}  [a-z0-9.-]+$/.test(matches[0]!)) throw new Error('bridge_checksum_missing');
   return matches[0]!.slice(0, 64);
 }
+async function retainChecksum(filename: string, digest: string): Promise<void> {
+  const temporary = `${filename}.${randomUUID()}.tmp`;
+  try {
+    const handle = await open(temporary, 'wx', 0o600);
+    try { await handle.writeFile(digest); await handle.sync(); } finally { await handle.close(); }
+    await link(temporary, filename).catch(async error => {
+      if (!isRecord(error) || error.code !== 'EEXIST') throw error;
+      if ((await readRegular(filename, 64)).toString('ascii') !== digest) throw new Error('bridge_checksum_invalid');
+    });
+  } finally { await unlink(temporary).catch(error => { if (!missing(error)) throw error; }); }
+}
 /** Archives are retained by the DSH installation, independently of framework programs and temporary downloads. */
 export async function prepareBridgeArchive(options: { readonly home: string; readonly version: string;
   readonly signal: AbortSignal; readonly offlineRoot?: string; readonly fetch?: typeof fetch }): Promise<string> {
@@ -86,6 +97,7 @@ export async function prepareBridgeArchive(options: { readonly home: string; rea
   if (existing) {
     if (hash(existing) !== digest) throw new Error('bridge_archive_checksum_invalid');
     options.signal.throwIfAborted();
+    await retainChecksum(checksumFile, digest);
     return filename;
   }
   bytes ??= await fetchBytes(`https://github.com/${FRAMEWORK_REPOSITORY}/releases/download/v${options.version}/${name}`,
@@ -102,12 +114,7 @@ export async function prepareBridgeArchive(options: { readonly home: string; rea
       if (hash(await readRegular(filename, limit)) !== digest) throw new Error('bridge_archive_checksum_invalid');
     });
     await unlink(temporary);
-    const checksum = await open(checksumFile, 'wx', 0o600).catch(error => {
-      if (isRecord(error) && error.code === 'EEXIST') return null;
-      throw error;
-    });
-    if (checksum) { try { await checksum.writeFile(digest); await checksum.sync(); } finally { await checksum.close(); } }
-    else if ((await readRegular(checksumFile, 64)).toString('ascii') !== digest) throw new Error('bridge_checksum_invalid');
+    await retainChecksum(checksumFile, digest);
     return filename;
   } finally { await unlink(temporary).catch(error => { if (!missing(error)) throw error; }); }
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { link, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
@@ -384,3 +384,20 @@ test('assistant deployment HTTP requires explicit preview revisions and exposes 
   assert.equal((await post('apply', request(parsed))).status, 200)
   assert.equal((await post('approve', {})).status, 404)
 })
+
+
+test('work admission accepts read-only package hardlinks while writable profile and credential hardlinks remain unsafe', async context => {
+  const data = await fixture(context)
+  await link(data.basePath, join(data.directory, 'pnpm-store.patch.yml'))
+  const prepared = await data.target.prepare(data.assistant().revision, signal)
+  assert.equal((await data.target.apply(request(prepared), signal)).state, 'verified')
+  const work = await data.target.prepareWork(signal)
+  assert.equal(work.resolution.configuration.enabled, true)
+  await work.assertCurrent(signal)
+  for (const filename of [data.profilePath, data.credentialsPath]) {
+    const other = join(data.directory, 'unsafe-link')
+    await link(filename, other)
+    try { await assert.rejects(work.assertCurrent(signal), { code: 'ASSISTANT_DEPLOYMENT_TARGET_CHANGED' }) }
+    finally { await rm(other) }
+  }
+});

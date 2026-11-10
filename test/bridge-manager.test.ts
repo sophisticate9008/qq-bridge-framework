@@ -28,7 +28,7 @@ async function fixture(installed = false) {
       if (result instanceof Error) throw result;
       if (['applied', 'restart-required'].includes(result.application)) {
         bundle = { installed: true, enabled, removable: true, legacy: false, version, source: `file:${archive}` };
-        if (result.application === 'applied') liveVersion = version;
+        if (result.application === 'applied') liveVersion = enabled ? version : null;
         if (loseAfterApply) { loseAfterApply = false; throw new Error('transport_lost'); }
       }
       return result;
@@ -136,4 +136,15 @@ test('explicit removal affects only the bridge package and remains idempotent', 
   assert.equal((await setup.manager.execute(request, signal())).state, 'removed');
   assert.equal((await setup.reopen().execute(request, signal())).state, 'removed');
   assert.deepEqual(setup.events, ['remove']);
+});
+
+
+test('updating a disabled bundle preserves its disabled state without falsely requiring a restart to load it', async t => {
+  const setup = await fixture(true); t.after(setup.dispose);
+  setup.setBundle({ enabled: false });
+  const result = await setup.manager.execute({ id: randomUUID(), action: 'update', version: '2.1.0' }, signal());
+  assert.equal(result.state, 'installed-disabled');
+  assert.equal(result.restartRequired, false);
+  assert.equal(setup.bundle().enabled, false);
+  assert.equal(setup.bundle().version, '2.1.0');
 });

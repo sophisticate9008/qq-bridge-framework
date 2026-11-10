@@ -41,12 +41,13 @@ git --version
 
 ```sh
 sha256sum --ignore-missing --check SHA256SUMS
-tar -xzf qq-bridge-framework-1.13.7.tar.gz
-cd qq-bridge-framework-1.13.7
+mkdir qq-bridge-framework
+tar -xzf qq-bridge-framework-1.13.7.tar.gz --strip-components=1 -C qq-bridge-framework
+cd qq-bridge-framework
 npm ci --omit=dev
 ```
 
-校验命令核对当前目录实际下载的附件。完整包中的 `npm start` 和 `npm run cli` 使用编译后的后端与网页，无需运行构建命令。依赖按照锁文件安装到目标机器；保留平台可选依赖，供图片与排版所需的原生模块使用，不复制其他机器的 `node_modules`。
+以上是首次安装，固定目录应尚不存在；已有安装按 [更新流程](UPDATING.md) 操作。下载包带版本号，服务入口使用固定安装目录。校验命令核对当前目录实际下载的附件。完整包中的 `npm start` 和 `npm run cli` 使用编译后的后端与网页，无需运行构建命令。依赖按照锁文件安装到目标机器；保留平台可选依赖，供图片与排版所需的原生模块使用，不复制其他机器的 `node_modules`。
 
 SDK 供扩展开发；DSH 桥接插件安装到独立 DSH 项目。两者可单独下载，也可直接使用完整包中 `components/` 的同版附件。QQ 协议端、DSH、Node.js 和个人配置由部署机器提供。
 

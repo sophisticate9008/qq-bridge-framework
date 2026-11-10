@@ -96,3 +96,18 @@ test('cancelled downloads cannot return a cached success or publish an archive',
   await prepareBridgeArchive({ home: setup.home, version: '2.0.0', signal: signal(), fetch: setup.fetcher });
   await assert.rejects(prepareBridgeArchive({ home: setup.home, version: '2.0.0', signal: aborted, fetch: setup.fetcher }));
 });
+
+
+test('an interrupted checksum publication is completed after verification without redownloading the archive', async t => {
+  const setup = await fixture(); t.after(setup.dispose);
+  const archive = await prepareBridgeArchive({ home: setup.home, version: '2.0.0', signal: signal(), fetch: setup.fetcher });
+  await rm(archive + '.sha256');
+  const requests: string[] = [];
+  await prepareBridgeArchive({ home: setup.home, version: '2.0.0', signal: signal(), fetch: async input => {
+    requests.push(String(input)); return new Response(`${sum(setup.bytes)}  ${setup.name}\n`);
+  } });
+  assert.equal(requests.length, 1);
+  assert(requests[0]!.endsWith('/SHA256SUMS'));
+  assert.equal(await readFile(archive + '.sha256', 'utf8'), sum(setup.bytes));
+  await prepareBridgeArchive({ home: setup.home, version: '2.0.0', signal: signal(), fetch: async () => { throw new Error('offline'); } });
+});

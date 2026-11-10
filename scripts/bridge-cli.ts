@@ -20,8 +20,10 @@ qbf-cli bridge rollback <旧版本> [--from <已解压完整包>] [--operation-i
 qbf-cli bridge remove [--operation-id <UUID>]
 qbf-cli bridge reconcile <原操作UUID>
 
+当前管理命令使用 Linux 本机鉴权；其他平台使用 DSH 自己的插件管理界面。
 默认自动发现本机 DSH。高级接入同时指定 --home <DSH_HOME绝对目录> 和 --endpoint <本机DSH地址>。
 归档保存在 DSH_HOME/packages/qq-bridge-framework，由 DSH 原生插件管理器安装、启用和移除。
+DSH 的插件管理器需要其运行环境可调用 pnpm；缺失时在 DSH 部署端准备，不由框架安装。
 操作不会重启 DSH 或 QQ。restart-required 表示需要在 DSH 中完成重载，不能当作已加载。
 旧手工加载与目录链接先按迁移说明处理；响应未知时用原操作编号 reconcile，不重复安装。`;
 
@@ -92,7 +94,7 @@ export async function bridgeCli(args: readonly string[], output: (message: strin
       : await manager.execute({ id: operationId, action: parsed.action as BridgeOperation['action'],
         version: parsed.action === 'remove' ? null : parsed.value! }, signal);
     output(JSON.stringify(project(operation)));
-    return ['loaded', 'removed'].includes(operation.state) ? 0 : operation.state === 'restart-required' ? 2 : 1;
+    return ['loaded', 'installed-disabled', 'removed'].includes(operation.state) ? 0 : operation.state === 'restart-required' ? 2 : 1;
   } catch (error) {
     const selected = errorCode(error, error instanceof Error && /^[a-z][a-z0-9_]{0,95}$/.test(error.message) ? error.message : 'bridge_operation_failed');
     failure(`${selected}。请查看组件状态和原操作记录；安装、更新和移除仅针对桥接组件。`); return 1;

@@ -19,11 +19,11 @@ export interface BridgeOperation {
   readonly phase: 'preparing' | 'installing' | 'removing' | 'restoring' | 'verifying';
   readonly restartRequired: boolean;
   readonly state: 'preparing' | 'installing' | 'removing' | 'restoring' | 'verifying' | 'loaded'
-    | 'restart-required' | 'removed' | 'rolled-back' | 'failed' | 'unknown';
+    | 'restart-required' | 'installed-disabled' | 'removed' | 'rolled-back' | 'failed' | 'unknown';
   readonly requestId: string | null;
   readonly error: string | null;
 }
-const terminal = (value: BridgeOperation) => ['loaded', 'restart-required', 'removed', 'rolled-back', 'failed'].includes(value.state);
+const terminal = (value: BridgeOperation) => ['loaded', 'restart-required', 'installed-disabled', 'removed', 'rolled-back', 'failed'].includes(value.state);
 const safeError = (value: string) => /^[a-z][a-z0-9_-]{0,95}$/.test(value) ? value : 'bridge_operation_failed';
 function validate(value: unknown): BridgeOperation | null {
   if (value === null) return null;
@@ -35,7 +35,7 @@ function validate(value: unknown): BridgeOperation | null {
     || value.previousSource !== null && (typeof value.previousSource !== 'string' || value.previousSource.length > 4096)
     || !['preparing', 'installing', 'removing', 'restoring', 'verifying'].includes(String(value.phase))
     || typeof value.restartRequired !== 'boolean'
-    || !['preparing', 'installing', 'removing', 'restoring', 'verifying', 'loaded', 'restart-required', 'removed', 'rolled-back', 'failed', 'unknown'].includes(String(value.state))
+    || !['preparing', 'installing', 'removing', 'restoring', 'verifying', 'loaded', 'restart-required', 'installed-disabled', 'removed', 'rolled-back', 'failed', 'unknown'].includes(String(value.state))
     || value.requestId !== null && !isNativeApplicationId(value.requestId)
     || value.error !== null && (typeof value.error !== 'string' || safeError(value.error) !== value.error)) throw new Error('bridge_journal_invalid');
   return value as unknown as BridgeOperation;
@@ -79,17 +79,18 @@ export function createBridgeManager(options: { readonly directory: string; reado
     }
     if (operation.action === 'remove') {
       const current = await options.port.read(signal);
-      if (current.installed || current.enabled) throw new Error('bridge_removal_unverified');
-      const result: BridgeOperation = { ...operation, state: 'removed', error: null };
+      if (current.installed || current.enabled || current.legacy) throw new Error('bridge_removal_unverified');
+      const result: BridgeOperation = { ...operation, state: change.application === 'restart-required' ? 'restart-required' : 'removed',
+        restartRequired: change.application === 'restart-required', error: null };
       await save(result); return result;
     }
     const current = await options.port.read(signal);
     if (!current.installed || current.version !== operation.version || current.legacy
       || current.enabled !== (operation.action === 'install' ? true : operation.previousEnabled)) throw new Error('bridge_installation_unverified');
     const live = await options.describe(signal).catch(() => null);
-    const result: BridgeOperation = { ...operation,
-      restartRequired: change.application === 'restart-required' || !live || live.pluginVersion !== operation.version,
-      state: change.application === 'restart-required' || !live || live.pluginVersion !== operation.version ? 'restart-required' : 'loaded', error: null };
+    const restartRequired = change.application === 'restart-required' || current.enabled && (!live || live.pluginVersion !== operation.version);
+    const result: BridgeOperation = { ...operation, restartRequired,
+      state: restartRequired ? 'restart-required' : current.enabled ? 'loaded' : 'installed-disabled', error: null };
     await save(result); return result;
   }
   const unchanged = (before: BridgeBundle, current: BridgeBundle) => JSON.stringify(before) === JSON.stringify(current);
@@ -151,7 +152,7 @@ export function createBridgeManager(options: { readonly directory: string; reado
                 || actual.enabled !== before.enabled || !actual.installed) throw new Error('bridge_rollback_unverified');
               const live = await options.describe(signal).catch(() => null);
               operation = { ...operation, state: 'rolled-back',
-                restartRequired: restored.application === 'restart-required' || live?.pluginVersion !== before.version,
+                restartRequired: restored.application === 'restart-required' || before.enabled && live?.pluginVersion !== before.version,
                 error: safeError(failure) };
               await save(operation); return operation;
             }
@@ -183,14 +184,14 @@ export function createBridgeManager(options: { readonly directory: string; reado
             && current.enabled === operation.previousEnabled) {
             const live = await options.describe(signal).catch(() => null);
             const restored: BridgeOperation = { ...operation, state: 'rolled-back',
-              restartRequired: result?.application === 'restart-required' || live?.pluginVersion !== operation.previousVersion,
+              restartRequired: result?.application === 'restart-required' || operation.previousEnabled && live?.pluginVersion !== operation.previousVersion,
               error: operation.error ?? 'bridge_candidate_failed' };
             await save(restored); return restored;
           }
         }
         if (!result) {
           const current = await options.port.read(signal);
-          if (operation.action === 'remove' && !current.installed && !current.enabled
+          if (operation.action === 'remove' && !current.installed && !current.enabled && !current.legacy
             || operation.phase !== 'restoring' && operation.action !== 'remove' && current.installed
               && current.version === operation.version && !current.legacy
               && current.enabled === (operation.action === 'install' ? true : operation.previousEnabled)) {

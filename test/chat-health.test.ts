@@ -41,7 +41,7 @@ test('chat readiness never treats an assembled host as proof of a working extern
   }
   assert.equal(parseChatHealth({ ...ready, layers: ready.layers.map(() => ready.layers[0]) }), null);
   assert.equal(parseChatHealth({ ...ready, layers: ready.layers.map(layer => ({ ...layer, reason: '/private/credential' })) }), null);
-  assert.match(chatHealthGuidance({ id: 'dsh', state: 'unavailable', reason: 'timeout' }), /本机受管 DSH.*一键恢复聊天.*远程 DSH.*部署端恢复/);
+  assert.match(chatHealthGuidance({ id: 'dsh', state: 'unavailable', reason: 'timeout' }), /DSH 的部署端.*服务.*网络.*框架会重新连接/);
   assert.match(chatHealthGuidance({ id: 'tools', state: 'recovering', reason: null }), /不重做/);
   assert.match(chatHealthGuidance({ id: 'tools', state: 'unavailable', reason: 'dsh_invalid_response' }), /无法核验.*一键恢复聊天.*未确认.*不重复执行/);
 });

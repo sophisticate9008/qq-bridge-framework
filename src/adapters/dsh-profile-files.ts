@@ -63,7 +63,7 @@ function dynamic(value: JsonValue): boolean {
   return false
 }
 
-async function safePath(filename: string, allowMissing: boolean): Promise<boolean> {
+async function safePath(filename: string, allowMissing: boolean, readOnlyLayer = false): Promise<boolean> {
   if (!isAbsolute(filename) || resolve(filename) !== filename || filename.includes('\0')) fail('explicit_dsh_path_required')
   if (!canonicalPathMatches(await realpath(dirname(filename)), dirname(filename))) fail('dsh_symlink_path_rejected')
   const parent = await lstat(dirname(filename))
@@ -73,14 +73,14 @@ async function safePath(filename: string, allowMissing: boolean): Promise<boolea
     throw error
   })
   if (!stat) return false
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 1_048_576
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 && !readOnlyLayer || stat.size > 1_048_576
     || !trustedPermissions(filename, stat)
     || typeof process.getuid === 'function' && stat.uid !== process.getuid()) fail('dsh_file_unsafe')
   return true
 }
 
-async function readFile(filename: string, secret = false, allowMissing = false): Promise<PrivateFile> {
-  if (!await safePath(filename, allowMissing)) return { path: filename, text: '', exists: false }
+async function readFile(filename: string, secret = false, allowMissing = false, readOnlyLayer = false): Promise<PrivateFile> {
+  if (!await safePath(filename, allowMissing, readOnlyLayer)) return { path: filename, text: '', exists: false }
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const before = await handle.stat()
@@ -110,7 +110,7 @@ async function readProfile(target: DeploymentTarget): Promise<ProfileRead> {
   const paths = [...target.layerPaths ?? [], target.profilePath, target.credentialsPath]
   if (paths.length > 34 || new Set(paths).size !== paths.length) fail('dsh_target_paths_ambiguous')
   const files: PrivateFile[] = []
-  for (const path of paths) files.push(await readFile(path, path === target.credentialsPath, path === target.profilePath || path === target.credentialsPath))
+  for (const path of paths) files.push(await readFile(path, path === target.credentialsPath, path === target.profilePath || path === target.credentialsPath, path !== target.profilePath && path !== target.credentialsPath))
   const profile = parse(files[files.length - 2]!.text || '[]\n')
   const credentials = parse(files[files.length - 1]!.text)
   const credentialRoot = object(values(credentials)) ?? (credentials.contents === null ? {} : undefined)

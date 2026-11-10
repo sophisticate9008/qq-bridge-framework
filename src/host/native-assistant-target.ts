@@ -1,7 +1,7 @@
 import { privatePermissions, trustedPermissions, canonicalPathMatches } from '../storage/file-security.ts';
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, realpath } from 'node:fs/promises'
+import { lstat, open, realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { FrameworkError, isRecord, snapshot } from '../core/values.ts'
 import type { NativeAssistantDeploymentRequest, NativeAssistantDeploymentSnapshot } from '../contracts/native-assistant-target.ts'
@@ -265,13 +265,24 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
       const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
       try {
         const before = await handle.stat()
-        if (!before.isFile() || before.nlink !== 1 || before.size > 1_048_576 || !trustedPermissions(filename, before)
+        const readOnlyLayer = filename !== target.profilePath && filename !== target.credentialsPath
+        if (!before.isFile() || before.nlink !== 1 && !readOnlyLayer || before.size > 1_048_576 || !trustedPermissions(filename, before)
           || typeof process.getuid === 'function' && before.uid !== process.getuid()
           || filename === target.credentialsPath && !privatePermissions(filename, before)) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
-        const bytes = await handle.readFile()
-        const after = await handle.stat()
+        const buffer = Buffer.alloc(before.size + 1)
+        let length = 0
+        while (length < buffer.length) {
+          signal.throwIfAborted()
+          const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null)
+          if (bytesRead === 0) break
+          length += bytesRead
+        }
+        const bytes = buffer.subarray(0, length)
+        const after = await handle.stat(), current = await lstat(filename)
         if (bytes.length !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs
-          || after.ctimeMs !== before.ctimeMs || after.mode !== before.mode || after.nlink !== 1) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
+          || after.ctimeMs !== before.ctimeMs || after.mode !== before.mode || after.nlink !== before.nlink
+          || current.isSymbolicLink() || current.ino !== before.ino || current.dev !== before.dev
+          || current.size !== before.size || current.mtimeMs !== before.mtimeMs || current.ctimeMs !== before.ctimeMs) fail('ASSISTANT_DEPLOYMENT_TARGET_CHANGED')
         signal.throwIfAborted()
         return [filename, createHash('sha256').update(bytes).digest('hex')]
       } finally { await handle.close() }

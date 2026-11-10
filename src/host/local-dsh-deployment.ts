@@ -64,14 +64,14 @@ async function metadata(filename: string, signal: AbortSignal): Promise<Record<s
   return value
 }
 
-async function patch(filename: string, signal: AbortSignal, optional = false): Promise<{ readonly path: string; readonly length: number } | null> {
+async function patch(filename: string, signal: AbortSignal, optional = false, readOnlyPackage = false): Promise<{ readonly path: string; readonly length: number } | null> {
   let path: string
   try { path = await realpath(filename) } catch (error) {
     if (optional && missing(error)) return null
     throw error
   }
   const information = await lstat(path)
-  if (!information.isFile() || information.isSymbolicLink() || information.nlink !== 1 || (information.mode & 0o022) !== 0) fail('LOCAL_DSH_DEPLOYMENT_PATCH_UNSAFE')
+  if (!information.isFile() || information.isSymbolicLink() || information.nlink !== 1 && !readOnlyPackage || (information.mode & 0o022) !== 0) fail('LOCAL_DSH_DEPLOYMENT_PATCH_UNSAFE')
   let value: unknown
   const content = await text(path, signal)
   try { value = readStaticDshProfileValues(content) }
@@ -221,7 +221,7 @@ export async function discoverLocalDshDeployment(request: LocalDshDeploymentRequ
       const files = typeof declaration === 'string' ? [declaration] : declaration
       if (!Array.isArray(files) || files.length === 0 || files.length > 32 || !files.every(filename => typeof filename === 'string'
         && !isAbsolute(filename) && !/[\u0000-\u001f\u007f]/.test(filename) && !relative(directory, resolve(directory, filename)).startsWith('..'))) fail('LOCAL_DSH_DEPLOYMENT_BUNDLE_INVALID')
-      for (const filename of files as string[]) layers.push((await patch(resolve(directory, filename), signal))!.path)
+      for (const filename of files as string[]) layers.push((await patch(resolve(directory, filename), signal, false, true))!.path)
     }
     const profile = await patch(join(profileDirectory, 'cordis.patch.yml'), signal, true)
     let profilePath = profile?.path ?? join(profileDirectory, 'cordis.patch.yml')

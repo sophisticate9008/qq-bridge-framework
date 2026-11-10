@@ -27,5 +27,8 @@ export function parseBridgeChange(value: unknown): BridgeChange | null {
       || !/^[a-z][a-z0-9-]{0,63}$/.test(value.error.code))) return null;
   return { application: value.application as BridgeChange['application'], changed: value.changed,
     version: typeof value.version === 'string' ? value.version : null,
-    error: isRecord(value.error) ? String(value.error.code) : null };
+    error: isRecord(value.error) ? value.error.code === 'operation-error'
+      && typeof value.error.diagnostic === 'string' && value.error.diagnostic.length <= 8192
+      && /(?:^|\n)spawn pnpm ENOENT(?:\n|$)/.test(value.error.diagnostic)
+      ? 'package-manager-unavailable' : String(value.error.code) : null };
 }

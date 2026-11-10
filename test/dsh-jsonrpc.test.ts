@@ -25,7 +25,8 @@ const promptRequest = () => ({ sessionId: 'session-1', requestId: 'prompt-1', mo
 
 test('DSH question channel exposes a broken wire and reconnects without issuing model requests', async context => {
   const fake = await fixture(context, { snapshot: { type: 'ready', clientId: 'question-client' } })
-  const client = fake.port()
+  // Functional reconnect coverage has its own setup budget; deadline tests below keep explicit short limits.
+  const client = fake.port({ timeoutMs: 2000 })
   assert.deepEqual(client.interactionStatus?.(), { state: 'idle', lastError: null })
   const first = await client.connectInteractions!({ signal: signal(), onEvent() {} })
   assert.deepEqual(client.interactionStatus?.(), { state: 'connected', lastError: null })
@@ -319,7 +320,7 @@ test('DSH rechecks the off classification after selection and treats failed evid
     return true
   } })
   const off = { ...sessionDefinition, model: { ...sessionDefinition.model, reasoningEffort: 'off' as const } }
-  const client = fake.port({ sessionDefinition: off, presetBindings: [{ agentPreset: 'framework-chat', definition: off }] })
+  const client = fake.port({ timeoutMs: 2000, sessionDefinition: off, presetBindings: [{ agentPreset: 'framework-chat', definition: off }] })
   const explicit = withReasoning({ efforts: [{ id: 'off', name: 'Off' }, { id: 'high', name: 'High' }], defaultEffort: 'high' })
   for (const changed of [
     withReasoning({ efforts: [{ id: 'high', name: 'High' }] }),

@@ -1,3 +1,4 @@
+import { parseBridgeChange } from '../src/contracts/bridge-management.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
@@ -44,4 +45,13 @@ test('native plugin management uses owner transport and only the fixed bridge pa
   const count = calls.length;
   assert.throws(() => port.install('relative.tgz', id, true, signal));
   assert.equal(calls.length, count);
+});
+
+
+test('missing DSH package manager has a specific safe code without forwarding external diagnostics', () => {
+  const result = parseBridgeChange({ application: 'failed', changed: false, stage: 'install', target: 'bridge',
+    error: { code: 'operation-error', diagnostic: 'Command failed with ENOENT: pnpm add /private/path.tgz\nspawn pnpm ENOENT' } });
+  assert.deepEqual(result, { application: 'failed', changed: false, version: null, error: 'package-manager-unavailable' });
+  assert.equal(parseBridgeChange({ application: 'failed', changed: false,
+    error: { code: 'operation-error', diagnostic: 'secret private response' } })?.error, 'operation-error');
 });
