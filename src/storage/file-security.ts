@@ -37,7 +37,9 @@ $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
 $allowed = @($current.Value,$system.Value,$admins.Value)
 $trusted = $owner -in $allowed
 $private = $trusted
-$ancestor = $trusted
+# Windows owns the system volume root through its Modules Installer service.
+# Only ancestor traversal accepts that owner; source files and private storage retain the narrower owner policy.
+$ancestor = $trusted -or $owner -eq 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
 $rules = $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
 if ($rules.Count -eq 0) { $trusted=$false; $private=$false; $ancestor=$false }
 foreach ($rule in $rules) {
