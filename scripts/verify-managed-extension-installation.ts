@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtemp,mkdir,readFile,readdir,rm,writeFile } from 'node:fs/promises'
-import {join} from 'node:path'
+import {dirname,join} from 'node:path'
+import {execFileSync} from 'node:child_process'
 import {createExtensionRegistry} from '../src/host/managed-extensions.ts'
 import {loadSelectedNativeBootstrap} from './bootstrap-loader.ts'
 import {managedExtensionCli} from './managed-extension-cli.ts'
@@ -46,6 +47,12 @@ export async function verifyManagedExtensionInstallation(root:string):Promise<vo
     const logs=join(directory,'admin/extensions/install-logs')
     for(const name of (await readdir(logs).catch(()=>[])).sort().slice(0,8)) {
       console.error(`SDK installation fixture ${name}:\n${(await readFile(join(logs,name),'utf8')).slice(-8192)}`)
+    }
+    if(process.platform==='win32') {
+      for(let parent=directory,depth=0;depth<32;depth++) {
+        console.error(execFileSync(join(process.env.SystemRoot??'C:/Windows','System32/icacls.exe'),[parent],{encoding:'utf8',maxBuffer:16384}).slice(-8192))
+        const next=dirname(parent);if(next===parent)break;parent=next
+      }
     }
     throw error
   } finally {await rm(directory,{recursive:true,force:true})}

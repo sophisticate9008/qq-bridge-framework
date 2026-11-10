@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { FrameworkError, isRecord } from '../core/values.ts';
 
 const windows = process.platform === 'win32';
-const aclCache = new Map<string, { identity: string; trusted: boolean; private: boolean }>();
+const aclCache = new Map<string, { identity: string; trusted: boolean; private: boolean; ancestor: boolean }>();
 // Paths are JSON on stdin, never interpolated into a command or PowerShell code.
 const aclScript = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -37,17 +37,20 @@ $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
 $allowed = @($current.Value,$system.Value,$admins.Value)
 $trusted = $owner -in $allowed
 $private = $trusted
+$ancestor = $trusted
 $rules = $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
-if ($rules.Count -eq 0) { $trusted=$false; $private=$false }
+if ($rules.Count -eq 0) { $trusted=$false; $private=$false; $ancestor=$false }
 foreach ($rule in $rules) {
   if (($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
   if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $rule.IdentityReference.Value -notin $allowed) {
     $private=$false
     # Data/append/extended attributes/attributes/delete/change DACL/take owner, plus generic write/all.
     if (([long]$rule.FileSystemRights -band 0x500d0156) -ne 0) { $trusted=$false }
+    # An ancestor may allow adding siblings; replacing/deleting existing children or changing security remains forbidden.
+    if (([long]$rule.FileSystemRights -band 0x500d0150) -ne 0) { $ancestor=$false }
   }
 }
-@{trusted=[bool]$trusted; private=[bool]$private}
+@{trusted=[bool]$trusted; private=[bool]$private; ancestor=[bool]$ancestor}
 })
 [Console]::Out.WriteLine((ConvertTo-Json -InputObject $results -Compress))
 } catch { [Console]::Out.WriteLine('{"error":true}') }
@@ -104,26 +107,26 @@ export function primePermissions(filenames: readonly string[]): void {
       const value: unknown = results[index];
       const after = lstatSync(path);
       if (stat.isSymbolicLink() || identity(stat) !== identity(after) || !isRecord(value)
-        || typeof value.trusted !== 'boolean' || typeof value.private !== 'boolean')
+        || typeof value.trusted !== 'boolean' || typeof value.private !== 'boolean' || typeof value.ancestor !== 'boolean')
         throw new FrameworkError('FILE_SECURITY_CHANGED', 'File changed during permission verification.');
       if (aclCache.size >= 512) aclCache.delete(aclCache.keys().next().value!);
-      aclCache.set(path.toLowerCase(), { identity: identity(after), trusted: value.trusted, private: value.private });
+      aclCache.set(path.toLowerCase(), { identity: identity(after), trusted: value.trusted, private: value.private, ancestor: value.ancestor });
     });
   }
 }
 function acl(filename: string, stat: Stats, protect = false) {
   if (stat.isSymbolicLink() || !stat.isDirectory() && !stat.isFile() || stat.isFile() && stat.nlink !== 1)
-    return { trusted: false, private: false };
+    return { trusted: false, private: false, ancestor: false };
   const key = resolve(filename).toLowerCase();
   const before = identity(stat), cached = aclCache.get(key);
   if (!protect && cached?.identity === before) return cached;
   const result = readAcls([{ path: resolve(filename), protect }])[0];
   const after = lstatSync(filename);
-  if (!isRecord(result) || typeof result.trusted !== 'boolean' || typeof result.private !== 'boolean'
+  if (!isRecord(result) || typeof result.trusted !== 'boolean' || typeof result.private !== 'boolean' || typeof result.ancestor !== 'boolean'
     || after.isSymbolicLink() || stat.dev !== after.dev || stat.ino !== after.ino || !protect && before !== identity(after))
     throw new FrameworkError('FILE_SECURITY_CHANGED', 'File identity changed during permission verification.');
   if (aclCache.size >= 512) aclCache.delete(aclCache.keys().next().value!);
-  const saved = { identity: identity(after), trusted: result.trusted, private: result.private };
+  const saved = { identity: identity(after), trusted: result.trusted, private: result.private, ancestor: result.ancestor };
   aclCache.set(key, saved);
   return saved;
 }
@@ -135,6 +138,12 @@ export function privatePermissions(filename: string, metadata: Stats, exactMode?
 export function trustedPermissions(filename: string, metadata: Stats): boolean {
   if (!windows) return (metadata.mode & 0o022) === 0;
   try { return acl(filename, metadata).trusted; } catch { return false; }
+}
+/** Windows ancestors may permit new siblings, but cannot grant strangers replacement or deletion of the trusted subtree. */
+export function trustedAncestorPermissions(filename: string, metadata: Stats): boolean {
+  if (!windows) return trustedPermissions(filename, metadata);
+  if (!metadata.isDirectory()) return false;
+  try { return acl(filename, metadata).ancestor; } catch { return false; }
 }
 export function securePermissions(filename: string, mode: number): void {
   if (!windows) { chmodSync(filename, mode); return; }
