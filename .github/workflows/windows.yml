@@ -36,12 +36,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24.12.0'
+      - name: 保护隔离源码工作目录的 ACL
+        run: node --input-type=module -e "import {securePermissions} from './src/storage/file-security.ts'; securePermissions(process.cwd(),0o700);"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test test/windows-file-security.test.ts
-      - run: node --test --test-name-pattern='real local WS text passes through native host' test/native-chat-runtime.test.ts
       - run: npm run build:sdk
       - name: 配套 SDK 扩展创建、预检与加载
         run: node --input-type=module -e "import {verifyManagedExtensionInstallation} from './scripts/verify-managed-extension-installation.ts'; await verifyManagedExtensionInstallation(process.cwd());"
+      - run: node --test --test-name-pattern='real local WS text passes through native host' test/native-chat-runtime.test.ts
   package:
     needs: html-renderer
     if: ${{ !inputs.source_only }}

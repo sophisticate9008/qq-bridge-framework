@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdtemp,mkdir,readFile,readdir,rm,writeFile } from 'node:fs/promises'
+import { mkdtemp,readFile,readdir,rm,writeFile } from 'node:fs/promises'
 import {dirname,join} from 'node:path'
+import {tmpdir} from 'node:os'
 import {execFileSync} from 'node:child_process'
 import {createExtensionRegistry} from '../src/host/managed-extensions.ts'
 import {loadSelectedNativeBootstrap} from './bootstrap-loader.ts'
@@ -9,9 +10,7 @@ import {runCli} from './cli.ts'
 
 /** The SDK job prepares the real package first; ordinary source tests require no SDK build or network. */
 export async function verifyManagedExtensionInstallation(root:string):Promise<void> {
-  const parent=join(root,'private/maintenance/sdk-installation-checks')
-  await mkdir(parent,{recursive:true,mode:0o700})
-  const directory=await mkdtemp(join(parent,'case-'))
+  const directory=await mkdtemp(join(tmpdir(),'qbf-sdk-installation-'))
   try {
     const configuration=join(directory,'admin/config.json'),output:string[]=[],errors:string[]=[]
     assert.equal(await runCli(['init','--config',configuration],{cwd:directory,env:{},stdout:x=>output.push(x),stderr:x=>errors.push(x)}),0,errors.join('\n'))
