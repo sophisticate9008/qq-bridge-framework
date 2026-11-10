@@ -53,7 +53,7 @@ qbf-cli bridge install 2.0.0
 
 归档经同版 SHA256SUMS 核验后保存在 `DSH_HOME/packages/qq-bridge-framework/`，DSH 将包安装到自己的依赖存储。运行入口固定为 `@qq-bridge-framework/dsh-bridge-plugin`，不链接框架版本目录。也可以在 DSH 自己的插件管理界面安装核验后的持久归档；不要同时保留手工 Loader 行。
 
-`status` 分别显示安装版本、实际加载版本、启用状态与原操作。命令不会启动或重启 DSH、QQ。退出码 2／`restart-required` 表示依赖已经安装但尚需在 DSH 中完成加载；重载后再次检查实际版本，再让框架重新连接。当前支持的原生管理接口来自 DSH `0.2.1-rc.2`，其进程 PATH 须能调用 pnpm。缺失时请通过 DSH 自己的安装/启动流程准备；框架不代为安装或重启引擎。
+`status` 分别显示安装版本、实际加载版本、启用状态与原操作。命令不会启动或重启 DSH、QQ。退出码 2／`restart-required` 表示依赖已经安装但尚需在 DSH 中完成加载；重载后再次检查实际版本，再让框架重新连接。当前支持的原生管理接口来自 DSH `0.2.1-rc.2`，其进程 PATH 须能调用 pnpm。缺失时请通过 DSH 自己的安装/启动流程准备；组件维护命令不代为安装或重启引擎。日常整套更新会协调配套桥接组件，必要时通过受管维护入口重载本机 DSH；DSH 本体仍单独维护。
 
 更新、回滚、卸载和旧目录链接迁移见 [安装生命周期](INSTALLATION_LIFECYCLE.md)。归档含公开清单、组合包 patch 与编译插件；不含框架配置、凭据、会话或宿主依赖。开发者打包仍使用 `npm --prefix packages/dsh-bridge-plugin run build` 与该目录下的 `npm pack --ignore-scripts`。
 

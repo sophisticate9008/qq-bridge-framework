@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import { resolveLivePath } from './runtime-configuration.ts';
 import { chmod, copyFile, lstat, mkdir, readFile, readlink, rename, symlink, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { registerProductCommands } from '../src/host/product-commands.ts';
 import { isRecord } from '../src/core/values.ts';
 
 class InstallError extends Error {}
 
-const root = fileURLToPath(new URL('../', import.meta.url));
+const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
+const root = basename(sourceRoot) === 'dist' ? dirname(sourceRoot) : sourceRoot;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -26,7 +29,7 @@ async function main(): Promise<void> {
   const adminPath = options.get('--admin-config') ?? resolveLivePath(root, 'framework-admin.json');
   const bootPath = options.get('--boot');
   const target = join(root, 'ops/qbf-cli');
-  const cliTarget = join(root, 'scripts/cli.ts');
+  const cliTarget = join(root, existsSync(join(root, '.git')) ? 'scripts/cli.ts' : 'dist/scripts/cli.js');
   const cli = join(binDirectory, 'qbf-cli');
   if (!/^\/[A-Za-z0-9_./-]+$/.test(cli)) throw new InstallError('命令安装路径不支持空格或特殊字符。');
   const adminSource = await readFile(adminPath, 'utf8');
@@ -38,7 +41,8 @@ async function main(): Promise<void> {
     if (isRecord(error) && error.code === 'ENOENT') return null;
     throw error;
   });
-  if (originalLink && (!originalLink.isSymbolicLink() || resolve(binDirectory, await readlink(cli)) !== resolve(cliTarget))) throw new InstallError('qbf-cli 已被其他程序占用。');
+  if (originalLink && (!originalLink.isSymbolicLink() || ![join(root, 'scripts/cli.ts'), join(root, 'dist/scripts/cli.js')]
+    .includes(resolve(binDirectory, await readlink(cli))))) throw new InstallError('qbf-cli 已被其他程序占用。');
 
   let bootSource: string | undefined;
   let bootNext: string | undefined;
@@ -71,18 +75,26 @@ async function main(): Promise<void> {
   await chmod(target, 0o755);
   await chmod(cliTarget, 0o755);
   if (!originalLink) await symlink(cliTarget, cli);
+  else if (resolve(binDirectory, await readlink(cli)) !== cliTarget) {
+    const temporary = join(binDirectory, `.qbf-cli-${randomUUID()}`);
+    try { await symlink(cliTarget, temporary); await rename(temporary, cli); }
+    finally { await unlink(temporary).catch(() => undefined); }
+  }
   await replace(adminPath, adminSource, `${JSON.stringify({ ...admin, serviceManager: target }, null, 2)}\n`, 0o600);
   if (bootPath && bootSource !== undefined && bootNext !== undefined) {
     const mode = (await lstat(bootPath)).mode & 0o777;
     await replace(bootPath, bootSource, bootNext, mode);
   }
+  const registrations: Array<{ path: string; target: string } | { path: string; sha256: string }> = [{ path: cli, target: cliTarget }];
   if (process.getuid?.() === 0) {
     const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
     const logDirectory = join(root, 'data/logs');
     await mkdir(logDirectory, { recursive: true, mode: 0o700 });
-    await writeFile('/etc/cron.d/qq-bridge-framework-storage',
-      `# Managed runtime retention; the service manager owns the operation lock.\n17 * * * * root ${quote(process.execPath)} ${quote(join(root, 'scripts/service-manager.ts'))} maintenance --apply >> ${quote(join(logDirectory, 'storage-maintenance.log'))} 2>&1\n`, { mode: 0o644 });
+    const cron = `# Managed runtime retention; the service manager owns the operation lock.\n17 * * * * root ${quote(target)} maintenance --apply >> ${quote(join(logDirectory, 'storage-maintenance.log'))} 2>&1\n`;
+    await writeFile('/etc/cron.d/qq-bridge-framework-storage', cron, { mode: 0o644 });
+    registrations.push({ path: '/etc/cron.d/qq-bridge-framework-storage', sha256: createHash('sha256').update(cron).digest('hex') });
   }
+  await registerProductCommands(root, registrations);
   console.log('已安装 qbf-cli 并更新管理配置。' + (bootPath ? ' boot 已切换到本框架运维入口。' : ''));
   console.log('已有进程保持运行；管理服务下次启动时读取新的维护入口。备份位于 private/maintenance/ops-backups。');
 }

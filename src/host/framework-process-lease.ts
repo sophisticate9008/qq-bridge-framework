@@ -15,9 +15,13 @@ async function existing(filename: string) {
     return { metadata, value: { pid: Number(value.pid), started: value.started as string | null, id: value.id } };
   } catch (error) { if (isRecord(error) && error.code === 'ENOENT') return null; throw error; }
 }
-export async function assertFrameworkProcessStopped(root: string): Promise<void> {
+export async function assertFrameworkProcessStopped(root: string, includeSupervisor = false): Promise<void> {
   const lease = await existing(join(root, 'data/framework-runtime.lock'));
   if (lease && await chatRepairProcessAlive(lease.value)) throw new Error('update_runtime_still_running');
+  if (includeSupervisor) {
+    const supervisor = await existing(join(root, 'data/framework-supervisor.lock'));
+    if (supervisor && await chatRepairProcessAlive(supervisor.value)) throw new Error('update_supervisor_still_running');
+  }
 }
 export async function acquireFrameworkProcessLease(root: string, kind: 'runtime' | 'supervisor'): Promise<() => Promise<void>> {
   await ensurePrivateDirectory(join(root, 'data'));

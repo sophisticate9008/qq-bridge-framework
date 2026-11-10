@@ -1,2 +1,6 @@
 #!/bin/sh
-exec node "$(dirname "$(readlink -f "$0")")/../scripts/service-manager.ts" "$@"
+QBF_OPS_ROOT="$(dirname "$(readlink -f "$0")")/.."
+if [ ! -d "$QBF_OPS_ROOT/.git" ] && [ -f "$QBF_OPS_ROOT/dist/scripts/service-manager.js" ]; then
+  exec node "$QBF_OPS_ROOT/dist/scripts/service-manager.js" "$@"
+fi
+exec node "$QBF_OPS_ROOT/scripts/service-manager.ts" "$@"

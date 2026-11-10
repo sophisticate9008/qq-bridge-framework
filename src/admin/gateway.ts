@@ -713,7 +713,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     if (route.method === 'POST') {
       if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') {
         const update = await readFrameworkUpdateState(frameworkInstallationRoot());
-        if (update && ['ready', 'applying', 'verifying'].includes(update.state)) throw new AdminRequestError(409, 'framework_update_busy');
+        if (update && ['ready', 'applying', 'verifying', 'unknown'].includes(update.state)) throw new AdminRequestError(409, 'framework_update_busy');
       }
       for (const repair of (await repairStorage.read()).value.records) {
         if ((await projectChatRepair(repair)).state !== 'running') continue;

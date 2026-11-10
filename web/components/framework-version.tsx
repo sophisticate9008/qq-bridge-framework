@@ -52,8 +52,11 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
     } catch (failure) { setError(`${errorMessage(failure)} 正在核对原更新状态，请勿重复提交。`); }
   }
   const updateLabels: Record<FrameworkUpdateState['state'], string> = { preparing: '下载、校验并安装新包依赖', ready: '等待框架停止后更新',
-    applying: '备份并替换程序', verifying: '核对新版本启动', completed: '更新完成，请刷新页面', failed: '更新未完成，原版本保留', 'rolled-back': '启动未通过，已恢复原程序' };
+    applying: '备份并更新框架及内置组件', verifying: '核对版本、聊天与助手', completed: '整套更新完成，请刷新页面', failed: '更新未完成，请查看原操作', 'rolled-back': '已恢复原组件组合', unknown: '结果待核对，保留原更新编号并暂停启动' };
   const updating = submitted || !!update && !['completed', 'failed', 'rolled-back'].includes(update.state);
+  const productLabels = { prepared: '组件及回滚来源已核验', stopping: '停止并排空框架', bridge: '更新并加载桥接组件', runtime: '替换框架程序',
+    starting: '核验新组合启动', completed: '整套更新完成', 'rollback-bridge': '恢复原桥接组件', 'rollback-runtime': '恢复原框架程序',
+    'rollback-start': '核验原组合恢复', 'rolled-back': '原组合已恢复', unknown: '结果待核对，已暂停启动' };
   useEffect(() => {
     if (!connected) { setStatus(null); setCheckFailed(false); return; }
     const controller = new AbortController();
@@ -104,19 +107,20 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
             {status?.latestVersion && status.latestVersion !== status.currentVersion && <p className="text-xs text-muted-foreground">最新发行：v{status.latestVersion}</p>}
             {error && <p className="text-xs leading-5 text-destructive" role="alert">{error}</p>}
             {status?.majorUpgrade && <p className="text-xs leading-5 text-amber-600 dark:text-amber-400">此更新跨越主版本，请先阅读迁移说明并备份数据。</p>}
-            {update && <p className="text-xs leading-5" role="status">更新 v{update.version}：{updateLabels[update.state]}</p>}
+            {update && <p className="text-xs leading-5" role="status">更新 v{update.version}：{update.productPhase ? productLabels[update.productPhase] : updateLabels[update.state]}</p>}
+            {update?.state === 'unknown' && <p className="text-xs leading-5">在运行机器核对原更新：<code>qbf-cli update --reconcile {update.id}</code></p>}
             {updateAvailable && status?.state === 'available' && !status.majorUpgrade && <Button disabled={updating} onClick={() => void install()}>{updating ? '更新处理中' : '更新框架'}</Button>}
             {status && <a className="mt-1 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href={status.releaseUrl} target="_blank" rel="noreferrer" aria-label="查看发行说明与下载"><ExternalLink className="size-3.5" />查看发布</a>}
           </div>
           <details className="border-t px-4 py-3 text-xs text-muted-foreground">
             <summary className="cursor-pointer">更新方式</summary>
             <div className="mt-2 grid gap-2 leading-5">
-              <p>框架与 DSH 独立更新。桥接组件随发行包提供，由 DSH 的插件管理器安装、启用和移除。</p>
+              <p>框架与内置桥接组件按同一发行清单协调更新，插件由 DSH 原生管理器安装和移除；需要加载时受控重启已托管的 DSH。DSH 本体和 QQ 独立维护。</p>
               <p>{status?.installation === 'docker' ? 'Docker 使用新镜像重新创建容器，继续挂载原数据卷。'
                 : status?.installation === 'source' ? '当前为源码安装，请使用 Git 更新并执行依赖安装与构建。'
                   : '完整发行包支持覆盖程序文件并保留 runtime、private 及自定义文件。更新前停止框架并备份数据。'}</p>
               {status?.installation === 'archive' && <p>{updateAvailable
-                ? '点击更新后会下载并校验新包，短暂停止框架后替换程序；配置、会话和私人扩展保留，启动失败自动回滚程序。'
+                ? '点击更新后统一下载、校验并备份框架和配套桥接组件，核验实际加载与启动结果；配置、会话和私人扩展保留。失败时恢复原组合，结果未知时沿原编号核对。'
                 : '使用 npm run cli -- serve 启动完整发行包后可在此更新；也可停止框架后执行 npm run cli -- update /解压后的新包目录。'}</p>}
             </div>
           </details>

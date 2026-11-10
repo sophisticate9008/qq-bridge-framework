@@ -119,6 +119,7 @@ const GENERAL_HELP = `QQ Bridge Framework 命令行
   qbf-cli test --browser [--target <项目>] [--with-deps]
   qbf-cli install --browser [--skip-browser-download] [--with-deps]
   qbf-cli uninstall --browser
+  qbf-cli uninstall --framework [--keep-bridge] [--operation-id <UUID>]
   qbf-cli build
 
 配置优先级：--config > QQ_BRIDGE_FRAMEWORK_CONFIG > 已登记的本机配置 > 当前目录 data/admin/config.json
@@ -677,6 +678,10 @@ async function start(configurationFilename: string, adminOnly: boolean, output: 
 async function startRuntime(configurationFilename: string, adminOnly: boolean, output: (message: string) => void,
   bootstrapFilename?: string): Promise<void> {
   if (existsSync(join(PROJECT_ROOT, '.framework-update.lock'))) throw new CliOperationError('框架更新尚未完成，请使用受监督启动入口恢复或执行更新回滚。');
+  const { readProductUpdate, productUpdateAllowsStart } = await import('../src/host/product-update.ts');
+  if (!productUpdateAllowsStart(await readProductUpdate(PROJECT_ROOT))) throw new CliOperationError('整套组件更新尚未核对完成，请使用受监督恢复或 qbf-cli update --reconcile <原操作编号>。');
+  const { productUninstallPending } = await import('../src/host/product-uninstall.ts');
+  if (await productUninstallPending(PROJECT_ROOT)) throw new CliOperationError('本次卸载尚未完成，请用原卸载编号继续核对，保留配置与会话。');
   const configuration = loadGatewayAdminConfiguration(configurationFilename);
   const bootstrap = await loadSelectedNativeBootstrap(configurationFilename, bootstrapFilename);
   await prepareStartupAssets();
@@ -782,6 +787,12 @@ export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAU
   if (argumentsList[0] === 'update') {
     try { const { updateFrameworkCli } = await import('./update-framework.ts'); await updateFrameworkCli(argumentsList.slice(1), PROJECT_ROOT, io.stdout); return 0; }
     catch (error) { io.stderr(error instanceof Error ? error.message : '更新失败'); return 1; }
+  }
+  if (argumentsList[0] === 'uninstall' && argumentsList.includes('--framework')) {
+    try {
+      const { uninstallFrameworkCli } = await import('./uninstall-framework.ts');
+      await uninstallFrameworkCli(argumentsList.slice(1), PROJECT_ROOT, io.stdout); return 0;
+    } catch (error) { io.stderr(error instanceof Error ? error.message : '卸载未完成，请保留原操作编号核对。'); return 1; }
   }
   const managed = serviceArguments(argumentsList);
   if (managed) return new Promise<number>(resolvePromise => {

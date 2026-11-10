@@ -8,13 +8,15 @@ import { frameworkUpdateDirectory, frameworkUpdateWasReceived, readFrameworkUpda
 import { ensurePrivateDirectory, withDirectoryWriteLock } from '../storage/private-json.ts';
 import { AdminRequestError, type AdminRoute } from './server.ts';
 import { frameworkInstallationRoot } from './framework-release.ts';
+import { readProductUpdate } from '../host/product-update.ts';
 
 export function createFrameworkUpdateRoutes(version: string): AdminRoute[] {
   const root = frameworkInstallationRoot(), directory = frameworkUpdateDirectory(root);
   const available = process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1' && process.env.QQ_BRIDGE_FRAMEWORK_CONTAINER !== '1'
     && existsSync(join(root, 'distribution.json')) && !existsSync(join(root, '.git'));
   return [{ method: 'GET', pathname: '/api/framework/update', async handle() {
-    return { schema: 1, available, operation: await readFrameworkUpdateState(root) };
+    const operation = await readFrameworkUpdateState(root), product = await readProductUpdate(root);
+    return { schema: 1, available, operation: operation && product?.id === operation.id ? { ...operation, productPhase: product.phase } : operation };
   } }, { method: 'POST', pathname: '/api/framework/update', maxRequestBytes: 1024, async handle({ body, query, signal }) {
     if (query.size || !body || Object.keys(body).length !== 2 || !isNativeApplicationId(body.operationId) || !releaseVersion(body.version)) throw new AdminRequestError(400, 'update_request_invalid');
     if (!available) throw new AdminRequestError(409, 'update_supervisor_required');
@@ -25,6 +27,8 @@ export function createFrameworkUpdateRoutes(version: string): AdminRoute[] {
       signal.throwIfAborted();
       const previous = await readFrameworkUpdateState(root);
       if (previous?.id === id) return { schema: 1, available, operation: previous };
+      const product = await readProductUpdate(root);
+      if (product && !['completed', 'rolled-back'].includes(product.phase)) throw new AdminRequestError(409, 'update_busy');
       if (await frameworkUpdateWasReceived(root, id)) throw new AdminRequestError(409, 'update_request_retired');
       if (previous && !['completed', 'failed', 'rolled-back'].includes(previous.state)) throw new AdminRequestError(409, 'update_busy');
       if ((await readdir(directory)).length >= 256) throw new AdminRequestError(409, 'update_history_full');

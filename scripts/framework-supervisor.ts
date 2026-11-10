@@ -5,12 +5,16 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { isRecord } from '../src/contracts/values.ts';
-import { applyFrameworkUpdate, rollbackFrameworkUpdate } from '../src/host/framework-updater.ts';
+import { rollbackFrameworkUpdate } from '../src/host/framework-updater.ts';
 import { readFrameworkUpdateState, writeFrameworkUpdateState } from '../src/host/framework-update-state.ts';
 import { frameworkUpdateStage } from './framework-update-download.ts';
 import { loadGatewayAdminConfiguration, gatewayAdminAddress } from '../src/admin/gateway.ts';
 import { resolveRuntimeConfiguration } from './runtime-configuration.ts';
 import { acquireFrameworkProcessLease } from '../src/host/framework-process-lease.ts';
+import { readProductUpdate } from '../src/host/product-update.ts';
+import { createProductUpdateRuntime } from './product-update.ts';
+import { NativeConfigurationRepository } from '../src/admin/native-configuration-repository.ts';
+import { dirname } from 'node:path';
 
 /** A parent outside the serving child owns restarts and code replacement. No shell or Docker socket is exposed. */
 export async function superviseFramework(root: string, args: readonly string[]): Promise<void> {
@@ -42,6 +46,7 @@ export async function superviseFramework(root: string, args: readonly string[]):
     } finally { clearTimeout(timer); }
   }
   function startChild(): void {
+    if (child && !childFinished && child.exitCode === null && child.signalCode === null) return;
     lastStart = Date.now(); childFinished = false;
     child = spawn(process.execPath, [cli, 'start', ...args], { cwd: root,
       env: { ...process.env, QQ_BRIDGE_FRAMEWORK_SUPERVISED: '1' }, stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
@@ -71,12 +76,52 @@ export async function superviseFramework(root: string, args: readonly string[]):
       const response = await fetch(new URL('/api/chat/runtime', origin), {
         headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
       const value: unknown = await response.json();
-      return response.ok && isRecord(value) && value.chatReady === true;
+      if (!response.ok || !isRecord(value) || value.chatReady !== true) return false;
+      const health = await fetch(new URL('/api/chat/health', origin), {
+        headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) });
+      const chain: unknown = await health.json();
+      return health.ok && isRecord(chain) && chain.healthy === true;
     } catch { return false; }
   }
+  async function verifyProduct(version: string, wasRunning: boolean): Promise<void> {
+    requireChatReady = wasRunning;
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline && !stopping && !childFinished) {
+      try {
+        if (await healthy()) {
+          const config = loadGatewayAdminConfiguration(configurationFilename);
+          const origin = new URL(gatewayAdminAddress(config));
+          if (['0.0.0.0', '[::]'].includes(origin.hostname)) origin.hostname = '127.0.0.1';
+          const token = (await readFile(config.tokenFile, 'utf8')).trim();
+          const response = await fetch(new URL('/api/framework/version', origin), {
+            headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+          const current: unknown = await response.json();
+          if (response.ok && isRecord(current) && current.currentVersion === version) return;
+        }
+      } catch { /* Only read-only readiness checks repeat within this deadline. */ }
+      await delay(1000, undefined, { signal: controller.signal }).catch(() => undefined);
+    }
+    throw new Error('product_start_unconfirmed');
+  }
+  const productRuntime = (source?: string) => createProductUpdateRuntime({ root, source, configurationFilename,
+    stop: stopChild, start: async () => { if (!stopping) startChild(); }, verify: verifyProduct });
   try {
     if (!existsSync(join(root, 'distribution.json'))) throw new Error('supervisor_requires_release_archive');
-    if (existsSync(join(root, '.framework-update.lock'))) {
+    const pendingProduct = await readProductUpdate(root);
+    const pendingWeb = await readFrameworkUpdateState(root);
+    if (pendingProduct && (!['completed', 'rolled-back'].includes(pendingProduct.phase)
+      || pendingProduct.phase === 'completed' && pendingWeb?.id === pendingProduct.id && ['applying', 'verifying', 'unknown'].includes(pendingWeb.state))) {
+      const runtime = await productRuntime();
+      try {
+        const result = await runtime.updater.rollback(pendingProduct.id);
+        if (result.phase !== 'rolled-back') throw new Error('product_update_requires_reconciliation');
+        const web = await readFrameworkUpdateState(root);
+        if (web?.id === result.id && ['applying', 'verifying', 'unknown'].includes(web.state)) {
+          await writeFrameworkUpdateState(root, { ...web, state: 'rolled-back', transactionId: result.runtimeTransactionId,
+            error: 'update_supervisor_interrupted', updatedAt: Date.now() });
+        }
+      } finally { await runtime.close(); }
+    } else if (existsSync(join(root, '.framework-update.lock'))) {
       const id = (await readFile(join(root, '.framework-update.lock'), 'utf8')).trim();
       // An interrupted transaction is restored before any runtime opens its data.
       await rollbackFrameworkUpdate(root, id);
@@ -92,31 +137,28 @@ export async function superviseFramework(root: string, args: readonly string[]):
       if (stopping) break;
       const update = await readFrameworkUpdateState(root);
       if (update?.state === 'ready' && process.env.QQ_BRIDGE_FRAMEWORK_CONTAINER !== '1') {
-        requireChatReady = await chatReady();
+        const config = loadGatewayAdminConfiguration(configurationFilename);
+        const intent = await new NativeConfigurationRepository(join(dirname(config.tokenFile), 'runtime')).readRunningIntent();
+        requireChatReady = intent.value.desiredRunning;
         await writeFrameworkUpdateState(root, { ...update, state: 'applying', updatedAt: Date.now() });
-        let transactionId: string | null = null;
+        let runtime: Awaited<ReturnType<typeof productRuntime>> | undefined;
         try {
-          await stopChild();
-          transactionId = await applyFrameworkUpdate({ source: join(frameworkUpdateStage(root, update.id), `qq-bridge-framework-${update.version}`), target: root, dependencies: true, retainLock: true });
-          await writeFrameworkUpdateState(root, { ...update, state: 'verifying', transactionId, updatedAt: Date.now() });
-          await rm(join(root, '.framework-update.lock'));
-          startChild();
-          let ready = false;
-          for (let attempt = 0; attempt < 30 && !stopping; attempt++) {
-            if (childFinished) break;
-            if (await healthy()) { ready = true; break; }
-            await delay(1000, undefined, { signal: controller.signal }).catch(() => undefined);
-          }
-          if (!ready) throw new Error('update_start_failed');
-          await writeFrameworkUpdateState(root, { ...update, state: 'completed', transactionId, updatedAt: Date.now() });
-          await rm(frameworkUpdateStage(root, update.id), { recursive: true, force: true });
+          runtime = await productRuntime(join(frameworkUpdateStage(root, update.id), `qq-bridge-framework-${update.version}`));
+          const result = await runtime.updater.execute({ id: update.id, version: update.version, wasRunning: requireChatReady });
+          const state = result.phase === 'completed' ? 'completed' : result.phase === 'rolled-back' ? 'rolled-back' : 'unknown';
+          await writeFrameworkUpdateState(root, { ...update, state, transactionId: result.runtimeTransactionId,
+            error: result.error, updatedAt: Date.now() });
+          if (state === 'completed') await rm(frameworkUpdateStage(root, update.id), { recursive: true, force: true });
+          if (state === 'unknown') throw new Error('product_update_requires_reconciliation');
         } catch {
-          await stopChild();
-          if (transactionId) await rollbackFrameworkUpdate(root, transactionId);
-          await writeFrameworkUpdateState(root, { ...update, state: transactionId ? 'rolled-back' : 'failed', transactionId,
+          const product = await readProductUpdate(root, update.id);
+          const current = await readFrameworkUpdateState(root);
+          if (current?.state === 'applying') await writeFrameworkUpdateState(root, { ...update,
+            state: product && !['completed', 'rolled-back'].includes(product.phase) ? 'unknown' : 'failed',
             error: 'update_apply_failed', updatedAt: Date.now() });
+          if (product && !['completed', 'rolled-back'].includes(product.phase)) throw new Error('product_update_requires_reconciliation');
           if (!stopping) startChild();
-        }
+        } finally { await runtime?.close(); }
         continue;
       }
       if (update?.state === 'preparing' && Date.now() - update.updatedAt > 20 * 60_000) {

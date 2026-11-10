@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { createDshJsonRpcPort } from '../src/adapters/dsh-jsonrpc.ts';
 import { createDshAuthenticationOptions } from '../src/adapters/dsh-authentication.ts';
@@ -10,6 +10,10 @@ import { createBridgeManager, type BridgeOperation } from '../src/host/bridge-ma
 import { isNativeApplicationId } from '../src/contracts/native-application.ts';
 import { releaseVersion } from '../src/contracts/framework-release.ts';
 import { errorCode } from '../src/core/values.ts';
+import { fileURLToPath } from 'node:url';
+import { registerManagedBridge } from '../src/host/product-components.ts';
+import { readProductUpdate } from '../src/host/product-update.ts';
+import { productUninstallPending } from '../src/host/product-uninstall-state.ts';
 
 const help = `桥接组件管理（独立于框架更新）
 qbf-cli bridge status
@@ -63,6 +67,12 @@ export async function bridgeCli(args: readonly string[], output: (message: strin
   try {
     const parsed = parseBridgeArguments(args);
     if (!parsed) { output(help); return 0; }
+    const parent = fileURLToPath(new URL('../', import.meta.url));
+    const root = basename(parent) === 'dist' ? dirname(parent) : parent;
+    if (!['status', 'download', 'reconcile'].includes(parsed.action)) {
+      const product = await readProductUpdate(root);
+      if (product && !['completed', 'rolled-back'].includes(product.phase) || await productUninstallPending(root)) throw new Error('product_maintenance_in_progress');
+    }
     const signal = AbortSignal.timeout(600_000);
     const selected = parsed.home ? { endpoint: parsed.endpoint!, credentialsPath: join(await realpath(parsed.home), '.credentials.yaml') }
       : await discoverLocalDsh({ signal });
@@ -93,6 +103,9 @@ export async function bridgeCli(args: readonly string[], output: (message: strin
     const operation = parsed.action === 'reconcile' ? await manager.reconcile(operationId, signal)
       : await manager.execute({ id: operationId, action: parsed.action as BridgeOperation['action'],
         version: parsed.action === 'remove' ? null : parsed.value! }, signal);
+    if (['loaded', 'installed-disabled', 'removed', 'restart-required'].includes(operation.state)) {
+      await registerManagedBridge(root, home, selected.endpoint, await port.pluginManagement.read(signal));
+    }
     output(JSON.stringify(project(operation)));
     return ['loaded', 'installed-disabled', 'removed'].includes(operation.state) ? 0 : operation.state === 'restart-required' ? 2 : 1;
   } catch (error) {

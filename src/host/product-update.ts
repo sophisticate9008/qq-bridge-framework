@@ -5,8 +5,10 @@ import { releaseVersion } from '../contracts/framework-release.ts';
 import { isRecord } from '../contracts/values.ts';
 import type { BridgeBundle } from '../contracts/bridge-management.ts';
 import type { BridgeOperation } from './bridge-manager.ts';
+import { FRAMEWORK_PRODUCT_PHASES, type FrameworkProductPhase } from '../contracts/framework-update.ts';
 import { ensurePrivateDirectory, readDocument, writeDocumentLocked } from '../storage/private-json.ts';
 import { acquireProcessFileLock } from '../storage/process-file-lock.ts';
+import { productUninstallPending } from './product-uninstall-state.ts';
 
 export interface ProductUpdate {
   readonly schema: 1;
@@ -18,12 +20,10 @@ export interface ProductUpdate {
   readonly restoreOperationId: string;
   readonly runtimeTransactionId: string;
   readonly wasRunning: boolean;
-  readonly phase: 'prepared' | 'stopping' | 'bridge' | 'runtime' | 'starting' | 'completed'
-    | 'rollback-bridge' | 'rollback-runtime' | 'rollback-start' | 'rolled-back' | 'unknown';
+  readonly phase: FrameworkProductPhase;
   readonly error: string | null;
 }
-const phases = ['prepared', 'stopping', 'bridge', 'runtime', 'starting', 'completed',
-  'rollback-bridge', 'rollback-runtime', 'rollback-start', 'rolled-back', 'unknown'];
+const phases: readonly string[] = FRAMEWORK_PRODUCT_PHASES;
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 function validate(input: unknown): ProductUpdate | null {
   if (input === null) return null;
@@ -37,7 +37,7 @@ function validate(input: unknown): ProductUpdate | null {
   return input as unknown as ProductUpdate;
 }
 export const productUpdateDirectory = (root: string) => join(root, 'data/product-updates');
-export async function readProductUpdate(root: string, id?: string): Promise<ProductUpdate | null> {
+async function readProductUpdateOnce(root: string, id?: string): Promise<ProductUpdate | null> {
   const directory = productUpdateDirectory(root);
   if (!id) {
     id = (await readDocument(join(directory, 'current.json'), null, input => {
@@ -48,6 +48,15 @@ export async function readProductUpdate(root: string, id?: string): Promise<Prod
   }
   if (!isNativeApplicationId(id)) throw new Error('product_update_id_invalid');
   return (await readDocument(join(directory, `${id}.json`), null, validate)).value;
+}
+export async function readProductUpdate(root: string, id?: string): Promise<ProductUpdate | null> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await readProductUpdateOnce(root, id); }
+    catch (error) {
+      if (attempt >= 2 || !isRecord(error) || error.code !== 'chat_revision_conflict') throw error;
+      await new Promise<void>(resolve => setTimeout(resolve, 10));
+    }
+  }
 }
 export function productUpdateAllowsStart(operation: ProductUpdate | null): boolean {
   return operation === null || ['starting', 'completed', 'rollback-start', 'rolled-back'].includes(operation.phase);
@@ -126,6 +135,7 @@ export function createProductUpdater(root: string, ports: ProductUpdatePorts) {
         }
         const active = await readProductUpdate(root);
         if (active && !['completed', 'rolled-back'].includes(active.phase)) throw new Error('product_update_requires_reconciliation');
+        if (await productUninstallPending(root)) throw new Error('product_uninstall_requires_reconciliation');
         const before = await ports.bridge();
         if (before?.legacy || before?.installed && (!before.version || !before.removable)) throw new Error('product_bridge_migration_required');
         if (before !== null) {
