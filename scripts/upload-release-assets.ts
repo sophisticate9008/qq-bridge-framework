@@ -5,12 +5,13 @@ import { lstat, readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { isRecord } from '../src/core/values.ts';
 
-// Upload verified CI artifacts to an existing draft. Publishing stays a separate action.
-const [tag, sourceCommit, runId, directoryArgument] = process.argv.slice(2);
+// Verify CI artifacts or downloaded assets; uploads target an existing draft. Publishing stays separate.
+const [tag, sourceCommit, runId, directoryArgument, mode, ...extra] = process.argv.slice(2);
 assert(tag && /^v\d+\.\d+\.\d+$/.test(tag));
 assert(sourceCommit && /^[a-f0-9]{40}$/.test(sourceCommit));
 assert(runId && /^[1-9][0-9]+$/.test(runId));
 assert(directoryArgument);
+assert(extra.length === 0 && (mode === undefined || mode === '--verify-only'));
 const directory = resolve(directoryArgument), version = tag.slice(1);
 const gh = (args: string[]): unknown => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
 const fields = ['headSha', 'headBranch', 'status', 'conclusion', 'workflowName', 'jobs'];
@@ -60,6 +61,10 @@ for (const line of checksums) {
 const distribution: unknown = JSON.parse(execFileSync('tar', ['-xOf', join(directory, expected[0]!),
   `qq-bridge-framework-${version}/distribution.json`], { encoding: 'utf8' }));
 assert(isRecord(distribution) && distribution.sourceCommit === sourceCommit && distribution.sourceModified === false && distribution.version === version);
-execFileSync('gh', ['release', 'upload', tag, '--clobber', ...names.sort().map(name => join(directory, name))],
-  { stdio: 'inherit', timeout: 180000 });
-console.log(`Uploaded ${names.length} verified assets to draft ${tag}; release remains unpublished.`);
+if (mode === '--verify-only') {
+  console.log(`Verified ${names.length} downloaded assets, checksums and source commit for draft ${tag}.`);
+} else {
+  execFileSync('gh', ['release', 'upload', tag, '--clobber', ...names.sort().map(name => join(directory, name))],
+    { stdio: 'inherit', timeout: 180000 });
+  console.log(`Uploaded ${names.length} verified assets to draft ${tag}; release remains unpublished.`);
+}
