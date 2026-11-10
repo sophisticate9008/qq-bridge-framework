@@ -58,10 +58,17 @@ test('Windows bootstrap ancestors permit new siblings but reject deletion of exi
     assert.equal(trustedAncestorPermissions(directory, lstatSync(directory)), false);
     await assert.rejects(loadNativeBootstrap(filename), { code: 'NATIVE_BOOTSTRAP_DIRECTORY_DENIED' });
   } catch (error) {
+    const parents: string[] = [];
     for (let parent = directory, depth = 0; depth < 32; depth++) {
+      parents.push(parent);
+      console.error(JSON.stringify({ path: parent, trusted: trustedPermissions(parent, lstatSync(parent)), ancestor: trustedAncestorPermissions(parent, lstatSync(parent)) }));
       console.error(execFileSync(icacls, [parent], { encoding: 'utf8', maxBuffer: 16384 }));
       const next = dirname(parent); if (next === parent) break; parent = next;
     }
+    const ownerScript = '$paths = ConvertFrom-Json ([Console]::In.ReadToEnd()); foreach ($p in $paths) { $a = Get-Acl -LiteralPath $p; [Console]::Out.WriteLine(($p + " owner=" + $a.Owner)) }';
+    console.error(execFileSync(join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ownerScript, 'utf16le').toString('base64')],
+      { input: JSON.stringify(parents), encoding: 'utf8', maxBuffer: 16384 }));
     throw error;
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
