@@ -14,6 +14,8 @@
 
 后台助手的开发说明对长期复用能力采用框架插件优先的偏好：先阅读当前安装包的开发文档和 SDK 示例，接入实际包、工具与生命周期；一次性处理、成本明显过高或接口难以实现时可使用脚本，并说明取舍。交付分别报告源码、依赖安装、扩展登记、运行加载和实际调用的完成状态，安装第三方库不等于框架扩展已经可用。
 
+已有脚本和经验先经工作区索引按需读取。脚本复用与服务故障分别跟踪，服务发布、工具登记与助手会话可调用各自验证；见 [工作区经验与服务排查](WORKSPACE_KNOWLEDGE.md)。
+
 优先分析能力边界，只把有实际跨任务复用价值的最小能力做成插件，已有工具优先复用。特定文件、作品、目标设备与输出约定相关的代码可以留在 `workspace/<任务名>/scripts/`中调用插件，不因理论上可复用就把每个步骤抽成通用功能。例如乐谱 PDF 转电子琴键位，可以只沉淀 PDF 读取、文字与坐标提取、页面渲染能力，乐谱修正、键位映射和成品编排留在任务脚本中。主人明确指定的插件范围优先，例如要求“PDF 解析插件，然后转换乐谱”，就交付该插件并完成转换；明确要求键位转换插件时才按该要求扩展。
 
 交给 Agent 编写插件时，至少约定：
@@ -122,7 +124,7 @@ npm pack ./packages/framework-sdk --pack-destination /tmp
 # 在一个新的外部目录中
 npm init -y
 npm pkg set type=module
-npm install --ignore-scripts /tmp/qq-bridge-framework-sdk-1.9.0.tgz
+npm install --ignore-scripts /tmp/qq-bridge-framework-sdk-2.0.0.tgz
 npm install --save-dev typescript@5.9.3
 ```
 

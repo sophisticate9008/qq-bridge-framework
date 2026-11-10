@@ -24,6 +24,8 @@ workspace/乐谱转换/
 
 助手预设引导使用这个结构，不强制把已有任务重新组织，也不自动删除 `tmp/`。有实际跨任务复用价值的最小能力可注册为框架插件；具体任务代码继续留在工作区。工作区不是安全沙箱，也不扩大权限。详见 [扩展开发](EXTENDING.md)。
 
+跨任务经验通过 `workspace/README.md` 索引、相关任务的 `SKILL.md`／README 和按需读取的 `references/` 分级组织。先核对现有脚本再开发，避免通读全部工作区；调用约定和服务故障记录见 [工作区经验](WORKSPACE_KNOWLEDGE.md)。
+
 ## 启动与更新
 
 默认管理配置为 `data/admin/config.json`。本机受管安装使用 `data/live/framework-admin.json`、`services.json` 和 `service-health.json`。显式 `--config` 和 `QQ_BRIDGE_FRAMEWORK_CONFIG` 环境变量优先；启动不会自动搬迁目录。原有自定义配置可继续通过明确路径启动。

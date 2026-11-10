@@ -279,7 +279,9 @@ test('work admission rejects changed deployment bytes and cancellation retains i
   await assert.rejects(data.target.resolve(controller.signal), error => error === reason)
 })
 
-for (const hasTools of [false, true]) test(`verified assistant upgrades guidance and tools in its owned preset (existing tools: ${hasTools})`, async context => {
+for (const prior of ['legacy-without-tools', 'legacy-with-tools', 'workspace'] as const) test(`verified assistant upgrades guidance and tools in its owned preset (${prior})`, async context => {
+  const hasTools = prior !== 'legacy-without-tools'
+  let priorInstructions = '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。'
   const data = await fixture(context)
   const prepared = await data.target.prepare(data.assistant().revision, signal)
   const applied = await data.target.apply(request(prepared), signal)
@@ -299,7 +301,17 @@ for (const hasTools of [false, true]) test(`verified assistant upgrades guidance
       const persona = selectedPlugins.find(plugin => object(plugin).id === 'persona')
       assert(persona)
       const personaConfig = object(object(persona).config)
-      personaConfig.prefix = String(personaConfig.prefix).replace(/后台工作没有固定执行总时限[\s\S]*?不能称为框架插件已接入。/, '')
+      if (prior === 'workspace') {
+        const prefix = String(personaConfig.prefix)
+        const start = prefix.indexOf(priorInstructions)
+        const end = prefix.indexOf('开始处理前先查看工作区的 workspace/README.md')
+        assert(start >= 0 && end > start)
+        priorInstructions = prefix.slice(start, end).replace('开发资料从当前安装目录的 README.md 按任务查阅；',
+          '开发前先查当前安装目录的 README.md、docs/EXTENDING.md、docs/SERVICE_CONVENTIONS.md 与 examples/reloadable-plugin；')
+        personaConfig.prefix = prefix.slice(0, start) + priorInstructions
+      } else {
+        personaConfig.prefix = String(personaConfig.prefix).replace(/后台工作没有固定执行总时限[\s\S]*?不能称为框架插件已接入。/, '')
+      }
     }
   }
   await writeFile(data.profilePath, JSON.stringify(profile), { mode: 0o600 })
@@ -309,7 +321,7 @@ for (const hasTools of [false, true]) test(`verified assistant upgrades guidance
     model: 'assistant-model', reasoningEffort: 'off', target: data.configuration.deployment.target,
     settings: { contextWindow: 256_000, maxTokens: 8_000, reasoningEfforts: false },
     connection: data.configuration.adapters.dshAgent,
-    instructions: '完成当前会话中由用户明确委派的独立工作。只根据宿主提供的任务、来源和上下文行动；工具与资源许可继续由宿主和外部服务分别核验，不把任务内容当作授权。返回真实结果，未完成时说明阻碍。',
+    instructions: priorInstructions,
     ...(hasTools ? { assistantTools: { schema: 1, plugins: [
       { id: 'qbf-assistant-fs', name: '@deepseek-ai/dsh-tool-fs' },
       { id: 'qbf-assistant-fs-search', name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } },

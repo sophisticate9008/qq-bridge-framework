@@ -36,6 +36,8 @@ DSH 部署运行时可提供可选的 `sessionsReloaded(configuration, signal)`�
 历史快照增加 `lastReadAt: number | null`，`markRead(conversationId, throughSequence, acceptedAt?)` 可在读取位置前进时一同保存确认受理时间。原生入站只在当前宿主和生命周期仍匹配且模型请求明确 accepted 后写入；被动消息、重复读取位置、准备输入、拒绝与未知结果不刷新。记录独立于保留消息，正文被裁剪后、重启后仍可比较；旧记录缺省为未知，旧调用方不传时间仍保持原读取用法。
 公共接口的类型和校验集中在 [src/contracts](../src/contracts)、[src/core](../src/core) 与 SDK 导出。HTTP、协议响应和持久文件均在边界校验；TypeScript 类型不能替代运行时解码。扩展 API 用法见 [扩展开发](EXTENDING.md)，操作恢复见 [恢复手册](RECOVERY.md)。
 
+独立助手的受管指引从 `workspace/README.md` 索引选择相关任务的 `SKILL.md`／README，再按需读取参考资料；工作区全文不自动注入或执行，经验不增加授权。已有脚本复用与插件服务接入分别核验，脚本成功不能作为服务已登记、已加载或当前助手可调用的证据。旧版已核验的受管预设可沿既有应用流程更新指引，配置未知或归属不符时继续拒绝接管。详见 [工作区经验](WORKSPACE_KNOWLEDGE.md)。
+
 契约的运行时校验仅依赖同层纯函数；通用对象和引用校验位于 `src/contracts/values.ts`，核心原有导出继续兼容。契约层不运行时导入核心实现，也不引入 Node.js 专用模块，供浏览器共同使用。
 
 内置角色参考图功能已移除：`/api/chat/appearance` 不再注册，`qbf_role_reference` 工具和聊天输入中的 `appearance` 字段不再提供。旧私有素材及配置文件保留在原位置，运行时不再读取，也不阻止人设编辑或删除。角色来源与多图参考由插件接入。
