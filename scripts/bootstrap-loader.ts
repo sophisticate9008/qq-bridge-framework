@@ -1,3 +1,4 @@
+import { trustedPermissions, privatePermissions } from '../src/storage/file-security.ts';
 import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
@@ -12,12 +13,12 @@ const pendingImports = new Set<string>();
 const maxPendingImports = 4;
 
 function trustedOwner(information: Stats) {
-  return typeof process.getuid === 'function' && [0, process.getuid()].includes(information.uid);
+  return process.platform === 'win32' || typeof process.getuid === 'function' && [0, process.getuid()].includes(information.uid);
 }
 
-function trustedFile(information: Stats, maxBytes: number) {
+function trustedFile(filename: string, information: Stats, maxBytes: number) {
   assert(information.isFile() && !information.isSymbolicLink() && information.nlink === 1
-    && (information.mode & 0o022) === 0 && trustedOwner(information)
+    && trustedPermissions(filename, information) && trustedOwner(information)
     && information.size > 0 && information.size <= maxBytes,
   'NATIVE_BOOTSTRAP_FILE_DENIED', 'Bootstrap must be a bounded trusted local regular file.');
 }
@@ -27,7 +28,7 @@ async function trustedParents(filename: string) {
   for (let count = 0; count < 128; count++) {
     const information = await lstat(directory);
     assert(information.isDirectory() && !information.isSymbolicLink() && trustedOwner(information)
-      && (information.mode & 0o022) === 0, 'NATIVE_BOOTSTRAP_DIRECTORY_DENIED', 'Bootstrap parent directories must be trusted and not shared writable.');
+      && trustedPermissions(directory,information), 'NATIVE_BOOTSTRAP_DIRECTORY_DENIED', 'Bootstrap parent directories must be trusted and not shared writable.');
     const parent = dirname(directory);
     if (parent === directory) return;
     directory = parent;
@@ -38,11 +39,11 @@ async function trustedParents(filename: string) {
 async function fingerprint(filename: string, maxBytes: number) {
   await trustedParents(filename);
   const information = await lstat(filename);
-  trustedFile(information, maxBytes);
+  trustedFile(filename, information, maxBytes);
   const descriptor = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await descriptor.stat();
-    trustedFile(before, maxBytes);
+    trustedFile(filename, before, maxBytes);
     assert(before.dev === information.dev && before.ino === information.ino,
       'NATIVE_BOOTSTRAP_CHANGED', 'Bootstrap changed during verification.');
     const bytes = Buffer.alloc(maxBytes + 1);
@@ -54,7 +55,7 @@ async function fingerprint(filename: string, maxBytes: number) {
     }
     const after = await descriptor.stat();
     const current = await lstat(filename);
-    trustedFile(after, maxBytes);
+    trustedFile(filename, after, maxBytes);
     assert(length === before.size && length === after.size && after.mtimeMs === before.mtimeMs
       && after.ctimeMs === before.ctimeMs && current.dev === before.dev && current.ino === before.ino
       && !current.isSymbolicLink(), 'NATIVE_BOOTSTRAP_CHANGED', 'Bootstrap changed during verification.');
@@ -62,14 +63,23 @@ async function fingerprint(filename: string, maxBytes: number) {
   } finally { await descriptor.close(); }
 }
 
-export async function loadNativeBootstrap(filename: string, { signal = new AbortController().signal, maxBytes = 262144, timeoutMs = 10000, expectedFingerprint }:
-  { signal?: AbortSignal; maxBytes?: number; timeoutMs?: number; expectedFingerprint?: string } = {}): Promise<LoadedNativeBootstrap> {
+export async function verifyNativeBootstrapFiles(filename: string, expectedFingerprint?: string, signal = new AbortController().signal) {
+  const codeFingerprint = await fingerprint(filename,1048576)
+  assert(expectedFingerprint === undefined || codeFingerprint === expectedFingerprint,'NATIVE_BOOTSTRAP_CHANGED','The installed bootstrap bytes changed.')
+  const content = await readNativeBootstrapContent(filename,signal)
+  await content?.verify(signal)
+  return {codeFingerprint,content}
+}
+
+export async function loadNativeBootstrap(filename: string, { signal = new AbortController().signal, maxBytes = 262144, timeoutMs = 10000, expectedFingerprint, expectedContentFingerprint }:
+  { signal?: AbortSignal; maxBytes?: number; timeoutMs?: number; expectedFingerprint?: string; expectedContentFingerprint?: string } = {}): Promise<LoadedNativeBootstrap> {
   assert(typeof filename === 'string' && filename.length <= 4096 && isAbsolute(filename) && filename === resolve(filename)
     && filename.endsWith('.ts') && !/[\x00-\x1f\x7f?#]/.test(filename),
   'NATIVE_BOOTSTRAP_PATH_DENIED', 'An explicit absolute local TypeScript bootstrap path is required.');
   assert(signal instanceof AbortSignal && Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= 1048576
     && Number.isSafeInteger(timeoutMs) && timeoutMs >= 10 && timeoutMs <= 300000
-    && (expectedFingerprint === undefined || /^[a-f0-9]{64}$/.test(expectedFingerprint)),
+    && (expectedFingerprint === undefined || /^[a-f0-9]{64}$/.test(expectedFingerprint))
+    && (expectedContentFingerprint === undefined || /^[a-f0-9]{64}$/.test(expectedContentFingerprint)),
   'INVALID_NATIVE_BOOTSTRAP_OPTIONS', 'Finite bootstrap load bounds are required.');
   assert(!pendingImports.has(filename) && pendingImports.size < maxPendingImports,
     'NATIVE_BOOTSTRAP_LOAD_BUSY', 'Earlier bootstrap imports remain unresolved.');
@@ -81,6 +91,8 @@ export async function loadNativeBootstrap(filename: string, { signal = new Abort
       const raw = (async () => {
         const codeFingerprint = await fingerprint(filename, maxBytes);
         const content = await readNativeBootstrapContent(filename, combined);
+        assert(expectedContentFingerprint === undefined || content?.identity.fingerprint === expectedContentFingerprint,
+          'NATIVE_PACKAGE_CONTENT_CHANGED','Installed extension source or dependency lock changed.');
         assert(expectedFingerprint === undefined || codeFingerprint === expectedFingerprint,
           'NATIVE_BOOTSTRAP_CHANGED', 'The selected bootstrap bytes have changed; explicit installation is required.');
         combined.throwIfAborted();
@@ -117,6 +129,11 @@ export async function loadNativeBootstrap(filename: string, { signal = new Abort
 }
 
 export async function loadSelectedNativeBootstrap(configurationFilename: string, explicitFilename?: string): Promise<LoadedNativeBootstrap | undefined> {
+  const { loadManagedBootstrap } = await import('./managed-bootstrap.ts');
+  return loadManagedBootstrap(configurationFilename, await loadSelectedBaseBootstrap(configurationFilename, explicitFilename));
+}
+
+async function loadSelectedBaseBootstrap(configurationFilename: string, explicitFilename?: string): Promise<LoadedNativeBootstrap | undefined> {
   if (explicitFilename !== undefined) return loadNativeBootstrap(explicitFilename);
   const configuration = resolve(configurationFilename);
   const filename = join(dirname(configuration), `${basename(configuration)}.bootstrap.json`);
@@ -126,8 +143,8 @@ export async function loadSelectedNativeBootstrap(configurationFilename: string,
   });
   if (information === null) return undefined;
   await trustedParents(filename);
-  trustedFile(information, 8192);
-  assert((information.mode & 0o077) === 0, 'NATIVE_BOOTSTRAP_SELECTION_DENIED', 'Operator bootstrap selection must be private.');
+  trustedFile(filename, information, 8192);
+  assert(privatePermissions(filename,information), 'NATIVE_BOOTSTRAP_SELECTION_DENIED', 'Operator bootstrap selection must be private.');
   const descriptor = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await descriptor.stat();
@@ -143,7 +160,7 @@ export async function loadSelectedNativeBootstrap(configurationFilename: string,
     const current = await lstat(filename);
     assert(length === before.size && length === after.size && length <= 8192
       && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs && !current.isSymbolicLink()
-      && current.dev === before.dev && current.ino === before.ino && (current.mode & 0o077) === 0,
+      && current.dev === before.dev && current.ino === before.ino && privatePermissions(filename,current),
     'NATIVE_BOOTSTRAP_CHANGED', 'Operator selection changed while reading.');
     let selection: unknown;
     try { selection = JSON.parse(bytes.subarray(0, length).toString('utf8')); }

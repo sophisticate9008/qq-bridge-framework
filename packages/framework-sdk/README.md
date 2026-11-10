@@ -2,6 +2,8 @@
 
 面向 TypeScript 扩展的功能、宿主、生命周期、适配器、持久状态与存储契约。SDK 包不包含管理服务器和网页。
 
+使用当前框架管理本机扩展时，`qbf-cli extensions init/install` 自动准备配套 SDK、安装锁定依赖并完成类型预检与版本登记；流程见 [扩展管理](../../docs/EXTENSION_LIFECYCLE.md)。以下手动构建方式用于 SDK 开发和独立分发。
+
 ## 构建与安装
 
 在框架仓库根目录运行：

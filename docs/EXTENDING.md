@@ -67,7 +67,7 @@ ctx.effect(() => declareMcpToolRegistration('dsh-global', 'search', {
 
 工具属于扩展的子项，扩展之间的运行依赖使用已有 `dependencies` 与 `requires` / `provides`，不能用工具前缀推断父子关系。例如“通用图片生成”提供输入材料服务，“自我形象与提示词前置输入”依赖它登记参考图并准备提示词；前置输入并不拥有通用生图能力。自拍、换装是提示词内容，不需要分别注册工具。包管理器按依赖顺序启动、逆序停止，运行快照 `dependencies` 用于控制台展示实际关系。角色资料按需准备，不应每轮重复注入。
 
-目前没有独立的插件市场、目录自动发现或一站式工具插件注册器。控制台读取注册元数据和实际运行状态，不能把尚未接入的源码目录显示为已安装。工具页分别呈现声明、注册与会话加载状态，框架服务页展示基础设施。
+本机扩展使用 `qbf-cli extensions init/install/verify/disable/remove` 完成独立版本安装、登记与应用，见 [扩展管理](EXTENSION_LIFECYCLE.md)。安装保留既有 bootstrap；工具热重载继续使用 `extensions reload`。框架不自动扫描任意源码目录或提供插件市场。控制台读取注册元数据和实际运行状态，不能把尚未接入的源码目录显示为已安装。工具页分别呈现声明、注册与会话加载状态，框架服务页展示基础设施。
 
 ## 插件定时任务与按需工具目录
 
@@ -93,7 +93,7 @@ ctx.effect(() => declareMcpToolRegistration('dsh-global', 'search', {
 
 运行时最多允许一代旧实例排空；旧代尚有任务、清理尚未结束或清理失败时，后续重载明确拒绝。内容指纹相同返回 `changed: false` 并释放新准备的候选实例。清理失败会保留错误码和排空状态，`close()` 也会报告失败；关闭立即禁止新调用与版本切换，并等待进行中的准备、任务及清理。
 
-`qbf-cli extensions` 查询已登记实例，`qbf-cli extensions reload <插件标识>` 读取当前指纹后提交 CAS 重载。状态仅包含标识、显示名、当前指纹、活动调用、排空、重载和关闭状态及错误码。返回的 `currentRevision`、`changed`、`draining` 区分版本切换和旧任务排空；网络中断后先查状态，不自动重放写操作。
+`qbf-cli extensions list` 查询受管安装；旧 bootstrap 中已登记的重载实例通过管理端扩展状态接口查询，`qbf-cli extensions reload <插件标识>` 读取当前指纹后提交 CAS 重载。状态仅包含标识、显示名、当前指纹、活动调用、排空、重载和关闭状态及错误码。返回的 `currentRevision`、`changed`、`draining` 区分版本切换和旧任务排空；网络中断后先查状态，不自动重放写操作。
 
 配置有各自的即时应用约定。当前生图配置 `generationAccess` 接受 `owner` 或 `whitelist`，执行时热读，保存后对后续权限检查生效；当前配置缺省为 `whitelist`。代码重载用于保持同一工具协议的实现更新。工具名称、输入输出 schema、依赖或注册结构变化需要完整应用插件装配，不能仅替换实例后声称工具目录已同步。
 

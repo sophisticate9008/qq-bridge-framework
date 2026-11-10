@@ -1494,6 +1494,7 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           ...(options.bootstrap ? { bootstrapContent: {
             identity: options.bootstrap.metadata.contentIdentity ?? { fingerprint: options.bootstrap.metadata.codeFingerprint, coverage: 'entry-only' as const, files: 1 },
             packageIds: bootstrapMount?.packageDefinitions.map(definition => definition.manifest.id) ?? [],
+            forPackage: options.bootstrap.contentForPackage,
             verify: signal => options.bootstrap!.verifyContent?.(signal) ?? Promise.resolve()
           } } : {}) })
         const packageStates = await packages.start()
@@ -2103,6 +2104,12 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     pluginModelService: () => state === 'running' && !closed ? pluginModels : undefined,
     pluginCapabilityService: () => state === 'running' && !closed ? pluginCapabilities : undefined, applyAccessChange, reconcileExecution, recoverExecution, diagnostics, mediaDiagnostics,
     extensionStatus() { return extensions.list() },
+    managedExtensionObservation() {
+      return { operationId: options.bootstrap?.metadata.managedExtensions?.operationId ?? null, registryRevision: options.bootstrap?.metadata.managedExtensions?.revision ?? digest([]), running: state === 'running',
+        packages: (packages?.describe() ?? []).map(item => ({ id: item.id, state: item.state, toolNames: item.toolNames ?? [] })),
+        tools: pluginTools?.entries().map(item => item.tool.definition.name) ?? [],
+        services: packages?.services().map(item=>({id:item.id,owner:item.owner,state:item.state})) ?? [] }
+    },
     reloadExtension(id: string, expectedRevision: string, signal: AbortSignal) {
       if (state !== 'running' || !lifetime || lifetime.signal.aborted || closed) failure('EXTENSION_RUNTIME_UNAVAILABLE')
       return extensions.reload(id, expectedRevision, AbortSignal.any([signal, lifetime.signal]))

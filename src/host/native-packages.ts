@@ -92,7 +92,7 @@ export function createNativePackages(options: {
   readonly packages: readonly NativePackageDefinition[]
   readonly configurationRegistry: PackageConfigurationRegistry
   readonly stateStore?: DurableStore
-  readonly bootstrapContent?: NativePackageContent & { readonly packageIds: readonly string[] }
+  readonly bootstrapContent?: NativePackageContent & { readonly packageIds: readonly string[]; readonly forPackage?: (id: string) => NativePackageContent | undefined }
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
 }) {
@@ -156,7 +156,8 @@ export function createNativePackages(options: {
       const descriptor = existing.find(item => item.id === id) ?? configurations.find(item => item.descriptor.id === id)?.descriptor
       if (!descriptor || descriptor.owner !== manifest.id) failure('NATIVE_PACKAGE_CONFIGURATION_OWNER_INVALID')
     }
-    const content = options.bootstrapContent?.packageIds.includes(manifest.id) ? options.bootstrapContent : definition.content
+    const content = options.bootstrapContent?.packageIds.includes(manifest.id)
+      ? options.bootstrapContent.forPackage?.(manifest.id) ?? options.bootstrapContent : definition.content
     const stateIdentity = content ? { packageVersion: manifest.version, stateSchemaVersion: manifest.stateSchemaVersion ?? 1,
       contentFingerprint: content.identity.fingerprint } : undefined
     if (options.stateStore) assert(content && stateIdentity, 'NATIVE_PACKAGE_CONTENT_IDENTITY_REQUIRED', 'Persistent packages require a verified content identity.')

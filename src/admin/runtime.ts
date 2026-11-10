@@ -3,6 +3,7 @@ import { withDeadline } from '../host/deadlines.ts'
 import { readAdminActivity } from './simulation-activity.ts'
 import { createNativeToolInventoryRoutes, type NativeToolInventoryReader } from './native-tool-inventory.ts'
 import { createNativeExtensionReloadRoutes } from './native-extension-reload.ts'
+import { createManagedExtensionRoutes } from './managed-extensions.ts'
 import { createNativeDshHealthRoutes } from './native-dsh-health.ts'
 import { createPluginSessionRoutes } from './plugin-sessions.ts'
 import { createStickerLibraryRoutes } from './sticker-library.ts'
@@ -1003,6 +1004,7 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
     runExclusive: run => nativeControl(directory, run) }))
   routes.push(...createNativeInteractionRoutes(options.interactions ?? (() => undefined)))
   routes.push(...createNativeExtensionReloadRoutes(chatRuntime))
+  routes.push(...createManagedExtensionRoutes(chatRuntime))
   routes.push(...createSimulationSessionRoutes(directory))
   routes.push(...createPluginSessionRoutes({ getService: () => chatRuntime?.isClosed() ? undefined : chatRuntime?.pluginModelService(),
     async resolveQQ(conversationId, signal) {

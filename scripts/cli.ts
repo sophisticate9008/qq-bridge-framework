@@ -109,7 +109,10 @@ const GENERAL_HELP = `QQ Bridge Framework 命令行
   qbf-cli stop [组件]
   qbf-cli logs [组件] [-f]
   qbf-cli protocol [napcat|snowluma]
-  qbf-cli extensions [list|reload <插件标识>]
+  qbf-cli extensions init <目录> --id <标识>
+  qbf-cli extensions install <目录> [--stage] [--config <管理配置>]
+  qbf-cli extensions <enable|disable|remove> <标识> [--stage] [--config <管理配置>]
+  qbf-cli extensions <list|verify|apply|reconcile|reload> [标识或操作编号] [--config <管理配置>]
   qbf-cli maintenance [--apply]
   qbf-cli bridge <status|download|install|update|rollback|remove|reconcile> [参数]
   qbf-cli serve [--config <管理配置>] [--admin-only]
@@ -795,6 +798,12 @@ export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAU
     } catch (error) { io.stderr(error instanceof Error ? error.message : '卸载未完成，请保留原操作编号核对。'); return 1; }
   }
   const managed = serviceArguments(argumentsList);
+  if (argumentsList[0] === 'extensions') {
+    try {
+      const { managedExtensionCli } = await import('./managed-extension-cli.ts');
+      return await managedExtensionCli(argumentsList.slice(1), { cwd: io.cwd, env: io.env, output: io.stdout, framework: PROJECT_ROOT });
+    } catch (error) { io.stderr(`${errorCode(error,'EXTENSION_OPERATION_FAILED')}: ${error instanceof Error ? error.message : '扩展管理失败，请保留原操作编号。'}`); return 1; }
+  }
   if (managed) return new Promise<number>(resolvePromise => {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./service-manager' + (import.meta.url.endsWith('.js') ? '.js' : '.ts'), import.meta.url)), ...managed],
       { cwd: io.cwd, env: io.env, stdio: ['inherit', 'pipe', 'pipe'] });

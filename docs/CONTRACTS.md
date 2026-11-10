@@ -498,3 +498,11 @@ DSH 的会话历史、原始附件与派生缓存由 DSH 自身管理，框架�
 CLI `update --rollback` 和 `update --reconcile` 接受原整套操作编号，核对后协调恢复原组合；旧纯程序事务编号继续用于纯程序回滚。未知原生写、未知重启和第三方修改均保留证据，不重放原写操作；普通启动在整套更新未决或卸载未完成时拒绝。外部监督进程中断后沿同一记录恢复，候选异常退出不能留下新旧组件混用的已就绪宿主。
 
 `uninstall --framework` 默认只移除本安装登记并核验归属的桥接插件及发行清单程序，`--keep-bridge` 保留插件。程序清理前核验私有卸载快照和现存文件校验值，外部固定入口只清理安装器登记且未被替换的项；配置、会话、工作区、私人扩展及未知结果保留。原生移除未知时不清理程序，卸载中断按原编号继续，不能更改原卸载意图。
+
+## 受管扩展安装与恢复
+
+`qbf-cli extensions init/install/list/verify/enable/disable/remove/apply/reconcile` 按管理配置隔离扩展。显式 schema 1 清单只接受根目录 TypeScript 入口与有界文件列表；安装使用当前框架 SDK、禁用 npm 安装脚本并严格类型检查。独立版本保存完整源码与依赖锁指纹，加载前核对，保留既有 bootstrap 与各包独立内容身份。管理配置必须先校验，预检失败不更改当前选择；业务数据和原源码不因停用或移除删除。详见 [扩展管理](EXTENSION_LIFECYCLE.md)。
+
+`GET /api/chat/extensions/installed` 使用现有鉴权，只返回当前运行宿主的 `{schema:1,observation}`；observation 为 null 或有界的启动时加载的 operationId、登记集合指纹、running、包、实际工具、服务状态。GET 不加载代码、不重启、不调用模型。CLI 将安装内容、运行装配与真实调用证据分别呈现，`invocationVerified:false` 不以装配成功替代模型调用验收；list 的 reloadableExtensions 独立读取旧热重载目录。
+
+扩展 CLI 写操作与整套更新、卸载共用维护锁，未决维护先拒绝；扩展操作另使用配置级进程身份锁和 CAS 私有记录，prepared/applying/completed/restoring/rolled-back/unknown 阶段先于外部副作用持久保存，保留前后选择与操作编号。只有已确认候选加载但验收失败才恢复原选择并执行一次恢复启动；未知重启或回执不自动重放，reconcile 只核对同一操作，未知结果还须证明宿主启动时加载过原操作编号；尚未应用的 prepared 选择在旧宿主在线时继续保留待应用状态。历史终态查询不得覆盖当前选择。受控应用只请求框架宿主重启，不获得 DSH、协议端或 QQ 客户端的生命周期权限。

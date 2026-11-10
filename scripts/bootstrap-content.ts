@@ -1,3 +1,4 @@
+import { trustedPermissions, canonicalPathMatches } from '../src/storage/file-security.ts'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
@@ -14,11 +15,11 @@ function excludedFile(name: string) { return /^\.env(?:\.|$)/i.test(name) || /(?
 function localPath(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 512
   && !isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part.length > 0 && part !== '.' && part !== '..') }
 async function bytes(filename: string, limit: number): Promise<Buffer> {
-  assert(await realpath(dirname(filename)) === dirname(filename), 'NATIVE_PACKAGE_CONTENT_UNSAFE', 'Package directories must not contain links.')
+  assert(canonicalPathMatches(await realpath(dirname(filename)),dirname(filename)), 'NATIVE_PACKAGE_CONTENT_UNSAFE', 'Package directories must not contain links.')
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   try {
     const before = await handle.stat()
-    assert(before.isFile() && before.nlink === 1 && (before.mode & 0o022) === 0 && before.size <= limit
+    assert(before.isFile() && before.nlink === 1 && trustedPermissions(filename,before) && before.size <= limit
       && (typeof process.getuid !== 'function' || [0, process.getuid()].includes(before.uid)), 'NATIVE_PACKAGE_CONTENT_UNSAFE', 'Package files must be bounded, trusted regular files.')
     const buffer = Buffer.alloc(before.size + 1)
     let length = 0
@@ -59,7 +60,7 @@ export async function readNativeBootstrapContent(filename: string, signal: Abort
     async function walk(directory: string, depth: number): Promise<void> {
       currentSignal.throwIfAborted()
       const before = await lstat(directory)
-      assert(depth <= 8 && before.isDirectory() && !before.isSymbolicLink() && (before.mode & 0o022) === 0
+      assert(depth <= 8 && before.isDirectory() && !before.isSymbolicLink() && trustedPermissions(directory,before)
         && (typeof process.getuid !== 'function' || [0, process.getuid()].includes(before.uid)), 'NATIVE_PACKAGE_CONTENT_UNSAFE', 'Package directories must be bounded and trusted.')
       for (const item of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
         if (excludedDirectories.has(item.name) || excludedFile(item.name)) continue

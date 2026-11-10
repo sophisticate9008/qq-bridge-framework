@@ -1,3 +1,4 @@
+import { privatePermissions } from '../src/storage/file-security.ts';
 import { resolveLivePath } from './runtime-configuration.ts';
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -33,11 +34,11 @@ function status(input: unknown): ReloadableExtensionStatus {
     reloading: input.reloading, closed: input.closed, error: input.error }
 }
 
-async function readToken(filename: string): Promise<string> {
+export async function readExtensionAdminToken(filename: string): Promise<string> {
   const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const info = await handle.stat()
-    if (!info.isFile() || info.nlink !== 1 || info.size > 4096 || (info.mode & 0o077) !== 0
+    if (!info.isFile() || info.nlink !== 1 || info.size > 4096 || !privatePermissions(filename,info)
       || process.getuid && info.uid !== process.getuid()) fail('管理端令牌须为当前用户持有的私有普通文件。')
     const token = (await handle.readFile('utf8')).trim()
     if (token.length < 24 || /[\r\n]/.test(token)) fail('管理端令牌无效。')
@@ -45,7 +46,7 @@ async function readToken(filename: string): Promise<string> {
   } finally { await handle.close() }
 }
 
-async function readResponse(response: Response): Promise<unknown> {
+export async function readExtensionAdminResponse(response: Response): Promise<unknown> {
   const reader = response.body?.getReader()
   if (!reader) fail('管理服务未返回插件状态。')
   const chunks: Uint8Array[] = []
@@ -67,15 +68,15 @@ async function readResponse(response: Response): Promise<unknown> {
 
 /** Credentials remain in memory; command arguments accept a registered id only. Writes never retry. */
 export async function manageExtensions(root: string, argumentsList: readonly string[],
-  output: (value: string) => void = console.log): Promise<void> {
+  output: (value: string) => void = console.log, configurationFilename?: string): Promise<void> {
   const listing = argumentsList.length === 0 || argumentsList.length === 1 && argumentsList[0] === 'list'
   const reloading = argumentsList.length === 2 && argumentsList[0] === 'reload' && identifier(argumentsList[1])
   if (!listing && !reloading) fail('用法：qbf-cli extensions [list] 或 qbf-cli extensions reload <插件标识>。')
   let configuration: ReturnType<typeof loadGatewayAdminConfiguration>
   let token: string
   try {
-    configuration = loadGatewayAdminConfiguration(resolveLivePath(root, 'framework-admin.json'))
-    token = await readToken(configuration.tokenFile)
+    configuration = loadGatewayAdminConfiguration(configurationFilename ?? resolveLivePath(root, 'framework-admin.json'))
+    token = await readExtensionAdminToken(configuration.tokenFile)
   } catch (error) {
     if (error instanceof ExtensionManagementError) throw error
     fail('无法读取本机管理配置或令牌，请先完成管理端初始化。')
@@ -95,7 +96,7 @@ export async function manageExtensions(root: string, argumentsList: readonly str
     if (!response.ok) {
       let failureCode: string | undefined
       try {
-        const failure = await readResponse(response)
+        const failure = await readExtensionAdminResponse(response)
         if (isRecord(failure) && typeof failure.error === 'string'
           && /^(?:extension_[a-z_]{1,54}|operation_unknown|handler_timeout|request_aborted|origin_forbidden)$/.test(failure.error)) {
           failureCode = failure.error
@@ -116,7 +117,7 @@ export async function manageExtensions(root: string, argumentsList: readonly str
         : response.status === 404 ? '插件未登记或当前部署尚不支持重载。'
         : `插件操作未成功（HTTP ${response.status}）；请查询状态。`)
     }
-    return readResponse(response)
+    return readExtensionAdminResponse(response)
   }
   const inventory = await request()
   if (!isRecord(inventory) || inventory.schema !== 1 || !Array.isArray(inventory.items)

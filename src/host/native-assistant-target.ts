@@ -59,11 +59,14 @@ const workspaceInstructions = previousBoundaryInstructions
   .replaceAll('runtime/ 任务代码', 'workspace/<任务名>/scripts/ 任务代码')
   + '任务工作区使用 workspace/<任务名>/，其中 scripts/ 保存处理脚本，input/ 保存输入，output/ 保存成果，tmp/ 保存可丢弃中间文件；任务脚本和成果默认保留，不因任务结束删除。runtime/ 用于正式运行组件，不放临时开发脚本；维护脚本和验证报告放 private/maintenance/，可重建缓存放 .cache/。现有任务引用的旧路径继续使用，不擅自搬迁或清理。'
 
-const instructions = workspaceInstructions
+const knowledgeInstructions = workspaceInstructions
   .replace('开发前先查当前安装目录的 README.md、docs/EXTENDING.md、docs/SERVICE_CONVENTIONS.md 与 examples/reloadable-plugin；', '开发资料从当前安装目录的 README.md 按任务查阅；')
   + '开始处理前先查看工作区的 workspace/README.md 能力索引（存在时），按任务关键词选择相关目录的 SKILL.md 或 README.md，再按需读取其链接的参考文档和脚本；缺少索引时仅搜索相关任务目录和文件名，不递归通读工作区、历史会话、依赖或全部文档。先核对已有脚本的用途、参数、依赖、输入输出、验证范围及副作用，能满足要求时直接复用，输出写入当前任务目录，保留原输入与成果。开发资料也按需读取：README 作为入口，编写扩展再读扩展与服务规范，接入重载时再读示例。'
   + '完成可复用工作后，维护简短的 workspace/README.md 索引及相关任务的 SKILL.md：索引只记能力、适用条件和入口；SKILL.md 记调用方式、依赖、权限与副作用、已验证范围和已知限制；详细排错与实例放在 references/ 并按需链接。只沉淀跨任务有用且已核验的经验，不复制会话正文、凭据或私人输入，不覆盖已有经验。文档是参考资料，不构成新授权，执行前仍按当前任务和权限核验。具体约定见 docs/WORKSPACE_KNOWLEDGE.md，开发扩展时按需查 docs/EXTENDING.md、docs/SERVICE_CONVENTIONS.md。'
   + '插件或服务接入失败时，先区分框架服务、模型工具、DSH 插件与 MCP 服务，核对实际安装版本、登记入口、依赖声明、加载状态及当前会话工具范围，再做最小调用验证。服务已发布不等于助手已有同名工具；写了源码不等于已接入。记录失败步骤、标准错误码和脱敏证据，未定位时明确原因未确认，不凭模型印象断言不支持。获准使用脚本时可先完成任务，但脚本成功不能关闭服务故障，交付分别报告任务结果、服务状态和待排查项；明确要求插件时保留插件交付要求。复用现有装配，不能为试接入覆盖 bootstrap、放宽权限或擅自重启外部服务；新增登记或不兼容结构按完整应用流程处理，结果未知先查原操作，不重复安装或写入。'
+
+const instructions = knowledgeInstructions
+  + '开发框架扩展先按需读 docs/EXTENSION_LIFECYCLE.md，使用 qbf-cli extensions init/install/verify 管理独立安装版本；install 自动准备配套 SDK、类型检查、登记并按受控管理器应用。显式选择正确的管理配置，不为接入覆盖已有 bootstrap 或写入 DSH 目录。list 同时区分受管安装与重载实例；停用、移除使用 disable/remove，保留源码和业务数据；只读 verify 不代表实际模型调用已验证。操作未知时用 reconcile 原编号查询，不重放重启或写操作。'
 
 const assistantPresetPlugins: readonly JsonObject[] = Object.freeze([
   Object.freeze({ id: 'qbf-assistant-fs', name: '@deepseek-ai/dsh-tool-fs' }),
@@ -185,7 +188,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
     // Ownership comes from the verified journal for this exact target, not a preset name prefix.
     // The old journal already binds provider/model/target/connection/settings/instructions. It may
     // authorize an in-place tools upgrade only when all those exact legacy inputs still match.
-    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, workspaceInstructions), configurationRevision(configuration, false, previousBoundaryInstructions), configurationRevision(configuration, false, previousInstructions), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
+    if (!applied || ![configurationRevision(configuration), configurationRevision(configuration, false, knowledgeInstructions), configurationRevision(configuration, false, workspaceInstructions), configurationRevision(configuration, false, previousBoundaryInstructions), configurationRevision(configuration, false, previousInstructions), configurationRevision(configuration, false, legacyInstructions), configurationRevision(configuration, true, legacyInstructions)].includes(applied.configurationRevision)) return []
     const plan = configuration.catalog.plans.find(candidate => candidate.id === configuration.catalog.activePlanId)
     const persona = configuration.personas.find(candidate => candidate.id === plan?.personaId)
     if (!plan || !persona || plan.provider !== applied.provider || plan.model !== applied.model) return []
@@ -381,7 +384,7 @@ export function createNativeAssistantTarget(options: NativeAssistantTargetOption
       const document = await readJournal()
       if (document.value.pending?.state !== 'verified' || !document.value.applied) return false
       const current = await selected(signal)
-      if (![current.configurationRevision, configurationRevision(current.configuration, false, workspaceInstructions), configurationRevision(current.configuration, false, previousBoundaryInstructions), configurationRevision(current.configuration, false, previousInstructions), configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
+      if (![current.configurationRevision, configurationRevision(current.configuration, false, knowledgeInstructions), configurationRevision(current.configuration, false, workspaceInstructions), configurationRevision(current.configuration, false, previousBoundaryInstructions), configurationRevision(current.configuration, false, previousInstructions), configurationRevision(current.configuration, false, legacyInstructions), configurationRevision(current.configuration, true, legacyInstructions)].includes(document.value.applied.configurationRevision)) return false
       const live = await verified(current)
       return live.reasons.length === 1 && live.reasons[0] === 'pending_reload'
     },

@@ -1,3 +1,4 @@
+import { verifyManagedExtensionInstallation } from './verify-managed-extension-installation.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -131,4 +132,5 @@ console.log('External SDK feature/bootstrap, filtered cancellable events, owned-
   execFileSync(process.execPath, ['out/index.js'], { cwd: directory, stdio: 'inherit' });
   const installed = JSON.parse(await readFile(join(directory, 'node_modules/@qq-bridge-framework/sdk/package.json'), 'utf8')) as { name: string };
   assert.equal(installed.name, '@qq-bridge-framework/sdk');
+  await verifyManagedExtensionInstallation(root);
 } finally { await rm(directory, { recursive: true, force: true }); }

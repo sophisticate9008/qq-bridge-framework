@@ -597,9 +597,8 @@ async function main(): Promise<void> {
   const rest = json ? rawRest.filter(value => value !== '--json') : rawRest;
   if (['help', '--help', '-h'].includes(action)) { help(); return; }
   if (action === 'extensions') {
-    const { ExtensionManagementError, manageExtensions } = await import('./extension-management.ts');
-    try { await manageExtensions(root, rest); }
-    catch (error) { if (error instanceof ExtensionManagementError) fail(error.message); throw error; }
+    const { managedExtensionCli } = await import('./managed-extension-cli.ts');
+    process.exitCode = await managedExtensionCli(rest, { cwd: process.cwd(), env: process.env, output: console.log, framework: root });
     return;
   }
   if (!['start', 'stop', 'restart', 'status', 'doctor', 'logs', 'console', 'protocol', 'describe', 'run', 'maintenance'].includes(action)) fail('未知命令，请运行 qbf-cli help。');

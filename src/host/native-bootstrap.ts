@@ -14,6 +14,7 @@ import { validatePackageConfigurationContribution, type PackageConfigurationCont
 import type { NativePackageContentIdentity } from '../contracts/native-package-content.ts';
 import { digest } from './data.ts';
 import { composeAgentInputPreparation } from './input-preparation.ts';
+import type { NativePackageContent } from './native-package-content.ts';
 import type { createReloadableExtensionRegistry } from './reloadable-extensions.ts';
 
 export type NativeBootstrapHost = ReturnType<typeof createBridgeHost>;
@@ -58,8 +59,10 @@ export interface NativeBootstrapMetadata {
   readonly trust: 'trusted-operator-code';
   readonly sandboxed: false;
   readonly requiresSeparateAuthorization: true;
+  readonly managedExtensions?: { readonly operationId: string | null; readonly revision: string; readonly items: readonly { readonly id: string; readonly revision: string; readonly enabled: boolean; readonly packages: readonly string[] }[] };
 }
 export interface LoadedNativeBootstrap {
+  readonly contentForPackage?: (id: string) => NativePackageContent | undefined;
   readonly verifyContent?: (signal: AbortSignal) => Promise<void>;
   readonly packageConfigurations?: readonly PackageConfigurationContribution[];
   readonly metadata: Readonly<NativeBootstrapMetadata>;

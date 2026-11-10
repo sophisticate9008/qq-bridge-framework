@@ -30,6 +30,8 @@ workspace/乐谱转换/
 
 默认管理配置为 `data/admin/config.json`。本机受管安装使用 `data/live/framework-admin.json`、`services.json` 和 `service-health.json`。显式 `--config` 和 `QQ_BRIDGE_FRAMEWORK_CONFIG` 环境变量优先；启动不会自动搬迁目录。原有自定义配置可继续通过明确路径启动。
 
+受管扩展的安装版本、SDK 副本、安装日志与操作历史保存在管理配置旁的 `extensions/`，选择记录为 `<配置文件>.extensions.json`；这些是持久安装与恢复资料，随配置备份，不作为缓存清理。扩展源码独立保留，运行数据继续由包的宿主存储管理。详见 [扩展管理](EXTENSION_LIFECYCLE.md)。
+
 账号内部的 `runtime/` 子目录是账号数据的一部分，例如 `data/admin/runtime/`。更新事务保存在 `data/framework-updates/`，更新控制记录和进程锁也位于 `data/`。程序更新与目录整理分别处理。
 
 发行清单禁止覆盖 `data/`、`workspace/`、`runtime/`、`private/` 和 `.cache/` 中的文件。完整包包含 README、公开文档、示例、SDK 源码和组件包；脚本与插件开发可直接查阅安装包内容。Docker 持久卷保存 data、workspace 和 private，详见 [Docker](DOCKER.md)。
