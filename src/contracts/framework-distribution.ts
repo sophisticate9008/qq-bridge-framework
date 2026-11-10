@@ -3,6 +3,7 @@ import { releaseVersion } from './framework-release.ts';
 export const MAX_DISTRIBUTION_BYTES = 8 * 1024 * 1024;
 
 export interface DistributionFile { readonly path: string; readonly sha256: string; readonly size: number; readonly executable: boolean }
+export interface DistributionComponent { readonly filename: string; readonly sha256: string }
 export interface FrameworkDistribution {
   readonly schema: 1;
   readonly kind: 'framework-runtime';
@@ -10,6 +11,7 @@ export interface FrameworkDistribution {
   readonly sourceCommit: string;
   readonly sourceModified: false;
   readonly files: readonly DistributionFile[];
+  readonly components?: readonly DistributionComponent[];
   readonly compatibility: { readonly data: 1; readonly overwrite: 1 };
 }
 export function isDistributionPath(value: unknown): value is string {
@@ -33,5 +35,16 @@ export function parseFrameworkDistribution(value: unknown): FrameworkDistributio
     names.add(file.path.toLowerCase()); total += Number(file.size);
   }
   if (total > 1024 * 1024 * 1024 || !names.has('package.json') || !names.has('dist/scripts/cli.js')) return null;
+  if (value.components !== undefined) {
+    if (!Array.isArray(value.components) || value.components.length !== 2) return null;
+    const expected = new Set(['sdk', 'dsh-bridge-plugin'].map(name => `qq-bridge-framework-${name}-${value.version}.tgz`));
+    for (const component of value.components) {
+      if (!isRecord(component) || typeof component.filename !== 'string' || !expected.delete(component.filename)
+        || typeof component.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(component.sha256)) return null;
+      const file = value.files.find(file => isRecord(file) && file.path === `components/${component.filename}`);
+      if (!isRecord(file) || file.sha256 !== component.sha256) return null;
+    }
+    if (expected.size) return null;
+  }
   return value as unknown as FrameworkDistribution;
 }

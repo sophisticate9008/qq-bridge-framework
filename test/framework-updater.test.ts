@@ -82,3 +82,22 @@ test('a completed swap retains its recovery lock until the supervisor records th
     await assert.rejects(readFile(join(setup.target, '.framework-update.lock')));
   } finally { await setup.dispose(); }
 });
+
+test('a release component manifest pins both package versions and agrees with the verified file inventory', async () => {
+  const setup = await fixture();
+  try {
+    const value = JSON.parse(await readFile(join(setup.source, 'distribution.json'), 'utf8'));
+    value.components = ['sdk', 'dsh-bridge-plugin'].map(name => {
+      const filename = `qq-bridge-framework-${name}-${value.version}.tgz`, sha256 = 'b'.repeat(64);
+      value.files.push({ path: `components/${filename}`, sha256, size: 1, executable: false });
+      return { filename, sha256 };
+    });
+    assert(parseFrameworkDistribution(value));
+    const mismatch = structuredClone(value); mismatch.components[0].sha256 = 'c'.repeat(64);
+    assert.equal(parseFrameworkDistribution(mismatch), null);
+    const skew = structuredClone(value); skew.components[1].filename = 'qq-bridge-framework-dsh-bridge-plugin-9.0.0.tgz';
+    assert.equal(parseFrameworkDistribution(skew), null);
+    assert.equal(parseFrameworkDistribution({ ...value, components: [value.components[0], value.components[0]] }), null);
+    assert.equal(parseFrameworkDistribution({ ...value, components: value.components.slice(0, 1) }), null);
+  } finally { await setup.dispose(); }
+});

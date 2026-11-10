@@ -5,6 +5,7 @@ import { MAX_DISTRIBUTION_BYTES, parseFrameworkDistribution, type FrameworkDistr
 import { compareReleaseVersions, releaseVersion } from '../contracts/framework-release.ts';
 import { isRecord } from '../contracts/values.ts';
 import { assertFrameworkProcessStopped } from './framework-process-lease.ts';
+import { isNativeApplicationId } from '../contracts/native-application.ts';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function exists(path: string): Promise<boolean> {
@@ -78,7 +79,8 @@ export async function rollbackFrameworkUpdate(target: string, id: string): Promi
 
 /** Caller stops the runtime and prepares production dependencies before entering this transaction. */
 export async function applyFrameworkUpdate(options: { readonly source: string; readonly target: string;
-  readonly allowMajor?: boolean; readonly allowSameVersion?: boolean; readonly dependencies?: boolean; readonly retainLock?: boolean }): Promise<string> {
+  readonly allowMajor?: boolean; readonly allowSameVersion?: boolean; readonly dependencies?: boolean; readonly retainLock?: boolean;
+  readonly transactionId?: string }): Promise<string> {
   const source = await realpath(options.source), target = await realpath(options.target);
   const contains = (parent: string, child: string) => { const path = relative(parent, child); return !path || !path.startsWith('..') && !isAbsolute(path); };
   if (contains(source, target) || contains(target, source)) throw new Error('update_directories_overlap');
@@ -95,8 +97,10 @@ export async function applyFrameworkUpdate(options: { readonly source: string; r
   if (oldValue.files !== undefined && !old) throw new Error('update_target_inventory_invalid');
   const paths = [...new Set([...distribution.files.map(file => file.path), ...old?.files.map(file => file.path) ?? [], 'distribution.json',
     ...(options.dependencies ? ['node_modules'] : [])])];
-  const id = randomUUID();
+  const id = options.transactionId ?? randomUUID();
+  if (!isNativeApplicationId(id)) throw new Error('update_id_invalid');
   const directory = await safePath(target, `data/framework-updates/${id}`);
+  if (await exists(directory)) throw new Error('update_transaction_already_received');
   // Complete preflight before taking ownership of any public file.
   const entries: UpdateEntry[] = [];
   for (const path of paths) {
