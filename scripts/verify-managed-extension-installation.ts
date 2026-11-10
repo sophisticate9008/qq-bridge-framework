@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp,mkdir,readFile,rm,writeFile } from 'node:fs/promises'
+import { mkdtemp,mkdir,readFile,readdir,rm,writeFile } from 'node:fs/promises'
 import {join} from 'node:path'
 import {createExtensionRegistry} from '../src/host/managed-extensions.ts'
 import {loadSelectedNativeBootstrap} from './bootstrap-loader.ts'
@@ -41,5 +41,12 @@ export async function verifyManagedExtensionInstallation(root:string):Promise<vo
     assert.equal((await registry.read()).revision,before.revision)
     await writeFile(join(project,'index.ts'),original,{mode:0o600})
     console.log('Managed extension CLI scaffold installed the matching real SDK, passed strict checking and preserved source files.')
+  } catch(error) {
+    // Only this generated fixture's bounded diagnostics enter CI logs; user installations keep their logs private.
+    const logs=join(directory,'admin/extensions/install-logs')
+    for(const name of (await readdir(logs).catch(()=>[])).sort().slice(0,8)) {
+      console.error(`SDK installation fixture ${name}:\n${(await readFile(join(logs,name),'utf8')).slice(-8192)}`)
+    }
+    throw error
   } finally {await rm(directory,{recursive:true,force:true})}
 }

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       source_only:
-        description: 仅诊断 Windows 源码聊天链路，不构建或验收安装包
+        description: 仅诊断 Windows 源码聊天与 SDK 接入，不构建或验收安装包
         required: false
         default: false
         type: boolean
@@ -36,9 +36,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24.12.0'
-      - run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test test/windows-file-security.test.ts
       - run: node --test --test-name-pattern='real local WS text passes through native host' test/native-chat-runtime.test.ts
+      - run: npm run build:sdk
+      - name: 配套 SDK 扩展创建、预检与加载
+        run: node --input-type=module -e "import {verifyManagedExtensionInstallation} from './scripts/verify-managed-extension-installation.ts'; await verifyManagedExtensionInstallation(process.cwd());"
   package:
     needs: html-renderer
     if: ${{ !inputs.source_only }}
