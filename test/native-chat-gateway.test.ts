@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import { createChatRepairStorage, chatRepairProcessStart } from '../src/storage/chat-repair.ts'
+import { NativeConfigurationRepository } from '../src/admin/native-configuration-repository.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -164,6 +167,23 @@ test('CLI-admin subprocess default mount applies real fixture YAML then manually
     const streamsBeforeRestart = streams.length
     const originalStream = streams.at(-1)!
     await shutdown()
+    const repairDirectory = join(directory, 'runtime')
+    const repairStorage = createChatRepairStorage(repairDirectory)
+    const repairId = randomUUID(), at = Date.now()
+    const intentRepository = new NativeConfigurationRepository(repairDirectory)
+    const savedIntent = await intentRepository.readRunningIntent()
+    assert.equal(savedIntent.value.desiredRunning, true)
+    await repairStorage.modify(async journal => ({ ...journal, records: [...journal.records, {
+      operation: { id: repairId, state: 'running', phase: 'starting-services', createdAt: at, updatedAt: at, reasons: [] },
+      worker: { pid: process.pid, started: await chatRepairProcessStart(process.pid) },
+    }] }))
+    await launch()
+    assert.equal((await runtime()).chatReady, false, 'active repair must suspend ordinary startup')
+    assert.deepEqual((await intentRepository.readRunningIntent()).value, savedIntent.value, 'maintenance preserves running intent')
+    assert.equal(calls.filter(call => call.method === 'session/prompt').length, 1)
+    await shutdown()
+    await repairStorage.modify(journal => ({ ...journal, records: journal.records.map(record => record.operation.id === repairId
+      ? { ...record, operation: { ...record.operation, state: 'failed', updatedAt: Date.now(), reasons: ['fixture_repair_failed'] } } : record) }))
     await launch()
     await until(() => onebots.size === 1)
     assert.equal((await runtime()).protocolConnected, true)

@@ -111,6 +111,7 @@ const GENERAL_HELP = `QQ Bridge Framework 命令行
   qbf-cli protocol [napcat|snowluma]
   qbf-cli extensions [list|reload <插件标识>]
   qbf-cli maintenance [--apply]
+  qbf-cli bridge <status|download|install|update|rollback|remove|reconcile> [参数]
   qbf-cli serve [--config <管理配置>] [--admin-only]
   qbf-cli update <新包目录> [--allow-major]
   qbf-cli --version
@@ -766,6 +767,10 @@ async function prepareStartupAssets(): Promise<void> {
 }
 
 export async function runCli(argumentsList: readonly string[], io: CliIo = DEFAULT_IO): Promise<number> {
+  if (argumentsList[0] === 'bridge') {
+    const { bridgeCli } = await import('./bridge-cli.ts');
+    return bridgeCli(argumentsList.slice(1), io.stdout, io.stderr);
+  }
   if (argumentsList[0] === 'serve') {
     try {
       parseCliArguments(['start', ...argumentsList.slice(1)]);

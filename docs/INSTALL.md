@@ -95,7 +95,7 @@ npm start
 
 ## 5. 准备 DSH 桥接插件
 
-按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.13.7.tgz` 或 Release 单独下载的同版插件，在所管理的 DSH Node 项目中安装，并将插件加载到已有 Cordis Context。仅安装 npm 包不会自动加载插件。
+按照 [DSH 接入的版本与安装](DSH.md#版本与安装)，使用完整框架包 `components/qq-bridge-framework-dsh-bridge-plugin-1.13.7.tgz` 或 Release 单独下载的同版插件，按该版本的 DSH 原生组合包流程安装并核验实际加载。2.0 候选使用 `qbf-cli bridge install 2.0.0`，首次迁移见 [安装生命周期](INSTALLATION_LIFECYCLE.md)。
 
 确认独立 DSH web 已启动，并在控制台“连接设置”选择自动连接本机 DSH。本机自动鉴权要求 DSH 与框架由同一系统用户运行，凭据文件归该用户所有且权限为 `0600` 或 `0400`。默认无需手填地址、令牌和凭据路径。远程实例使用高级手动接入。
 

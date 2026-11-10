@@ -28,10 +28,13 @@ export interface RecoveryObservation { readonly eligible: boolean; readonly faul
 
 /** Called after saved-intent and maintenance checks. Health is the same read-only evidence shown by the console. */
 export function observeChatRecovery(status: { readonly state: string; readonly chatReady: boolean; readonly canStart: boolean;
+  readonly lastError?: string | null;
   readonly missingReasons: readonly string[];
   readonly configurationImpact?: { readonly changedDependencies: readonly string[] } | null }, health: ChatHealth | null, managedRepair: boolean): RecoveryObservation {
   const blocked = (reason: string): RecoveryObservation => ({ eligible: false, fault: false, reason });
   if (!['stopped', 'error', 'running'].includes(status.state)) return blocked('lifecycle_busy');
+  if (!status.chatReady && ['NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE', 'NATIVE_CHAT_CORRELATION_PLUGIN_AUTH_REJECTED',
+    'NATIVE_CHAT_CORRELATION_PLUGIN_INVALID'].includes(status.lastError ?? '')) return blocked('dsh_component_requires_attention');
   const recoverable = new Set(['runtime_not_started', 'native_runtime_lease_blocked', 'native_runtime_lease_unknown',
     'agent_follow_unavailable', 'framework_tool_channel_unavailable', 'interaction_channel_unavailable',
     'host_not_ready', 'execution_controller_unavailable', 'execution_correlation_unavailable', 'onebot_protocol_not_connected',

@@ -41,3 +41,5 @@ workspace/乐谱转换/
 5. 启动框架后核对聊天、助手、插件、会话绑定、附件读取和实际模型调用。失败时按迁移记录恢复；不重置会话或重放未知任务。
 
 默认模拟记录写入 `private/maintenance/simulations/`，索引仍保存实际绝对路径。旧模拟目录包含来源归属和执行证据，保留其原路径或完成专门的索引迁移后再移动。维护命令处理已登记的新模拟目录，保护最近四轮，超过三十天且无引用的旧轮次才参与回收。发行产物写入 `private/maintenance/releases/v<版本>/`；远端历史 Release 保留。
+
+DSH 原生桥接包的持久归档位于独立 `DSH_HOME/packages/qq-bridge-framework/`，操作记录位于 `DSH_HOME/storages/qbf-bridge-management/`，由 DSH 所属安装保留。框架维护回收旧快照前检查已配置 DSH profile 的依赖声明和实际链接，保护仍被旧安装引用的程序；读取无法核验时停止清理。新安装不链接框架快照。

@@ -23,3 +23,7 @@ export async function startRepairServices(targets: readonly string[], deadline: 
   }
   throw new Error('部分受管服务尚未恢复，管理页面可查看恢复状态。')
 }
+/** Framework recovery owns these hosts even when other local services are explicitly managed. */
+export function frameworkRepairServiceIds(order: readonly string[]): string[] {
+  return order.filter(id => id === 'framework-admin' || id === 'framework-gateway');
+}

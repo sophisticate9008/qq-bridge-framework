@@ -1510,7 +1510,14 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
           authorize: (conversationId, signal) => guard(conversationId, signal, true, 'resource') })
         await dsh.verify(controller.signal)
         if (!dsh.bridgePlugin) failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE')
-        const plugin = await dsh.bridgePlugin.describe(controller.signal).catch(() => failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE'))
+        const plugin = await dsh.bridgePlugin.describe(controller.signal).catch(error => {
+          const code = errorCode(error, '')
+          if (code === 'DSH_PLUGIN_UNAVAILABLE') failure('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE')
+          if (['DSH_PLUGIN_AUTH_REJECTED', 'DSH_AUTH_REJECTED'].includes(code)) failure('NATIVE_CHAT_CORRELATION_PLUGIN_AUTH_REJECTED')
+          if (['DSH_PLUGIN_INVALID_RESPONSE', 'DSH_INVALID_RESPONSE'].includes(code)) failure('NATIVE_CHAT_CORRELATION_PLUGIN_INVALID')
+          if (['DSH_TIMEOUT', 'DSH_TRANSPORT_UNKNOWN', 'DSH_ABORTED'].includes(code)) throw error
+          return failure('NATIVE_CHAT_CORRELATION_PLUGIN_CHECK_FAILED')
+        })
         requestScopedCancellation = plugin.methods?.includes('bridgePlugin/cancelExecution') === true && dsh.bridgePlugin.cancelExecution !== undefined
         pluginEpoch = plugin.issuerEpoch
         correlationRecovery = createNativeCorrelationRecovery({ issuerEpoch: plugin.issuerEpoch, signal: controller.signal,

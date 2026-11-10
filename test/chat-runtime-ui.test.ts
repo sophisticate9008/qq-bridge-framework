@@ -7,7 +7,9 @@ const status = { state: 'stopped', canStart: true, configurationIssues: [], chat
   missingReasons: ['runtime_not_started', 'onebot_protocol_not_connected'], revisions, activeRevisions: null, lastError: null };
 
 test('runtime errors explain missing plugins and retained sessions without revealing raw diagnostics', () => {
-  assert.match(chatRuntimeLastError('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE'), /请求关联插件.*安装.*加载.*认证/);
+  assert.match(chatRuntimeLastError('NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE'), /桥接插件.*安装.*加载/);
+  assert.match(chatRuntimeLastError('NATIVE_CHAT_CORRELATION_PLUGIN_AUTH_REJECTED'), /拒绝当前认证/);
+  assert.match(chatRuntimeLastError('NATIVE_CHAT_CORRELATION_PLUGIN_CHECK_FAILED'), /无法判断是否需要重新安装/);
   assert.match(chatRuntimeLastError('NATIVE_CHAT_SESSION_CONFIGURATION_CONFLICT'), /保留上下文/);
   assert.match(chatRuntimeLastError('NATIVE_CHAT_PERSONA_VERSION_MIGRATION_REQUIRED'), /显式迁移/);
   assert.match(chatRuntimeLastError('NATIVE_CHAT_STOP_UNKNOWN'), /不要重复启动/);

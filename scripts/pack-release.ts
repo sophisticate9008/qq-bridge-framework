@@ -28,6 +28,7 @@ async function pack(directory: string, name: string): Promise<string> {
   for (const file of packed.files) {
     assert(isRecord(file) && typeof file.path === 'string');
     assert(['package.json', 'README.md', 'LICENSE', 'NOTICE.md'].includes(file.path)
+      || name === '@qq-bridge-framework/dsh-bridge-plugin' && file.path === 'cordis.patch.yml'
       || /^dist\/(?!.*(?:^|\/)\.\.\/)[a-z0-9./-]+\.(?:js|d\.ts)$/.test(file.path), `Unexpected package file: ${file.path}`);
     assert(!/(?:^|\/)(?:runtime|node_modules|test|admin|web|scripts)(?:\/|$)/.test(file.path));
   }

@@ -18,6 +18,7 @@ function fixture() {
   copyFileSync(new URL(`../scripts/runtime-configuration.${extension}`, import.meta.url), join(directory, `scripts/runtime-configuration.${extension}`));
   copyFileSync(new URL(`../scripts/service-processes.${extension}`, import.meta.url), join(directory, `scripts/service-processes.${extension}`));
   copyFileSync(new URL(`../scripts/service-lifecycle.${extension}`, import.meta.url), join(directory, `scripts/service-lifecycle.${extension}`));
+  copyFileSync(new URL(`../scripts/repair-service-start.${extension}`, import.meta.url), join(directory, `scripts/repair-service-start.${extension}`));
   const service = (id: string, extra: Record<string, unknown> = {}) => ({
     command: process.execPath, args: [], cwd: directory, screen: `qbf-scope-${basename(directory)}-${id}`,
     group: 'core', ...extra,
@@ -123,6 +124,31 @@ test('real restart restores stopped framework processes when a later worker cann
     assert.equal(external.listening, true);
   } finally {
     for (const id of ['framework-admin', 'framework-gateway']) values.run('stop', id);
+    await new Promise<void>(resolve => external.close(() => resolve()));
+    rmSync(values.directory, { recursive: true, force: true });
+  }
+});
+
+
+test('chat repair leaves DSH, protocol clients and auxiliary listeners running even when explicitly managed', {
+  skip: process.platform !== 'linux' || !existsSync('/usr/bin/screen'), timeout: 20_000,
+}, async () => {
+  const values = fixture();
+  const external = createServer();
+  try {
+    await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve));
+    const address = external.address();
+    assert(address && typeof address !== 'string');
+    for (const id of ['dsh', 'napcat', 'auxiliary'] as const) {
+      Object.assign(values.configuration.services[id], { managed: true, port: { host: '127.0.0.1', port: address.port } });
+    }
+    values.save();
+    const result = spawnSync(process.execPath, [join(values.directory, `scripts/service-manager.${extension}`), 'repair-services-stop'], {
+      encoding: 'utf8', timeout: 15_000, env: { ...process.env, QQ_BRIDGE_FRAMEWORK_OPS_LOCKED: '1' },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(external.listening, true);
+  } finally {
     await new Promise<void>(resolve => external.close(() => resolve()));
     rmSync(values.directory, { recursive: true, force: true });
   }

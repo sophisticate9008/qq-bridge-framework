@@ -505,9 +505,9 @@ async function main(): Promise<void> {
     if (argumentsList.length !== 4 || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id ?? '')
       || flag !== '--config' || !absolute(filename)) fail('聊天修复参数无效。');
     const config = await load();
-    for (const id of ['dsh', 'framework-admin']) {
+    for (const id of ['framework-admin']) {
       const service = component(config, id, true);
-      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管 DSH 与框架管理服务。');
+      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
     }
     const { runChatRepair } = await import('./chat-repair.ts');
     const command = async (value: string) => {
@@ -520,39 +520,36 @@ async function main(): Promise<void> {
       if (result.code !== 0) throw Object.assign(new Error('Managed repair stage failed.'), { code:
         value === 'repair-services-stop' ? 'chat_repair_stop_failed' : 'chat_repair_start_failed' });
     };
-    await runChatRepair(filename, id, { dshHome: config.dshHome,
+    await runChatRepair(filename, id, {
       async guardian() {
         await new Promise<void>((resolve, reject) => {
           const child = spawn(process.execPath, [entry, 'repair-chat-guardian', id, '--config', filename], { stdio: 'ignore', detached: false });
           child.once('error', () => reject(Object.assign(new Error('Guardian could not start'), { code: 'chat_repair_guardian_unavailable' })));
           child.once('spawn', () => { child.unref(); resolve(); });
         });
-      }, ensureDsh: () => command('repair-services-prepare'),
+      },
       stop: () => command('repair-services-stop'), start: () => command('repair-services-start') });
     return;
   }
-  if (['repair-services-prepare', 'repair-services-stop', 'repair-services-start', 'repair-services-rescue'].includes(action)) {
+  if (['repair-services-stop', 'repair-services-start', 'repair-services-rescue'].includes(action)) {
     if (action === 'repair-services-rescue' ? argumentsList.length !== 2 || !/^[a-f0-9-]{36}$/.test(argumentsList[1] ?? '') : argumentsList.length !== 1) fail('聊天修复参数无效。');
     const config = await load();
-    for (const id of ['dsh', 'framework-admin']) {
+    for (const id of ['framework-admin']) {
       const service = component(config, id, true);
-      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管 DSH 与框架管理服务。');
+      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
     }
     if (process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') { await lockAndRun(config, argumentsList); return; }
     if (action === 'repair-services-rescue') process.env.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE = argumentsList[1];
-    // Protocol clients never belong to chat repair, even if a legacy manifest marks them managed.
-    const targets = ordered(config).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
+    const { startRepairServices, frameworkRepairServiceIds } = await import('./repair-service-start.ts');
+    // Engine, protocol clients and auxiliary applications retain their independent lifecycle.
+    const targets = frameworkRepairServiceIds(ordered(config)).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
       && !['napcat', 'snowluma'].includes(config.services[id]!.group));
-    if (action === 'repair-services-prepare') {
-      // Starting an already ready DSH does not interrupt a working chat. Live capability discovery needs its API.
-      await startOne(config, 'dsh', Date.now() + 60_000);
-    } else if (action === 'repair-services-stop') {
+    if (action === 'repair-services-stop') {
       const deadline = Date.now() + 60_000;
       for (const id of targets.toReversed()) await stopOne(config, id, deadline);
       // Recheck every target: only this proof permits editing abandoned configuration controllers.
       for (const id of targets) if ((await sessions(config.services[id]!)).length > 0 || await listening(config.services[id]!)) fail('受管服务尚未全部停止。');
     } else {
-      const { startRepairServices } = await import('./repair-service-start.ts');
       const starts = targets.filter(id => config.services[id]!.enabled !== false);
       await startRepairServices(starts, Date.now() + (action === 'repair-services-start' ? 240_000 : 140_000), {
         bootstrapAdministrator: deadline => startOne(config, 'framework-admin', deadline, true),

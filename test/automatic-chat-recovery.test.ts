@@ -97,3 +97,11 @@ test('transient faults and an aborted observation cannot dispatch recovery', asy
     await recovery.tick(controller.signal); assert.equal(calls, 0);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('missing, unauthorized and incompatible bridge components require DSH management instead of repeated framework repair', () => {
+  for (const lastError of ['NATIVE_CHAT_CORRELATION_PLUGIN_UNAVAILABLE', 'NATIVE_CHAT_CORRELATION_PLUGIN_AUTH_REJECTED', 'NATIVE_CHAT_CORRELATION_PLUGIN_INVALID']) {
+    const observation = observeChatRecovery({ ...readyStatus, chatReady: false, lastError }, readyHealth, true);
+    assert.equal(observation.eligible, false, lastError);
+    assert.equal(observation.reason, 'dsh_component_requires_attention');
+  }
+});

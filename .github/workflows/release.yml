@@ -43,6 +43,15 @@ jobs:
         run: npm run test:release
       - name: 同批桥接组件原生附件路径与私有存储
         run: node scripts/verify-work-path-release.ts
+      - name: 保存独立桥接组件供隔离联调
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: bridge-component
+          path: |
+            private/maintenance/releases/v*/qq-bridge-framework-dsh-bridge-plugin-*.tgz
+            private/maintenance/releases/v*/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 3
       - name: 保存经过安装验证的发行包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

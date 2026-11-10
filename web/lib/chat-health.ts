@@ -34,8 +34,8 @@ export function chatHealthGuidance(layer: ChatHealthLayer): string {
     return '请检查协议端 HTTP 服务及发送地址；若使用框架网关，再检查网关状态。接口恢复后重新检查，未知送达的消息不重发。';
   }
   if (layer.id === 'dsh') return layer.reason === 'authentication_failed' || layer.reason === 'credentials_unavailable'
-    ? '请核对 DSH 的鉴权设置；本机受管 DSH 可使用“一键恢复聊天”自动恢复。'
-    : '请检查 DSH 服务和网络；本机受管 DSH 可使用“一键恢复聊天”，远程 DSH 请在其部署端恢复。';
+    ? '请在 DSH 中核对鉴权设置，再让框架重新连接。'
+    : '请在 DSH 的部署端检查服务和网络；服务可用后框架会重新连接。';
   if (layer.id === 'replies') {
     const causes: Readonly<Record<string, string>> = {
       dsh_follow_ended: 'DSH 会话订阅连接已关闭。', dsh_follow_pong_timeout: 'DSH 会话订阅心跳超时。',

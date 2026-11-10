@@ -11,6 +11,7 @@ import { DshAdapterError } from './dsh.ts'
 import type { DshClientPort, DshCreateSessionRequest, DshFollowEvent, DshFollowRequest, DshInteractionConnectionRequest, DshInteractionEvent, DshInteractionPort, DshInteractionResponseRequest, DshPortResult } from './dsh.ts'
 import { createDshBridgePluginPort } from './dsh-tool-scope.ts'
 import type { DshBridgePluginPort } from './dsh-tool-scope.ts'
+import { createDshPluginManagement, type DshPluginManagement } from './dsh-plugin-management.ts'
 import { createDshSessionMigrationPort, type DshSessionMigrationPort } from './dsh-session-migration.ts'
 import { createDshFrameworkToolPort, type DshFrameworkToolPort, type DshFrameworkToolMethod } from './dsh-framework-tools.ts'
 import { createDshWorkPort, dshWorkRpcError, type DshWorkPort, type DshWorkMethod } from './dsh-work.ts'
@@ -39,6 +40,7 @@ export interface DshJsonRpcOptions {
 }
 
 export interface DshJsonRpcPort extends DshClientPort, DshInteractionPort {
+  readonly pluginManagement: DshPluginManagement
   interactionStatus?(): { readonly state: 'idle' | 'connecting' | 'connected' | 'closed' | 'error'; readonly lastError: string | null }
   readonly pluginModels: PluginModelBackend
   configureSession?(request: { readonly sessionId: string; readonly conversationId: string; readonly signal: AbortSignal }): Promise<void>
@@ -191,6 +193,11 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
     follow: request => pluginFollow(request), cancel: request => port.cancel(request),
   }, invoke: (method, input, signal) => rpc(method, method === 'bridgePlugin/pluginModels' ? undefined : input, signal) })
   const port: DshJsonRpcPort = Object.freeze({
+    pluginManagement: createDshPluginManagement(async (method, input, signal) => {
+      const result = await rpc(method, input, signal, true)
+      if (!result.ok) throw failure('DSH_PLUGIN_MANAGEMENT_UNAVAILABLE')
+      return result.value
+    }),
     pluginModels,
     bridgePlugin,
     async configureSession(request: { readonly sessionId: string; readonly conversationId: string; readonly signal: AbortSignal }) {

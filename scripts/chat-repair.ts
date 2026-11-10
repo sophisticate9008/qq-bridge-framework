@@ -22,8 +22,6 @@ import { ensurePrivateDirectory, readDocument } from '../src/storage/private-jso
 import { privatePermissions } from '../src/storage/file-security.ts'
 
 interface RepairPorts {
-  readonly dshHome: string
-  ensureDsh(): Promise<void>
   guardian(): Promise<void>
   stop(): Promise<void>
   start(): Promise<void>
@@ -200,12 +198,12 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     if (token.length < 24) fail('chat_repair_authentication_unavailable')
     await update({ phase: 'checking' })
     await assertSingleAccount()
+    const maintenance = await createNativeDshRestartStorage(directory).read()
+    if (maintenance.value.records.some(entry => ['running', 'unknown'].includes(entry.operation.state))) fail('chat_repair_dsh_maintenance_unresolved')
     const configuration = await readNativeChatConfigurationUnlocked(directory)
     const adapter = configuration.adapters.dshAgent
     if (!adapter.enabled || !adapter.localCredentialsPath || !['localhost', '127.0.0.1', '[::1]'].includes(new URL(adapter.endpoint).hostname)) fail('chat_repair_local_dsh_required')
-    if (await realpath(adapter.localCredentialsPath) !== await realpath(join(ports.dshHome, '.credentials.yaml'))) fail('chat_repair_dsh_target_mismatch')
-    // Only start DSH, preserving any working chat. Preflight capabilities require its authenticated API even after an outage.
-    await ports.ensureDsh()
+    // DSH must already be available. Framework recovery never installs, starts or restarts its engine.
     signal.throwIfAborted()
     const target = await discoverLocalDshDeployment({ endpoint: adapter.endpoint, localCredentialsPath: adapter.localCredentialsPath, signal })
     if (await realpath(target.credentialsPath) !== await realpath(adapter.localCredentialsPath)) fail('chat_repair_dsh_target_mismatch')
@@ -244,18 +242,7 @@ export async function runChatRepair(configurationFilename: string, operationId: 
         nativeApplicationRequiresReconciliation(entry.snapshot) ? { ...entry, snapshot: { ...entry.snapshot, state: 'blocked' as const,
           reasons: ['application_interrupted_by_chat_repair'], updatedAt: Date.now() } } : entry) })
     }
-    const restarts = createNativeDshRestartStorage(directory)
-    const maintenance = await restarts.read()
-    if (maintenance.value.records.some(entry => ['running', 'unknown'].includes(entry.operation.state))) {
-      await backup(join(backups, 'dsh-restarts.json'), maintenance.value)
-      await restarts.write(maintenance.revision, { ...maintenance.value, records: maintenance.value.records.map(entry =>
-        ['running', 'unknown'].includes(entry.operation.state) ? { ...entry, operation: { ...entry.operation, state: 'blocked' as const,
-          reasons: ['dsh_restart_interrupted_by_chat_repair'], updatedAt: Date.now() } } : entry) })
-    }
-    for (const filename of [...new Set([`${join(dirname(target.profilePath), 'package.json')}.lock`, `${target.credentialsPath}.lock`])]) {
-      await retireStoppedDshWriterLock(filename, backups)
-    }
-    await repository.clearRunningIntent()
+    // Maintenance suspends framework startup through its repair journal, preserving the user's running intent.
     await update({ phase: 'starting-services' })
     await ports.start()
     servicesRestored = true
@@ -271,7 +258,7 @@ export async function runChatRepair(configurationFilename: string, operationId: 
     const applicationId = randomUUID()
     await update({ phase: 'applying' }, applicationId)
     let result: unknown
-    try { result = await call('/api/chat/application', { operationId: applicationId, revisions: runtime.revisions, deploy: true }) }
+    try { result = await call('/api/chat/application', { operationId: applicationId, revisions: runtime.revisions, deploy: false }) }
     catch {
       // A lost response never causes a second apply. Query the original durable operation.
       result = await readWhenAvailable(`/api/chat/application?id=${encodeURIComponent(applicationId)}`)

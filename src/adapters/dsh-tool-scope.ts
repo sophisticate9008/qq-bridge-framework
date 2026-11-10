@@ -1,3 +1,4 @@
+import { DshAdapterError } from './dsh.ts'
 import { parseNativeToolInventory, type NativeToolInventory } from '../contracts/native-tool-inventory.ts'
 import { DSH_EXECUTION_EVIDENCE_PROTOCOL, type DshExecutionEvidence, type DshExecutionEvidenceRequest } from '../contracts/dsh-execution-evidence.ts'
 import { readDshExecutionEvidence } from './dsh-execution-evidence.ts'
@@ -62,12 +63,12 @@ export type DshBridgeScopeInspection = {
 type PluginMethod = 'bridgePlugin/cancelExecution' | 'bridgePlugin/inspectToolInventory' | 'bridgePlugin/inspectExecution' | 'bridgePlugin/describe' | 'bridgePlugin/inspectScope' | 'bridgePlugin/claimReceipts'
 
 function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('DSH_PLUGIN_INVALID_RESPONSE')
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DshAdapterError('DSH_PLUGIN_INVALID_RESPONSE', 'DSH_PLUGIN_INVALID_RESPONSE')
   return value as Record<string, unknown>
 }
 
 function requireProof(condition: unknown): asserts condition {
-  if (!condition) throw new Error('DSH_PLUGIN_INVALID_RESPONSE')
+  if (!condition) throw new DshAdapterError('DSH_PLUGIN_INVALID_RESPONSE', 'DSH_PLUGIN_INVALID_RESPONSE')
 }
 
 function watermark(value: unknown): value is number {

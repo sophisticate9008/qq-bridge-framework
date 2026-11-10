@@ -14,7 +14,7 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 ## 版本与安装
 
-当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **1.13.7**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
+当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **2.0.0 候选**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
 
 
 ### 安全依赖覆盖
@@ -40,55 +40,26 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 下一次实际模型调用后，pi-ai 的 `dist/api/qbf-provider-usage-observed.json` 保留最近一次上游用量诊断：只包含白名单数值计数、缓存报告标记及时间，不记录请求、正文或凭据。文件以 `0600` 权限原子覆盖，不累积历史；诊断写入失败不影响聊天。它用于区分网关缺少缓存字段与下游映射丢失。
 
-从 [v1.13.7 Release](https://github.com/sophisticate9008/qq-bridge-framework/releases/tag/v1.13.7) 下载插件 tarball，或直接使用完整框架包内的 `components/qq-bridge-framework-dsh-bridge-plugin-1.13.7.tgz`。无需在安装机器上构建插件。
+### 原生组合包安装
 
-开发者也可在框架仓库根目录执行以下命令生成安装包：
-
-```sh
-npm --prefix packages/dsh-bridge-plugin ci --ignore-scripts --no-audit --no-fund
-npm --prefix packages/dsh-bridge-plugin run build
-artifact_dir="$(mktemp -d)"
-(cd packages/dsh-bridge-plugin && npm pack --ignore-scripts --pack-destination "$artifact_dir")
-printf '安装包目录：%s\n' "$artifact_dir"
-```
-
-记下输出的 `.tgz` 绝对路径。在你管理的独立 DSH Node 项目目录中明确安装它，例如：
+桥接组件从 2.0 起包含 DSH 原生组合包清单，由 DSH 插件管理器安装和选择加载。框架提供固定包名的命令入口，默认自动发现本机 DSH：
 
 ```sh
-npm install --ignore-scripts /absolute/path/qq-bridge-framework-dsh-bridge-plugin-1.13.7.tgz
+qbf-cli bridge status
+qbf-cli bridge install 2.0.0
 ```
 
-安装前核对该实例的 SDK 版本与锁文件。安装包只包含公开清单及编译后的插件文件，不包含框架配置、凭据或会话数据。隔离打包验收会在临时项目中安装真实 tarball，核对既有依赖的版本和完整性，并运行官方 SDK 的加载及 owner 认证测试。
+正式发布前，以上在线命令没有对应 Release 可下载。候选测试使用已经核验的完整包：`qbf-cli bridge install 2.0.0 --from /absolute/path/to/unpacked-package`。高级本机接入需同时指定 `--home` 与回环 `--endpoint`，适用于没有 Linux 自动发现的部署。
 
-## 将插件加载到 DSH
+归档经同版 SHA256SUMS 核验后保存在 `DSH_HOME/packages/qq-bridge-framework/`，DSH 将包安装到自己的依赖存储。运行入口固定为 `@qq-bridge-framework/dsh-bridge-plugin`，不链接框架版本目录。也可以在 DSH 自己的插件管理界面安装核验后的持久归档；不要同时保留手工 Loader 行。
 
-安装 npm 包后，还需让独立 DSH 实例的 Cordis 启动过程加载它。已经实际验证的入口是官方 `@deepseek-ai/cordis-plugin-loader` **1.0.6**。若实例尚未提供 Loader，先在该独立项目中明确安装：
+`status` 分别显示安装版本、实际加载版本、启用状态与原操作。命令不会启动或重启 DSH、QQ。退出码 2／`restart-required` 表示依赖已经安装但尚需在 DSH 中完成加载；重载后再次检查实际版本，再让框架重新连接。当前支持的原生管理接口来自 DSH `0.2.1-rc.2`。
 
-```sh
-npm install --ignore-scripts @deepseek-ai/cordis-plugin-loader@1.0.6
-```
+更新、回滚、卸载和旧目录链接迁移见 [安装生命周期](INSTALLATION_LIFECYCLE.md)。归档含公开清单、组合包 patch 与编译插件；不含框架配置、凭据、会话或宿主依赖。开发者打包仍使用 `npm --prefix packages/dsh-bridge-plugin run build` 与该目录下的 `npm pack --ignore-scripts`。
 
-然后在其启动装配中使用：
+### 自定义宿主的程序加载
 
-```ts
-import type { Context } from '@deepseek-ai/cordis';
-import Loader from '@deepseek-ai/cordis-plugin-loader';
-
-// 在独立 DSH 的启动代码中调用；ctx 是该实例已有的 Cordis Context。
-// 此示例适用于尚未安装 Loader 的 ctx。
-export async function loadFrameworkBridge(ctx: Context): Promise<void> {
-  const loader = ctx.plugin(Loader);
-  await loader.inertia;
-  await ctx.loader.create({
-    name: import.meta.resolve('@qq-bridge-framework/dsh-bridge-plugin'),
-  });
-  await ctx.loader.await();
-}
-```
-
-调用前，该 DSH Context 必须已经提供 `agents`、`agentPresets`、`tools` 和 `typertGateway` 服务。已有 Loader 的实例复用原 Loader，只执行 `create` 和 `await`；同一实例只加载一份桥接插件。实际集成测试还装配官方 session、projection、system prompt、LLM、registry、remote access、gateway、preset 和 agent loop 服务，覆盖了插件入口及真实 session controller。
-
-上例是经过测试的程序加载 API。现有 DSH 实例如何持久保存这段启动装配，应由该实例自己的启动管理方式决定。本框架没有提供已验证的通用永久 Cordis YAML 插入方案，不会在控制台连接或应用方案时自动安装 npm 包或首次加载插件。已受管实例在应用现有会话提示词或助手配置时，可能通过本机维护服务重启 DSH，见下文。
+自行嵌入 DSH SDK 的开发者可通过现有 Cordis Loader 创建插件：`await ctx.loader.create({ name: import.meta.resolve('@qq-bridge-framework/dsh-bridge-plugin') })`，再 `await ctx.loader.await()`。Context 须提供 `agents`、`agentPresets`、`tools` 与 `typertGateway`。这是自行维护的装配方式，原生组合包管理命令会拒绝接管此类手工加载，避免重复注册。
 
 插件通过 owner 认证后的 `bridgePlugin/describe` 声明 `qq-bridge-framework.dsh-bridge/1`、插件和 SDK 版本、当前 `issuerEpoch` 及证据保留能力。普通模型工具调用者不能借用这个管理身份。
 

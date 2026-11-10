@@ -27,19 +27,20 @@ try {
   const filename = object(packed[0]).filename
   assert(typeof filename === 'string' && /^[A-Za-z0-9_.-]+\.tgz$/.test(filename))
   const files = object(packed[0]).files
-  const publicFiles = ['package.json', 'README.md', 'LICENSE', 'NOTICE.md']
+  const publicFiles = ['package.json', 'README.md', 'LICENSE', 'NOTICE.md', 'cordis.patch.yml']
   const modules = (await readdir(join(root, 'src'))).filter(name => /^[a-z0-9-]+\.ts$/.test(name)).map(name => name.slice(0, -3))
   const expectedFiles = [...publicFiles, ...modules.flatMap(name => [`dist/${name}.js`, `dist/${name}.d.ts`])].sort()
   assert(Array.isArray(files))
   assert.deepEqual(files.map(file => object(file).path).sort(), expectedFiles, 'The tarball must match its complete public module inventory')
   assert(files.every(file => {
     const path = object(file).path
-    return typeof path === 'string' && (['package.json', 'README.md', 'LICENSE', 'NOTICE.md'].includes(path) || /^dist\/[a-z0-9-]+\.(?:js|d\.ts)$/.test(path))
+    return typeof path === 'string' && (publicFiles.includes(path) || /^dist\/[a-z0-9-]+\.(?:js|d\.ts)$/.test(path))
   }), 'The release tarball may contain only its public manifest, README, licenses and compiled plugin')
   for (const required of ['LICENSE', 'NOTICE.md']) {
     assert(files.some(file => object(file).path === required), `Missing release license: ${required}`)
   }
   const tarball = join(temporary, filename)
+  const tarballSha256 = createHash('sha256').update(await readFile(tarball)).digest('hex')
   const name = 'dsh-bridge-plugin-isolated-install-fixture'
   const dependencies = { '@qq-bridge-framework/dsh-bridge-plugin': `file:${tarball}` }
   manifest.name = name
@@ -64,6 +65,8 @@ try {
     const info = await lstat(join(fixture, 'node_modules', dependency))
     assert(info.isDirectory() && !info.isSymbolicLink(), 'Packed verification must use installed packages, not linked old SDKs')
   }
+  // Runtime resolution belongs to DSH, even after the framework/download source is gone.
+  await rm(tarball)
   await mkdir(join(fixture, 'test'))
   await cp(join(root, 'test/sdk-entry.test.ts'), join(fixture, 'test/sdk-entry.test.ts'))
   await cp(join(root, 'test/controller-start.test.ts'), join(fixture, 'test/controller-start.test.ts'))
@@ -74,7 +77,7 @@ try {
   }
   const digest = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex')
   process.stdout.write(JSON.stringify({ state: 'verified-isolated-install', node: process.version,
-    lockSha256: digest(lockText), tarballSha256: digest(await readFile(tarball)),
+    lockSha256: digest(lockText), tarballSha256, sourceArchiveRemovedBeforeLoading: true,
     frameworkIntegration: process.env.QQ_FRAMEWORK_DSH_PORT_MODULE ? 'passed' : 'not-requested',
     ...(keep ? { fixture } : {}),
   }) + '\n')

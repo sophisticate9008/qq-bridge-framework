@@ -188,6 +188,7 @@ async function fixture(context: TestContext, options: {
   rejectedSend?: boolean
   holdCreate?: boolean
   pluginMissing?: boolean
+  pluginFailure?: 'transport' | 'authentication' | 'invalid'
   holdPrompt?: boolean
   promptFailure?: 'rejected' | 'unknown'
   suppressClaims?: boolean
@@ -287,9 +288,15 @@ async function fixture(context: TestContext, options: {
     const input: Record<string, unknown> = envelope.payload.args.request ?? envelope.payload.args
     rpc.push({ method: envelope.method, request: input })
     if (envelope.method === 'settings/describe' && options.healthFails) { response.destroy(); return }
+    if (envelope.method === 'bridgePlugin/describe' && options.pluginFailure) {
+      if (options.pluginFailure === 'transport') response.destroy()
+      else if (options.pluginFailure === 'authentication') response.writeHead(403).end()
+      else response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: {} } }))
+      return
+    }
     if (envelope.method.startsWith('bridgePlugin/') && options.pluginMissing) {
       response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId,
-        result: { ok: false, error: { code: 'unknown-method', message: 'Optional plugin is not installed.' } } }))
+        result: { ok: false, error: { code: 'gateway/method-unavailable', message: 'Optional plugin is not installed.', details: {} } } }))
       return
     }
     let value: unknown = {}
@@ -903,6 +910,21 @@ test('missing trusted optional plugin blocks manual startup with false readiness
   assert.equal(fake.creates(), 0)
   assert.equal((await invoke(fake.routes(), 'GET', '/api/chat/sessions')).items instanceof Array, true)
   assert.equal(fake.runtime().host()?.sessions.list().length, 0)
+})
+
+test('plugin transport, authentication and protocol failures do not all claim an absent installation', async context => {
+  const cases = [
+    ['transport', 'DSH_TRANSPORT_UNKNOWN'],
+    ['authentication', 'NATIVE_CHAT_CORRELATION_PLUGIN_AUTH_REJECTED'],
+    ['invalid', 'NATIVE_CHAT_CORRELATION_PLUGIN_INVALID'],
+  ] as const
+  for (const [pluginFailure, code] of cases) {
+    const fake = await fixture(context, { pluginFailure })
+    await fake.configure()
+    await assert.rejects(fake.start(), { code })
+    assert.equal((await fake.runtime().status()).lastError, code)
+    assert.equal(fake.creates(), 0)
+  }
 })
 
 test('actual native persona scope preserves a proven 015 version without aliasing or rewriting old outbox data', async context => {

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
+import { parse } from 'yaml'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Agents from '@deepseek-ai/dsh-agent'
@@ -54,8 +56,15 @@ test('actual SDK loads entry, authenticates owner calls, observes real inbox cla
   ctx.plugin(Presets, { default: 'chosen' })
   ctx.plugin(AgentLoop)
   await loaderFiber.inertia
+  const bundle: unknown = parse(await readFile(new URL(import.meta.resolve('@qq-bridge-framework/dsh-bridge-plugin/cordis.patch.yml')), 'utf8'))
+  assert(Array.isArray(bundle) && bundle.length === 1)
+  const rows = object(bundle[0]).insert
+  assert(Array.isArray(rows) && rows.length === 1)
+  const row = object(rows[0])
+  assert.equal(row.id, 'qbf-bridge')
+  assert.equal(row.name, '@qq-bridge-framework/dsh-bridge-plugin')
   const entryPath = import.meta.resolve('@qq-bridge-framework/dsh-bridge-plugin')
-  const entryId = await ctx.loader.create({ name: entryPath })
+  const entryId = await ctx.loader.create({ id: String(row.id), name: entryPath })
   await ctx.loader.await()
   await new Promise<void>(resolve => setImmediate(resolve))
   try {
@@ -67,7 +76,7 @@ test('actual SDK loads entry, authenticates owner calls, observes real inbox cla
       await ctx.typertGateway.invoke({ namespace: 'bridgePlugin', method, args, peer: currentPeer }) as PluginReplies[Method]
     const described = await invoke('describe')
     assert.equal(described.protocol, 'qq-bridge-framework.dsh-bridge/1')
-    assert.equal(described.pluginVersion, '1.13.7')
+    assert.equal(described.pluginVersion, '2.0.0')
     const nonOwner = new Peer(ctx, { principal: { kind: 'test-untrusted' }, interactions: 'none' })
     await assert.rejects(invoke('describe', {}, nonOwner))
     ctx.remoteAccess.registerPolicy('test-untrusted', { bindings: () => [{

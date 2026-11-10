@@ -111,6 +111,7 @@ export function FrameworkVersion({ api, connected, triggerContainer }: { readonl
           <details className="border-t px-4 py-3 text-xs text-muted-foreground">
             <summary className="cursor-pointer">更新方式</summary>
             <div className="mt-2 grid gap-2 leading-5">
+              <p>框架与 DSH 独立更新。桥接组件随发行包提供，由 DSH 的插件管理器安装、启用和移除。</p>
               <p>{status?.installation === 'docker' ? 'Docker 使用新镜像重新创建容器，继续挂载原数据卷。'
                 : status?.installation === 'source' ? '当前为源码安装，请使用 Git 更新并执行依赖安装与构建。'
                   : '完整发行包支持覆盖程序文件并保留 runtime、private 及自定义文件。更新前停止框架并备份数据。'}</p>

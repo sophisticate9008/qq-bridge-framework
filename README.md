@@ -57,7 +57,7 @@ Docker 用户可下载同版本 `docker-amd64` 或 `docker-arm64` 镜像归档�
 
 安装、注册、就绪与授权分别显示。实际能力以所选模型、协议端、DSH 插件和已加载扩展为准。使用示例和限制见 [使用教程](docs/USAGE.md)。
 
-当前版本为 **v1.13.7**（框架、SDK 与 DSH 桥接插件统一为 `1.13.7`），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
+最近正式版为 **v1.13.7**；当前源码候选为 **v2.0.0**（框架、SDK 与 DSH 桥接插件统一版本，尚未发布），安装包、兼容范围与限制见 [发布说明](docs/RELEASE_NOTES.md)。
 
 ## 文档
 
@@ -97,3 +97,5 @@ Docker 用户可下载同版本 `docker-amd64` 或 `docker-arm64` 镜像归档�
 聊天资源清理与容量规则见 [资源回收契约](docs/CONTRACTS.md#聊天资源回收)。运维命令 `qbf-cli maintenance` 可预览可回收内容，加 `--apply` 执行；当前部署、仍被历史引用的附件及未核清的执行证据受保护。
 
 原生 HTML 组件的恢复、构建和跨版本复用方法见 [构建教程](docs/HTML_BUILD.md)。
+
+2.0 安装管理候选的策略与 1.x 显式迁移见 [安装生命周期](docs/INSTALLATION_LIFECYCLE.md)；候选尚未发布，下载以上已发布版本时仍按对应版本文档操作。

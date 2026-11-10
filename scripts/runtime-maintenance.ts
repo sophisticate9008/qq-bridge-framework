@@ -1,6 +1,6 @@
 import { resolveLivePath } from './runtime-configuration.ts';
-import { lstat, readdir, readFile, readlink, realpath, rm, writeFile, rename, mkdir } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { lstat, open, readdir, readFile, readlink, realpath, rm, writeFile, rename, mkdir } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { isRecord, assert } from '../src/core/values.ts';
 
 const day = 86400000;
@@ -46,6 +46,74 @@ async function treeBytes(path: string): Promise<number> {
   }
   return bytes;
 }
+/** Legacy external consumers can still depend on a deployment even when no process keeps a file open. */
+async function configuredDshDependencies(live: string): Promise<string[]> {
+  const paths: string[] = [], homes = new Set<string>(), profiles = new Set<string>();
+  const document = async (filename: string): Promise<Record<string, unknown> | null> => {
+    const info = await lstat(filename).catch(error => { if (missing(error)) return null; throw error; });
+    if (!info) return null;
+    assert(info.isFile() && !info.isSymbolicLink() && info.size <= 1024 * 1024,
+      'MAINTENANCE_DSH_REFERENCES_UNKNOWN', 'DSH dependency references must be readable before cleanup.');
+    const handle = await open(filename, 'r');
+    let source: string;
+    try {
+      const before = await handle.stat();
+      assert(before.ino === info.ino && before.dev === info.dev && before.size === info.size,
+        'MAINTENANCE_DSH_REFERENCES_UNKNOWN', 'DSH dependency metadata changed.');
+      const buffer = Buffer.alloc(1024 * 1024 + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const after = await handle.stat();
+      assert(bytesRead === before.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs,
+        'MAINTENANCE_DSH_REFERENCES_UNKNOWN', 'DSH dependency metadata changed.');
+      source = buffer.subarray(0, bytesRead).toString('utf8');
+    } finally { await handle.close(); }
+    const value: unknown = JSON.parse(source);
+    assert(isRecord(value), 'MAINTENANCE_DSH_REFERENCES_UNKNOWN', 'DSH dependency metadata must be an object.');
+    return value;
+  };
+  const services = await document(join(live, 'services.json'));
+  if (typeof services?.dshHome === 'string' && isAbsolute(services.dshHome)) homes.add(services.dshHome);
+  const adapters = await document(join(live, 'runtime/chat-adapters.json'));
+  const dsh = isRecord(adapters?.adapters) && isRecord(adapters.adapters.dshAgent) ? adapters.adapters.dshAgent : null;
+  if (typeof dsh?.localCredentialsPath === 'string' && isAbsolute(dsh.localCredentialsPath)) homes.add(dirname(dsh.localCredentialsPath));
+  const deployment = await document(join(live, 'runtime/chat-deployment.json'));
+  const target = isRecord(deployment?.deployment) && isRecord(deployment.deployment.target) ? deployment.deployment.target : null;
+  if (typeof target?.profilePath === 'string' && isAbsolute(target.profilePath)) profiles.add(dirname(target.profilePath));
+  for (const home of homes) {
+    const root = await realpath(join(home, 'profiles')).catch(error => { if (missing(error)) return null; throw error; });
+    if (!root) continue;
+    const names = await entries(root);
+    assert(names.length <= 64, 'MAINTENANCE_SCAN_LIMIT', 'Too many DSH profiles to inspect safely.');
+    for (const name of names) {
+      const profile = await realpath(join(root, name));
+      if (await regularDirectory(profile)) profiles.add(profile);
+    }
+  }
+  for (const profile of profiles) {
+    const manifest = await document(join(profile, 'package.json'));
+    if (!manifest) continue;
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      const dependencies = manifest[field];
+      if (dependencies === undefined) continue;
+      assert(isRecord(dependencies) && Object.keys(dependencies).length <= 1024,
+        'MAINTENANCE_DSH_REFERENCES_UNKNOWN', 'DSH dependency declarations could not be verified.');
+      for (const [name, spec] of Object.entries(dependencies)) {
+        assert(/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(name) && typeof spec === 'string',
+          'MAINTENANCE_DSH_REFERENCES_UNKNOWN', 'Invalid DSH dependency declaration.');
+        if (/^(?:file|link):/.test(spec)) paths.push(resolve(profile, spec.slice(spec.indexOf(':') + 1)));
+        const installed = join(profile, 'node_modules', name);
+        const link = await readlink(installed).catch(error => {
+          if (missing(error) || isRecord(error) && error.code === 'EINVAL') return null;
+          throw error;
+        });
+        if (link) paths.push(resolve(dirname(installed), link));
+        const canonical = await realpath(installed).catch(error => { if (missing(error)) return null; throw error; });
+        if (canonical) paths.push(canonical);
+      }
+    }
+  }
+  return paths;
+}
 export async function runRuntimeMaintenance(root: string, apply = false) {
   root = await realpath(root);
   const runtime = join(root, 'runtime');
@@ -58,6 +126,7 @@ export async function runRuntimeMaintenance(root: string, apply = false) {
     const path = join(live, name); const info = await lstat(path);
     if (info.isFile() && !info.isSymbolicLink() && info.size <= 1024 * 1024) configuredPaths.push(await readFile(path, 'utf8'));
   }
+  configuredPaths.push(...await configuredDshDependencies(live));
   const used = async (path: string) => {
     active ??= [...await processPaths(), ...configuredPaths];
     return active.some(text => text.includes(path + sep) || text.endsWith(path) || text.includes(path + '\n') || text.includes(path + '"'));

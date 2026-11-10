@@ -58,7 +58,7 @@ import { FrameworkError } from '../core/values.ts';
 import { createNativePackageConfigurationRegistry } from '../host/native-package-configuration.ts';
 import { readNativeRuntimeProjection } from '../host/native-runtime-projection.ts';
 
-const FRAMEWORK_VERSION = '1.13.7';
+const FRAMEWORK_VERSION = '2.0.0';
 const PROBE_TIMEOUT_MS = 2_500;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 
@@ -703,6 +703,12 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     signal.throwIfAborted();
   }
   const repairStorage = createChatRepairStorage(directory);
+  const repairRunning = async () => {
+    for (const repair of (await repairStorage.read()).value.records) {
+      if ((await projectChatRepair(repair)).state === 'running') return true;
+    }
+    return false;
+  };
   const maintenanceGuard = (route: AdminRoute): AdminRoute => ({ ...route, async handle(request) {
     if (route.method === 'POST') {
       if (process.env.QQ_BRIDGE_FRAMEWORK_SUPERVISED === '1') {
@@ -843,6 +849,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
   const startup = (async () => {
     // Guardian rescue restores the management surface; saved intent cannot start chat or apply assistant settings here.
     if (rescueOnly) return;
+    if (await repairRunning()) return;
     const maintenance = await createNativeDshRestartStorage(directory).read();
     if (maintenance.value.records.some(record => record.operation.state === 'running' || record.operation.state === 'unknown')) return;
     const registered = await accounts.read();
@@ -908,6 +915,7 @@ export async function startGatewayAdmin(configuration: Readonly<GatewayAdminConf
     if (startupController.signal.aborted || rescueOnly) return;
     recoveryTimer = setTimeout(() => {
       recoveryTask = (async () => {
+        if (await repairRunning()) return;
         const registered = await accounts.read();
         const signal = AbortSignal.any([startupController.signal, AbortSignal.timeout(40_000)]);
         const tasks: (() => Promise<unknown>)[] = [];

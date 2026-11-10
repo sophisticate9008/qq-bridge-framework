@@ -148,3 +148,5 @@ node scripts/install-service-manager.ts --boot /绝对路径/service-boot.sh --a
 协议切换先核对目标可执行文件和目录，再停止原协议端。启动失败时恢复原选择，并尝试恢复原来运行的协议端；不会删除安装或账号数据。自动回滚失败会返回非零状态，需要查看组件状态和日志。
 
 `logs` 显示本机服务原始日志，应只向受信任的本机操作者开放。日志使用 `ops/logrotate.conf` 的轮转规则，部署时将实际日志目录加入系统 logrotate 配置；建议保留 7 天，并按大小轮转。服务清单本身不安装定时任务。
+
+聊天一键恢复与自动恢复仅管理 framework-admin/framework-gateway；即使 DSH 或辅助服务被显式托管，也不参与此恢复。需要维护 DSH 时使用它自己的明确生命周期入口。插件管理见 [安装生命周期](INSTALLATION_LIFECYCLE.md)。

@@ -36,7 +36,16 @@ export async function verifyFrameworkUpgrade(candidate: string): Promise<void> {
     await writeFile(join(old, 'custom-settings.json'), '{"retained":true}');
     const database = new DatabaseSync(join(old, 'runtime/upgrade-proof.sqlite'));
     database.exec('CREATE TABLE evidence (id TEXT PRIMARY KEY, value TEXT); INSERT INTO evidence VALUES (\'session-1\', \'retained history\');'); database.close();
-    const result = await run(process.execPath, [join(candidate, 'dist/scripts/update-framework.js'), '--target', old],
+    const expected: unknown = JSON.parse(await readFile(join(candidate, 'package.json'), 'utf8')); assert(isRecord(expected) && typeof expected.version === 'string');
+    const majorChanged = expected.version.split('.')[0] !== previous.split('.')[0];
+    const updater = join(candidate, 'dist/scripts/update-framework.js');
+    if (majorChanged) {
+      await assert.rejects(run(process.execPath, [updater, '--target', old],
+        { cwd: old, env, timeout: 360_000, maxBuffer: 1024 * 1024 }));
+      assert.equal(JSON.parse(await readFile(join(old, 'package.json'), 'utf8')).version, previous);
+      assert.equal(await readFile(join(old, 'runtime/admin/config.json'), 'utf8'), config);
+    }
+    const result = await run(process.execPath, [updater, '--target', old, ...(majorChanged ? ['--allow-major'] : [])],
       { cwd: old, env, timeout: 360_000, maxBuffer: 1024 * 1024 });
     assert.match(result.stdout, /已更新到/);
     assert.equal(await readFile(join(old, 'runtime/admin/config.json'), 'utf8'), config);
@@ -44,7 +53,6 @@ export async function verifyFrameworkUpgrade(candidate: string): Promise<void> {
     assert.equal(await readFile(join(old, 'custom-settings.json'), 'utf8'), '{"retained":true}');
     const reopened = new DatabaseSync(join(old, 'runtime/upgrade-proof.sqlite'), { readOnly: true });
     try { assert.equal(reopened.prepare('SELECT value FROM evidence WHERE id = ?').get('session-1')?.value, 'retained history'); } finally { reopened.close(); }
-    const expected: unknown = JSON.parse(await readFile(join(candidate, 'package.json'), 'utf8')); assert(isRecord(expected));
     const actual: unknown = JSON.parse(await readFile(join(old, 'package.json'), 'utf8')); assert(isRecord(actual));
     assert.equal(actual.version, expected.version);
     await run(process.execPath, [cli, '--version'], { cwd: old, env, timeout: 30_000 });

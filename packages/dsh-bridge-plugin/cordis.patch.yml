@@ -1,0 +1,3 @@
+- insert:
+    - id: qbf-bridge
+      name: '@qq-bridge-framework/dsh-bridge-plugin'

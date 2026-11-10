@@ -56,6 +56,7 @@ export async function prepareSimulationDsh(options: {
       await mkdir(moduleDirectory, { mode: 0o700 })
       await cp(join(sourceModule, 'dist'), join(moduleDirectory, 'dist'), { recursive: true, errorOnExist: true, force: false })
       await cp(join(sourceModule, 'package.json'), join(moduleDirectory, 'package.json'), { errorOnExist: true, force: false })
+      await cp(join(sourceModule, 'cordis.patch.yml'), join(moduleDirectory, 'cordis.patch.yml'), { errorOnExist: true, force: false })
       // DSH Session has private class state: host and bridge must share the same SDK instances.
       await symlink(await realpath(resolve(dirname(binary), '../../..')), join(moduleDirectory, 'node_modules'), 'dir')
     } else {
@@ -67,7 +68,7 @@ export async function prepareSimulationDsh(options: {
     const link = join(profile, 'node_modules', name)
     await mkdir(dirname(link), { recursive: true, mode: 0o700 })
     await symlink(moduleDirectory, link, 'dir')
-    if (name !== '@qq-bridge-framework/dsh-bridge-plugin') {
+    {
       const manifest: unknown = JSON.parse(await readFile(join(moduleDirectory, 'package.json'), 'utf8'))
       const declaration = isRecord(manifest) && isRecord(manifest.dsh) && isRecord(manifest.dsh.bundle) ? manifest.dsh.bundle.patch : undefined
       const patches: unknown = typeof declaration === 'string' ? [declaration] : declaration
@@ -88,14 +89,13 @@ export async function prepareSimulationDsh(options: {
   const credentialsPath = join(home, '.credentials.yaml')
   await writeFile(credentialsPath, stringify(credentials), { mode: 0o600, flag: 'wx' })
   await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'qbf-private-simulation', private: true,
-    dsh: { profile: { bundles: packages.slice(0, 2) } } }, null, 2), { mode: 0o600, flag: 'wx' })
+    dsh: { profile: { bundles: packages } } }, null, 2), { mode: 0o600, flag: 'wx' })
   await writeFile(join(profile, 'cordis.yml'), '[]\n', { mode: 0o600, flag: 'wx' })
   const profilePath = join(profile, 'cordis.patch.yml')
   await writeFile(profilePath, stringify([
     { id: 'llm-pi-ai', config: provider.config },
     { id: 'session-title-llm', disabled: true },
-    { id: 'tool-plugin-manager', disabled: true },
-    { insert: [{ id: 'qbf-bridge-evidence', name: '@qq-bridge-framework/dsh-bridge-plugin' }] }
+    { id: 'tool-plugin-manager', disabled: true }
   ]), { mode: 0o600, flag: 'wx' })
   const port = await unusedPort()
   const endpoint = `http://127.0.0.1:${port}`
