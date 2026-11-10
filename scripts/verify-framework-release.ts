@@ -31,7 +31,7 @@ delete env.QQ_BRIDGE_FRAMEWORK_CONFIG;
 let child: ChildProcess | undefined, childExit: Promise<unknown[]> | undefined, diagnostics = '';
 let phase = 'archive', completed = false;
 const evidence = { version, platform: process.platform, arch: process.arch, productionInstall: false,
-  nativeRenderingAndFonts: false, windowsChatAndAcl: false, initialized: false, webAssetsVerified: 0, initializationAndRestart: false };
+  nativeRenderingAndFonts: false, windowsChatAndAcl: false, managedExtensionSdk: false, initialized: false, webAssetsVerified: 0, initializationAndRestart: false };
 function checkpoint(next: string): void { phase = next; console.log(JSON.stringify({ phase, platform: process.platform, arch: process.arch })); }
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function port(): Promise<number> {
@@ -122,6 +122,10 @@ try {
   // Removing original TS proves that the runtime package actually uses compiled backend/worker files.
   await rm(join(cwd, 'src'), { recursive: true });
   await rm(join(cwd, 'scripts'), { recursive: true });
+  checkpoint('bundled-sdk-extension');
+  const extensionCheck=await run(process.execPath,['--input-type=module','-e',"import {verifyManagedExtensionInstallation} from './dist/scripts/verify-managed-extension-installation.js'; await verifyManagedExtensionInstallation(process.cwd());"],{cwd,env,timeout:240000,maxBuffer:262144});
+  console.log(extensionCheck.stdout.trim());
+  evidence.managedExtensionSdk=true;
   checkpoint('native-rendering');
   await run(process.execPath, ['--input-type=module', '-e', String.raw`
     import assert from 'node:assert/strict';

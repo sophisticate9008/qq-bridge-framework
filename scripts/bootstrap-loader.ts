@@ -28,7 +28,7 @@ async function trustedParents(filename: string) {
   for (let count = 0; count < 128; count++) {
     const information = await lstat(directory);
     assert(information.isDirectory() && !information.isSymbolicLink() && trustedOwner(information)
-      && trustedPermissions(directory,information), 'NATIVE_BOOTSTRAP_DIRECTORY_DENIED', 'Bootstrap parent directories must be trusted and not shared writable.');
+      && (trustedPermissions(directory,information) || count > 0 && process.platform !== 'win32' && (information.mode & 0o1000) !== 0), 'NATIVE_BOOTSTRAP_DIRECTORY_DENIED', 'Bootstrap parent directories must be trusted and not shared writable.');
     const parent = dirname(directory);
     if (parent === directory) return;
     directory = parent;

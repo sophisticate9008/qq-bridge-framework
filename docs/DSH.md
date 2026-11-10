@@ -14,7 +14,7 @@ DSH 启动时会加载已启用的 MCP 服务；stdio 服务由 DSH 启动独立
 
 ## 版本与安装
 
-当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **2.0.0 候选**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
+当前桥接插件是 `@qq-bridge-framework/dsh-bridge-plugin` **2.0.0**，适配官方 DSH SDK **0.2.1-rc.2** 和 Cordis **4.0.5**。框架要求 Node.js **24.12.0 及以上**。插件清单中的 SDK peer dependencies 使用精确版本；升级 SDK 后需重新验证协议和运行行为。
 
 
 ### 安全依赖覆盖

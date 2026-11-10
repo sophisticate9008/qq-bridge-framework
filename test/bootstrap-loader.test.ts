@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, chown, link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
@@ -162,4 +163,16 @@ export default {
     assert.deepEqual(loaded.packageConfigurations?.[0]?.defaults, { enabled: false });
     assert(Object.isFrozen(loaded.packageConfigurations));
   } finally { await setup.cleanup(); }
+});
+
+
+test('private owned bootstrap directories remain safe below a POSIX sticky temporary directory', {skip:process.platform==='win32'},async context=>{
+  const directory=await mkdtemp(join(tmpdir(),'qbf-private-bootstrap-'));
+  context.after(()=>rm(directory,{recursive:true,force:true}));
+  const filename=join(directory,'entry.ts');await writeFile(filename,source,{mode:0o600});
+  assert.equal((await loadNativeBootstrap(filename)).metadata.manifest.id,'loader-example');
+  await chmod(directory,0o1777);
+  await assert.rejects(loadNativeBootstrap(filename),{code:'NATIVE_BOOTSTRAP_DIRECTORY_DENIED'});
+  await chmod(directory,0o777);
+  await assert.rejects(loadNativeBootstrap(filename),{code:'NATIVE_BOOTSTRAP_DIRECTORY_DENIED'});
 });

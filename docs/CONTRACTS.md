@@ -506,3 +506,5 @@ CLI `update --rollback` 和 `update --reconcile` 接受原整套操作编号，�
 `GET /api/chat/extensions/installed` 使用现有鉴权，只返回当前运行宿主的 `{schema:1,observation}`；observation 为 null 或有界的启动时加载的 operationId、登记集合指纹、running、包、实际工具、服务状态。GET 不加载代码、不重启、不调用模型。CLI 将安装内容、运行装配与真实调用证据分别呈现，`invocationVerified:false` 不以装配成功替代模型调用验收；list 的 reloadableExtensions 独立读取旧热重载目录。
 
 扩展 CLI 写操作与整套更新、卸载共用维护锁，未决维护先拒绝；扩展操作另使用配置级进程身份锁和 CAS 私有记录，prepared/applying/completed/restoring/rolled-back/unknown 阶段先于外部副作用持久保存，保留前后选择与操作编号。只有已确认候选加载但验收失败才恢复原选择并执行一次恢复启动；未知重启或回执不自动重放，reconcile 只核对同一操作，未知结果还须证明宿主启动时加载过原操作编号；尚未应用的 prepared 选择在旧宿主在线时继续保留待应用状态。历史终态查询不得覆盖当前选择。受控应用只请求框架宿主重启，不获得 DSH、协议端或 QQ 客户端的生命周期权限。
+
+本地可信 bootstrap 加载核对文件与祖先目录的所有者和权限。POSIX sticky 共享祖先只能位于已经核对的私有源码目录之外，借其子项保护规则支持私有临时安装；直接共享可写的源码目录继续拒绝。Windows 使用系统 ACL 判断，发行包中的 SDK 扩展预检随原生平台验收。
