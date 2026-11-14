@@ -15,6 +15,9 @@ import { createPluginToolDirectory } from './plugin-tool-directory.ts'
 import { recordNativeExecutionPhase } from './native-execution-diagnostics.ts'
 import { createExecutionRecoveryPoll } from './execution-recovery-poll.ts'
 import { createSessionTurnQueue } from './session-turns.ts'
+import { readSessionModelOverride, SESSION_MODELS, SESSION_MODEL_APPLIED } from './session-model-configuration.ts'
+import { parseSessionModelConfiguration, type SessionModelConfiguration } from '../contracts/session-model-configuration.ts'
+import { parsePluginModelSelection, type PluginModelSelection } from '../contracts/plugin-model.ts'
 import type { PluginRuntimeServices } from './plugin-runtime.ts'
 import { createNativeCapabilityDirectory, NATIVE_DIRECTORY_TOOLS } from './native-capability-directory.ts'
 import { createNativeSessionDirectoryTools } from './native-session-tools.ts'
@@ -2102,6 +2105,57 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     },
     stickerLibrary: () => state === 'running' && !closed ? stickerLibrary : undefined,
     pluginModelService: () => state === 'running' && !closed ? pluginModels : undefined,
+    async sessionModelConfigurations(keys: readonly string[]): Promise<Readonly<Record<string, SessionModelConfiguration>>> {
+      if (state !== 'running' || !active || closed) return {}
+      const configuration = active
+      const definition = configuredDefinition(configuration)
+      if (!definition || closed) return {}
+      const plan = configuration.catalog.plans.find(item => item.id === definition.planId)
+      const provider = configuration.providers.find(item => item.id === definition.model.provider)
+      const selectedModel = provider?.models.find(item => item.id === definition.model.name)
+      const reader = store ?? openReadonlySqliteStore(join(options.directory, 'native-chat.sqlite'))
+      try {
+        return Object.fromEntries(keys.map(key => {
+          const selected = readSessionModelOverride(reader, key)
+          const kind = key.startsWith('group:') ? 'group' : 'private'
+          const preset = verifiedDeployment?.presetBindings.find(item => item.conversationKind === undefined || item.conversationKind === kind)
+          const inherited = { provider: preset?.externalProvider ?? definition.model.provider,
+            model: definition.model.name, reasoningEffort: definition.model.reasoningEffort }
+          const applied = reader.read(SESSION_MODEL_APPLIED, key)
+          const entry = parseSessionModelConfiguration({ revision: selected.revision, override: selected.model,
+            inherited, planName: plan?.name ?? definition.planId,
+            providerName: selected.model ? selected.providerName : provider?.name ?? definition.model.provider,
+            modelName: selected.model ? selected.modelName : selectedModel?.name ?? definition.model.name,
+            lastApplied: applied?.value ?? null })
+          if (!entry) failure('SESSION_MODEL_INVALID_STATE')
+          return [key, entry]
+        }))
+      } finally { if (reader !== store) reader.close() }
+    },
+    async setSessionModel(target: NativeSessionResetTarget, model: PluginModelSelection | null, revision: number | null, signal: AbortSignal) {
+      if (closed || state !== 'running' || !store || !lifetime || !dsh || !sessionTurns) failure('SESSION_MANAGEMENT_NOT_RUNNING')
+      const currentStore = store, currentLifetime = lifetime, queue = sessionTurns
+      const combined = AbortSignal.any([signal, currentLifetime.signal, AbortSignal.timeout(15000)])
+      runtime.assertSessionIdle(target)
+      if (queue.isBusy(target.sessionId)) failure('SESSION_MANAGEMENT_BUSY')
+      const selected = model === null ? null : parsePluginModelSelection(model)
+      if (selected?.contextWindow !== undefined) failure('SESSION_MANAGEMENT_INVALID_TARGET')
+      const catalog = selected === null ? [] : await dsh.pluginModels.models(combined)
+      const descriptor = selected && catalog.find(item => item.provider === selected.provider && item.model === selected.model)
+      if (selected && !descriptor) failure('SESSION_MODEL_UNAVAILABLE')
+      const release = await queue.acquire(target.sessionId, combined)
+      try {
+        combined.throwIfAborted()
+        if (closed || state !== 'running' || store !== currentStore || lifetime !== currentLifetime) failure('SESSION_MANAGEMENT_BUSY')
+        runtime.assertSessionIdle(target)
+        const previous = readSessionModelOverride(currentStore, target.key)
+        if (previous.revision !== revision) failure('SESSION_MANAGEMENT_CONFLICT')
+        currentStore.write(SESSION_MODELS, target.key, { schema: 1, model: selected ? { ...selected } : null,
+          providerName: descriptor?.providerName ?? '', modelName: descriptor?.modelName ?? '', updatedAt: Date.now() }, { expectedRevision: revision })
+        return { schema: 1, ok: true, key: target.key, sessionId: target.sessionId, historyPreserved: true,
+          appliesTo: 'next-request', configuration: (await runtime.sessionModelConfigurations([target.key]))[target.key] }
+      } finally { release() }
+    },
     pluginCapabilityService: () => state === 'running' && !closed ? pluginCapabilities : undefined, applyAccessChange, reconcileExecution, recoverExecution, diagnostics, mediaDiagnostics,
     extensionStatus() { return extensions.list() },
     managedExtensionObservation() {

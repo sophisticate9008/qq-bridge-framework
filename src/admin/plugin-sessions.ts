@@ -60,6 +60,11 @@ export function createPluginSessionRoutes(options: {
           if (!binding) throw new AdminRequestError(503, 'plugin_sessions_invalid_state')
           return { schema: 1, ok: true, action: input.action, binding, historyPreserved: true, executionRepeated: false }
         }
+        if (input.action === 'model') {
+          const binding = parsePluginSessionBinding(await target.setModel(input.owner, key, input.model, signal))
+          if (!binding) throw new AdminRequestError(504, 'plugin_session_operation_unknown')
+          return { schema: 1, ok: true, action: input.action, binding, historyPreserved: true, appliesTo: 'next-request' }
+        }
         if (input.action === 'bind' && input.qqConversationId !== undefined) {
           if (!options.resolveQQ) throw new AdminRequestError(503, 'plugin_session_qq_lookup_unavailable')
           const source = await options.resolveQQ(input.qqConversationId, signal)

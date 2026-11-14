@@ -1,6 +1,8 @@
 import { AutomaticMaintenanceStatus } from '../components/automatic-maintenance-status.tsx';
 import { WorkRecords } from '../components/work-records.tsx';
 import { SessionBindDialog } from '../components/session-bind-dialog.tsx';
+import { SessionModelDialog } from '../components/session-model-dialog.tsx';
+import { ChatAssistantManager } from '../components/chat-assistant-manager.tsx';
 import { PluginSessions } from '../components/plugin-sessions.tsx';
 import { SimulationSessions } from '../components/simulation-sessions.tsx';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs.tsx';
@@ -63,6 +65,7 @@ export function SessionsPage(props: PageProps) {
   const inboxItems = useMemo(() => new Map(inbox.snapshot?.items.map(item => [item.conversationId, item]) ?? []), [inbox.snapshot]);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [bindTarget, setBindTarget] = useState<ManagedSession | null>(null);
+  const [modelTarget, setModelTarget] = useState<ManagedSession | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedSession | null>(null);
   const [diagnosticKey, setDiagnosticKey] = useState<string | null>(null);
   const [mediaKey, setMediaKey] = useState<string | null>(null);
@@ -118,6 +121,7 @@ export function SessionsPage(props: PageProps) {
     setPagingBlocked(false);
     setResetTarget(null);
     setBindTarget(null);
+    setModelTarget(null);
     setDiagnosticKey(null);
     setMediaKey(null);
     setDetailTarget(null);
@@ -208,7 +212,8 @@ export function SessionsPage(props: PageProps) {
     if (!query) return snapshot.sessions;
     return snapshot.sessions.filter(session => {
       const identity = describeConversationKey(session.key);
-      return [identity.label, identity.identifier, session.owner ? '主人' : '', session.key]
+      return [identity.label, identity.identifier, session.owner ? '主人' : '', session.key,
+        session.modelConfiguration?.providerName ?? '', session.modelConfiguration?.modelName ?? '', session.modelConfiguration?.planName ?? '']
         .join(' ').toLocaleLowerCase().includes(query);
     });
   }, [deferredFilter, snapshot]);
@@ -381,16 +386,16 @@ export function SessionsPage(props: PageProps) {
           {selectionUnconfirmed && selected && <div className="mx-2.5 mb-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-status-warning" data-session-unconfirmed data-selected-session={selected.key}><span>上次所选会话尚未在本批次确认，不可解除绑定；请继续加载或选择已加载行。</span><ReadOnlyDetails title="待核对的会话"><TechnicalDetails fields={[{ label: '会话', value: selected.key }, { label: '模型会话标识', value: selected.sessionId }]} /><Button size="sm" variant="outline" onClick={() => void copySessionId(selected.sessionId)}>复制标识</Button></ReadOnlyDetails><Button size="sm" variant="ghost" onClick={navigateToUsage}>用量统计</Button></div>}
           {snapshot.sessions.length === 0 ? <EmptyState title={snapshot.next ? "当前批次没有可显示绑定" : "暂无会话绑定"} description={snapshot.next ? "服务端仍有后续记录，可继续加载；当前批次可能只有尚未就绪的会话。" : "聊天宿主已返回空列表；收到新的有效对话后可能建立绑定。"} />
             : filteredSessions.length === 0 ? <EmptyState title="没有匹配的会话" description={snapshot.next ? "只筛选当前已加载记录；后续页仍可能有匹配项，可继续加载，不会修改服务端数据。" : "调整筛选词后再试；筛选不会修改服务端数据。"} />
-              : <div id="session-details" className="tablewrap overscroll-contain border-y" tabIndex={0} role="region" aria-label="会话绑定列表"><table aria-rowcount={filteredSessions.length + 1} className="w-full min-w-[48rem] text-left text-[11px]"><thead className="sticky top-0 z-10 border-b bg-muted text-muted-foreground"><tr><th className="px-2 py-1 font-medium">会话</th><th className="px-2 py-1 font-medium">类型</th><th className="px-2 py-1 font-medium">身份</th><th className="px-2 py-1 font-medium">收件处理</th><th className="px-2 py-1 font-medium">队列</th><th className="px-2 py-1 text-right font-medium">操作</th></tr></thead><VirtualTableBody items={filteredSessions} getItemKey={session => session.key} columns={6} estimateSize={30}>{session => {
+              : <div id="session-details" className="tablewrap overscroll-contain border-y" tabIndex={0} role="region" aria-label="会话绑定列表"><table aria-rowcount={filteredSessions.length + 1} className="w-full min-w-[48rem] text-left text-[11px]"><thead className="sticky top-0 z-10 border-b bg-muted text-muted-foreground"><tr><th className="px-2 py-1 font-medium">会话</th><th className="px-2 py-1 font-medium">类型</th><th className="px-2 py-1 font-medium">身份</th><th className="px-2 py-1 font-medium">供应商 / 模型</th><th className="px-2 py-1 font-medium">收件处理</th><th className="px-2 py-1 font-medium">队列</th><th className="px-2 py-1 text-right font-medium">操作</th></tr></thead><VirtualTableBody items={filteredSessions} getItemKey={session => session.key} columns={7} estimateSize={44}>{session => {
                 const identity = describeConversationKey(session.key);
                 const queue = inboxItems.get(session.key);
                 return <tr key={session.key} data-session-key={session.key} data-selected-session={selectedKey === session.key ? session.key : undefined} className={selectedKey === session.key ? 'bg-accent/45' : 'hover:bg-muted/30'}>
                   <td className="px-2 py-0.5"><Button size="sm" variant="ghost" className="-ml-2 h-6 max-w-44 px-2 text-[11px] font-medium text-primary tabular-nums" aria-pressed={selectedKey === session.key} title={session.key} onClick={() => { setSelectedKey(session.key); setDetailTarget(session); }}><span className="truncate">{identity.identifier}</span></Button></td>
                   <td className="whitespace-nowrap px-2 py-0.5">{identity.label}</td>
                   <td className="whitespace-nowrap px-2 py-0.5">{session.owner ? <Badge variant="secondary">主人</Badge> : <span className="text-muted-foreground">普通会话</span>}</td>
-                  <td className="whitespace-nowrap px-2 py-0.5 text-muted-foreground">{inbox.error || !inbox.snapshot ? '状态待更新' : inboxStateLabel(queue)}</td>
+                  <td className="max-w-56 px-2 py-0.5"><span className="block truncate" title={session.modelConfiguration ? `${session.modelConfiguration.providerName} / ${session.modelConfiguration.modelName}` : undefined}>{session.modelConfiguration ? `${session.modelConfiguration.providerName} / ${session.modelConfiguration.modelName}` : '尚未确认'}</span><span className="block truncate text-muted-foreground">{session.modelConfiguration?.override ? '本会话指定 · 下次消息' : session.modelConfiguration ? `跟随方案：${session.modelConfiguration.planName}` : ''}</span></td><td className="whitespace-nowrap px-2 py-0.5 text-muted-foreground">{inbox.error || !inbox.snapshot ? '状态待更新' : inboxStateLabel(queue)}</td>
                   <td className="px-2 py-0.5 tabular-nums text-muted-foreground">{inbox.error || !inbox.snapshot ? '未知' : queue?.pending ?? 0}</td>
-                  <td className="px-2 py-0.5"><div className="flex items-center justify-end gap-0.5 [&>button]:h-6 [&>button]:px-1.5 [&>button]:text-[11px]"><Button size="sm" variant="ghost" onClick={() => { setSelectedKey(session.key); setDiagnosticKey(session.key); }}>检查未回复</Button><Button size="sm" variant="ghost" onClick={() => setMediaKey(session.key)}>媒体</Button><Button size="sm" variant="ghost" onClick={() => { setSelectedKey(session.key); setDetailTarget(session); }}>详情</Button><Button size="sm" variant="ghost" disabled={snapshot.source === 'imported' || !hasSessionResetTarget(session) || loading || moreLoading || resetState === 'saving'} onClick={() => setBindTarget(session)}>更换绑定</Button><Button id={selectedKey === session.key ? 'session-reset-open' : undefined} size="sm" variant="ghost" className="text-destructive" disabled={snapshot.resetAvailable !== true || !hasSessionResetTarget(session) || selectionUnconfirmed || loading || moreLoading || resetState === 'saving'} onClick={() => { setSelectedKey(session.key); openReset(session); }}><RotateCcw className="size-3.5" />解除绑定</Button><Button size="sm" variant="ghost" className="text-destructive" disabled title="请到 DSH 删除模型会话">删除</Button></div></td>
+                  <td className="px-2 py-0.5"><div className="flex items-center justify-end gap-0.5 [&>button]:h-6 [&>button]:px-1.5 [&>button]:text-[11px]"><Button size="sm" variant="ghost" disabled={!session.modelConfiguration || !hasSessionResetTarget(session) || snapshot.resetAvailable !== true || loading || moreLoading || resetState === 'saving'} onClick={() => setModelTarget(session)}>调整模型</Button><Button size="sm" variant="ghost" onClick={() => { setSelectedKey(session.key); setDiagnosticKey(session.key); }}>检查未回复</Button><Button size="sm" variant="ghost" onClick={() => setMediaKey(session.key)}>媒体</Button><Button size="sm" variant="ghost" onClick={() => { setSelectedKey(session.key); setDetailTarget(session); }}>详情</Button><Button size="sm" variant="ghost" disabled={snapshot.source === 'imported' || !hasSessionResetTarget(session) || loading || moreLoading || resetState === 'saving'} onClick={() => setBindTarget(session)}>更换绑定</Button><Button id={selectedKey === session.key ? 'session-reset-open' : undefined} size="sm" variant="ghost" className="text-destructive" disabled={snapshot.resetAvailable !== true || !hasSessionResetTarget(session) || selectionUnconfirmed || loading || moreLoading || resetState === 'saving'} onClick={() => { setSelectedKey(session.key); openReset(session); }}><RotateCcw className="size-3.5" />解除绑定</Button><Button size="sm" variant="ghost" className="text-destructive" disabled title="请到 DSH 删除模型会话">删除</Button></div></td>
                 </tr>;
               }}</VirtualTableBody></table></div>}
           <div className="flex flex-wrap items-center gap-2 bg-muted/20 px-2.5 py-2" data-session-pagination><p className="mr-auto text-xs leading-5 text-muted-foreground">搜索仅筛选已加载的会话。删除模型会话请到 DSH。</p>{snapshot.next && <Button id="session-load-more" size="sm" variant="outline" disabled={loading || moreLoading || pagingBlocked} onClick={() => void loadMore()}>{moreLoading && <LoaderCircle className="size-3.5 animate-spin" />}{moreLoading ? "正在加载下一批" : "继续加载会话"}</Button>}{moreLoading && <Button id="session-load-cancel" size="sm" variant="ghost" onClick={cancelMore}>取消加载</Button>}</div>
@@ -406,10 +411,11 @@ export function SessionsPage(props: PageProps) {
         <TabsList aria-label="会话相关记录" className="h-[34px] w-full justify-start bg-muted/30 px-2"><TabsTrigger value="executions">执行日志</TabsTrigger><TabsTrigger value="interactions">QQ 互动</TabsTrigger><TabsTrigger value="work">助手工作</TabsTrigger></TabsList>
         <TabsContent value="executions" keepMounted className="[&[hidden]]:hidden"><ExecutionJournal api={api} connected={connected} embedded /></TabsContent>
         <TabsContent value="interactions" keepMounted className="[&[hidden]]:hidden"><ChatInteractions key={reloadVersion} api={api} connected={connected} embedded /></TabsContent>
-        <TabsContent value="work" keepMounted className="[&[hidden]]:hidden"><WorkRecords api={api} connected={connected} embedded /></TabsContent>
+        <TabsContent value="work" keepMounted className="[&[hidden]]:hidden"><p className="px-3 py-2 text-xs text-muted-foreground">助手模型独立于 QQ 聊天。这里的模型设置用于新工作；已有工作按记录中的模型继续执行。</p><ChatAssistantManager api={api} connected={connected} setDirty={props.setDirty} onManageCapabilities={() => props.navigate('providers')} /><WorkRecords api={api} connected={connected} embedded /></TabsContent>
       </Tabs>
     </Section>
     <SessionBindDialog api={api} connected={connected} target={bindTarget} onClose={() => setBindTarget(null)} onBound={reload} />
+    <SessionModelDialog api={api} connected={connected} target={modelTarget} onClose={() => setModelTarget(null)} onSaved={reload} />
     <SessionDeleteDialog api={api} target={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={reload} />
     <Dialog open={resetTarget !== null} onOpenChange={open => { if (!open) closeReset(); }}>
       <DialogContent showCloseButton={resetState !== 'saving' && resetState !== 'conflict' && resetState !== 'unknown'}>

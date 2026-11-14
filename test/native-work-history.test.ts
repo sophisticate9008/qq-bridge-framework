@@ -23,7 +23,7 @@ test('stopped work history reads preserved evidence without executor recovery or
   const filename = join(directory, 'native-chat.sqlite')
   const store = createSqliteStore({ filename })
   store.write('native-work.executions', 'a', record('a'))
-  store.write('native-work.executions', 'b', record('b', 'private:456'))
+  store.write('native-work.executions', 'b', { ...record('b', 'private:456'), configuration: { provider: 'work-provider', model: 'work-model', secret: 'private-secret' } })
   store.write('native-work.executions', 'c', { ...record('c'), status: 'completed', result: { stopReason: 'end', output: [{ type: 'text', text: 'done' }] },
     delivery: 'confirmed', deliveryFileId: 'uploaded-file', deliveryMessageId: null })
   store.close()
@@ -32,6 +32,8 @@ test('stopped work history reads preserved evidence without executor recovery or
   context.after(() => readonly.close())
   const reader = createNativeWorkHistoryReader(readonly)
   assert.equal(reader.read('a')?.status, 'starting')
+  assert.equal(reader.read('a')?.model, undefined)
+  assert.deepEqual(reader.read('b')?.model, { provider: 'work-provider', model: 'work-model' })
   assert.equal(reader.read('c')?.deliveryFileId, 'uploaded-file')
   assert.equal(reader.read('missing'), null)
   const first = reader.list({ limit: 1, conversationId: 'private:456' })

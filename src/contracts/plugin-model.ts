@@ -29,6 +29,10 @@ export interface PluginModelBinding {
   readonly sessionId: string
   readonly source: 'created' | 'existing'
   readonly model: PluginModelSelection | null
+  /** Session preference set by the administrator; takes priority over plugin requests. */
+  readonly modelOverride?: PluginModelSelection | null
+  /** Plugin preference retained separately from the last model used. */
+  readonly modelDefault?: PluginModelSelection | null
   readonly createdAt: number
   readonly updatedAt: number
   readonly lastUsedAt: number | null

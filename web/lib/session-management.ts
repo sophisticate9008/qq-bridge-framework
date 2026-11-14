@@ -1,7 +1,9 @@
 import { parseSessionSnapshot as parseBaseSnapshot, parseSessionResetResult as parseBaseResetResult, type ManagedSession as BaseSession, type SessionSnapshot as BaseSnapshot } from './activity.ts';
+import { parseSessionModelConfiguration, type SessionModelConfiguration } from '../../src/contracts/session-model-configuration.ts';
 
 export interface ManagedSession extends BaseSession {
   readonly generation?: number;
+  readonly modelConfiguration?: SessionModelConfiguration;
 }
 
 export interface SessionSnapshot extends BaseSnapshot {
@@ -31,8 +33,11 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
     if (!isRecord(entry)) return null;
     if (entry.generation !== undefined && (typeof entry.generation !== 'number' || !Number.isSafeInteger(entry.generation) || entry.generation < 1)) return null;
     if (entry.bindingRevision !== undefined && (typeof entry.bindingRevision !== 'string' || !/^[a-f0-9]{64}$/.test(entry.bindingRevision))) return null;
+    const modelConfiguration = entry.modelConfiguration === undefined ? undefined : parseSessionModelConfiguration(entry.modelConfiguration);
+    if (modelConfiguration === null) return null;
     sessions.push({ ...session, ...(typeof entry.generation === 'number' ? { generation: entry.generation } : {}),
-      ...(typeof entry.bindingRevision === 'string' ? { bindingRevision: entry.bindingRevision } : {}) });
+      ...(typeof entry.bindingRevision === 'string' ? { bindingRevision: entry.bindingRevision } : {}),
+      ...(modelConfiguration ? { modelConfiguration } : {}) });
   }
   const resetAvailable = base.resetAvailable === true && sessions.every(hasSessionResetTarget);
   return { ...base, sessions, resetAvailable, deleteAvailable: value.deleteAvailable === true,

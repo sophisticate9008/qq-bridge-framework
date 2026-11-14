@@ -300,7 +300,9 @@ async function fixture(context: TestContext, options: {
       return
     }
     let value: unknown = {}
-    if (envelope.method === 'session/modelCatalog') value = { default: { provider: 'external-provider', model: 'model', reasoningEffort: 'off' },
+    if (envelope.method === 'bridgePlugin/pluginModels') value = { models: ['model', ...(options.migrationChannel ? ['next-model'] : [])].map(model => ({
+      provider: 'external-provider', model, providerName: 'Local fixture provider', modelName: model })) }
+    else if (envelope.method === 'session/modelCatalog') value = { default: { provider: 'external-provider', model: 'model', reasoningEffort: 'off' },
       routableProviders: ['external-provider'], groups: [{ id: 'external-provider', name: 'Local fixture provider',
         models: [{ id: 'model', name: 'Model', reasoning: { efforts: [{ id: 'off', name: 'Off' }], defaultEffort: 'off' } }, ...(options.migrationChannel ? [{ id: 'next-model', name: 'Next', reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' } }] : [])] }], failures: [] }
     else if ((options.frameworkToolChannel || options.executionCheckpoint || options.migrationChannel) && envelope.method === 'bridgePlugin/describe') value = {
@@ -3332,4 +3334,46 @@ test('activity attribution ignores self echoes and unregistered work-feedback id
   fake.rawFinal(2)
   await until(() => fake.runtime().executions()!.forConversation('group:456') === null)
   assert.equal(fake.sends.length, 0)
+})
+
+test('QQ model settings apply on the next request without replacing the session and can return to the plan', async context => {
+  const fake = await fixture(context, { migrationChannel: true })
+  await fake.configure(); await fake.start()
+  fake.runtime().host()!.sessions.bind('private:123', 'existing-session', 1)
+  const get = async () => {
+    const page = await invoke(fake.routes(), 'GET', '/api/chat/sessions')
+    const row = (page.sessions as Array<Record<string, unknown>>).find(item => item.key === 'private:123')!
+    return { target: { key: row.key, sessionId: row.sessionId, generation: row.generation, bindingRevision: row.bindingRevision },
+      configuration: row.modelConfiguration as { revision: number | null; override: unknown; lastApplied: { model: { model: string } } | null } }
+  }
+  const original = await get()
+  const selected = { provider: 'external-provider', model: 'next-model', reasoningEffort: 'high' }
+  const saved = await invoke(fake.routes(), 'POST', '/api/chat/sessions/model', { ...original.target,
+    modelRevision: original.configuration.revision, model: selected, confirm: true })
+  assert.equal(saved.historyPreserved, true)
+  assert.equal(saved.sessionId, 'existing-session')
+  assert.equal(fake.rpc.filter(item => item.method === 'session/prompt').length, 0)
+  await assert.rejects(invoke(fake.routes(), 'POST', '/api/chat/sessions/model', { ...original.target,
+    modelRevision: original.configuration.revision, model: null, confirm: true }), { code: 'session_model_conflict' })
+  fake.message(901)
+  await until(() => fake.rpc.some(item => item.method === 'session/prompt'))
+  const change = fake.rpc.filter(item => item.method === 'session/selectModel').at(-1)!
+  assert.equal(change.request.model, 'next-model')
+  assert.equal(change.request.sessionId, 'existing-session')
+  const busy = await get()
+  await assert.rejects(invoke(fake.routes(), 'POST', '/api/chat/sessions/model', { ...busy.target,
+    modelRevision: busy.configuration.revision, model: null, confirm: true }), { code: 'session_model_busy' })
+  await fake.answer()
+  await until(() => fake.runtime().executions()!.active().length === 0)
+  const current = await get()
+  assert.equal(current.configuration.lastApplied?.model.model, 'next-model')
+  await invoke(fake.routes(), 'POST', '/api/chat/sessions/model', { ...current.target,
+    modelRevision: current.configuration.revision, model: null, confirm: true })
+  fake.message(902)
+  await until(() => fake.rpc.filter(item => item.method === 'session/prompt').length === 2)
+  assert.equal(fake.rpc.filter(item => item.method === 'session/selectModel').at(-1)?.request.model, 'model')
+  assert.equal(fake.runtime().host()!.sessions.get('private:123')?.sessionId, 'existing-session')
+  assert.equal(fake.creates(), 0)
+  await fake.answer(2)
+  await until(() => fake.runtime().executions()!.active().length === 0)
 })

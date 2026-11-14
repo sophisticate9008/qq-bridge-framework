@@ -7,7 +7,10 @@ function projection(stored: StoredRecord): NativeWorkView {
   const value = stored.value
   assert(isRecord(value) && value.schema === 1 && value.id === stored.key,
     'INVALID_NATIVE_WORK_RECORD', 'The persisted work evidence cannot be interpreted safely.')
+  const configuration = isRecord(value.configuration) ? value.configuration : {}
   const view = parseNativeWorkView({ id: stored.key, childId: value.childId, parentSessionId: value.parentSessionId,
+    ...(typeof configuration.provider === 'string' && typeof configuration.model === 'string'
+      ? { model: { provider: configuration.provider, model: configuration.model } } : {}),
     ...(value.progress === undefined ? {} : { progress: value.progress }),
     conversationId: value.conversationId, generation: value.generation, createdAt: value.createdAt, deadlineAt: value.deadlineAt,
     status: value.status, result: value.result ?? null, lateResult: value.lateResult ?? null,

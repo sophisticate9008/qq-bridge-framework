@@ -17,7 +17,7 @@ import { createDshFrameworkToolPort, type DshFrameworkToolPort, type DshFramewor
 import { createDshWorkPort, dshWorkRpcError, type DshWorkPort, type DshWorkMethod } from './dsh-work.ts'
 import { prepareDshPromptContent, type DshPromptImageResolver } from './dsh-prompt-content.ts'
 import { createDshPluginModelBackend } from './dsh-plugin-model.ts'
-import type { PluginModelBackend } from '../contracts/plugin-model.ts'
+import type { PluginModelBackend, PluginModelSelection } from '../contracts/plugin-model.ts'
 import { createDshFollowByteBudget, type DshFollowCursors } from './dsh-follow-budget.ts'
 
 export type { NativeDeploymentPresetBinding as DshPresetBinding } from '../contracts/native-deployment.ts'
@@ -43,7 +43,7 @@ export interface DshJsonRpcPort extends DshClientPort, DshInteractionPort {
   readonly pluginManagement: DshPluginManagement
   interactionStatus?(): { readonly state: 'idle' | 'connecting' | 'connected' | 'closed' | 'error'; readonly lastError: string | null }
   readonly pluginModels: PluginModelBackend
-  configureSession?(request: { readonly sessionId: string; readonly conversationId: string; readonly signal: AbortSignal }): Promise<void>
+  configureSession?(request: { readonly sessionId: string; readonly conversationId: string; readonly model?: PluginModelSelection; readonly signal: AbortSignal }): Promise<void>
   inspectSessionStorage?(sessionId: string, signal: AbortSignal): Promise<{ sessionId: string; exists: boolean; root?: string; filename?: string }>
   readModelCatalog(signal: AbortSignal): Promise<JsonValue>
   readonly bridgePlugin?: DshBridgePluginPort
@@ -200,14 +200,16 @@ export function createDshJsonRpcPort(options: DshJsonRpcOptions): DshJsonRpcPort
     }),
     pluginModels,
     bridgePlugin,
-    async configureSession(request: { readonly sessionId: string; readonly conversationId: string; readonly signal: AbortSignal }) {
+    async configureSession(request: { readonly sessionId: string; readonly conversationId: string; readonly model?: PluginModelSelection; readonly signal: AbortSignal }) {
       if (!identifier(request.sessionId)) throw failure('DSH_INVALID_SESSION')
       const kind = request.conversationId.startsWith('group:') ? 'group' : 'private'
       const matches = bindings.filter(binding => binding.conversationKind === undefined || binding.conversationKind === kind)
       if (matches.length !== 1) throw failure('DSH_INSTRUCTIONS_UNSUPPORTED')
       const binding = matches[0]!
+      const model = request.model
       await updateDshSessionModel({ sessionId: request.sessionId, definition: binding.definition,
-        externalProvider: binding.externalProvider ?? binding.definition.model.provider, signal: request.signal, rpc })
+        ...(model ? { selection: model } : {}),
+        externalProvider: model?.provider ?? binding.externalProvider ?? binding.definition.model.provider, signal: request.signal, rpc })
     },
     async inspectSessionStorage(sessionId: string, signal: AbortSignal) {
       if (!identifier(sessionId)) throw failure('DSH_INVALID_SESSION')

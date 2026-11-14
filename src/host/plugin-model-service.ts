@@ -62,6 +62,8 @@ function binding(value: unknown, revision: number, busy: boolean): PluginModelBi
   const model = value.model === null ? null : parsePluginModelSelection(value.model)
   return snapshot({ revision, busy, owner: value.owner, name: value.name, conversationId: value.conversationId, sessionId: value.sessionId,
     source: value.source as PluginModelBinding['source'], state: value.state as PluginModelBinding['state'], model,
+    ...(value.modelOverride === undefined ? {} : { modelOverride: value.modelOverride === null ? null : parsePluginModelSelection(value.modelOverride) }),
+    ...(value.modelDefault === undefined ? {} : { modelDefault: value.modelDefault === null ? null : parsePluginModelSelection(value.modelDefault) }),
     createdAt: Number(value.createdAt), updatedAt: Number(value.updatedAt), lastUsedAt: value.lastUsedAt as number | null,
     ...(value.contextRestartedFrom === undefined ? {} : { contextRestartedFrom: value.contextRestartedFrom }) })
 }
@@ -181,7 +183,9 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
     const at = Date.now()
     const prepared: PluginModelBinding = { revision: 0, busy: false, owner, name: current.name, conversationId: current.conversationId,
       sessionId: `qbf-plugin-${randomUUID()}`, source: 'created', model, state: 'creating', createdAt: at, updatedAt: at, lastUsedAt: null,
-      ...(contextRestartedFrom === undefined ? {} : { contextRestartedFrom }) }
+      ...(contextRestartedFrom === undefined ? {} : { contextRestartedFrom,
+        ...(current.value?.modelOverride === undefined ? {} : { modelOverride: current.value.modelOverride }),
+        ...(current.value?.modelDefault === undefined ? {} : { modelDefault: current.value.modelDefault }) }) }
     const saved = options.store.write(BINDINGS, current.id, json(prepared), { expectedRevision: current.row?.revision ?? null })
     options.store.write(SESSIONS, prepared.sessionId, json({ schema: 1, ...prepared, mode: 'persistent' }), { expectedRevision: null })
     try {
@@ -241,7 +245,10 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
         try {
           active.throwIfAborted()
           if (!(await options.backend.inspect(target.sessionId, active)).exists) failure('PLUGIN_MODEL_SESSION_NOT_FOUND')
-          const model = request.model ? await selectModel(request.model, active) : target.model ?? undefined
+          const preference = request.model ? target.modelOverride ? parsePluginModelSelection(request.model) : await selectModel(request.model, active)
+            : target.modelDefault === undefined ? target.model : target.modelDefault
+          const model = target.modelOverride ? await selectModel(target.modelOverride, active)
+            : preference ?? (target.modelOverride !== undefined && target.modelDefault === null ? await selectModel(undefined, active) : undefined)
           stop = await options.backend.follow({ sessionId: target.sessionId, requestId, owner, signal: active, onEvent(event) {
             if (!submitted) return
             if (event.type === 'message') {
@@ -276,7 +283,8 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
           if (event.type !== 'completed') failure(modelFailure(data))
           const latest = read(owner, request)
           if (latest.value?.sessionId === target.sessionId && latest.row) write(latest.id,
-            { ...latest.value, ...(model ? { model } : {}), updatedAt: Date.now(), lastUsedAt: Date.now() }, latest.row.revision)
+            { ...latest.value, ...(model ? { model } : {}), modelDefault: preference ?? null,
+              updatedAt: Date.now(), lastUsedAt: Date.now() }, latest.row.revision)
           return snapshot({ requestId, sessionId: target.sessionId, text, usage: data })
         } catch (error) {
           if (submitted) options.store.write(EXECUTIONS, target.sessionId, json({ schema: 1, owner, requestId, state: 'unknown', updatedAt: Date.now() }))
@@ -310,11 +318,33 @@ export function createPluginModelService(options: PluginModelServiceOptions) {
         if (!observed.idle || observed.state !== 'failed' || !contextOverflow(observed.usage)) return current
         signal.throwIfAborted()
         return create(owner, { ...request, expectedRevision: current.revision,
-          model: request.model ?? current.model ?? undefined }, signal, current.sessionId, current.sessionId)
+          model: current.modelOverride ?? request.model ?? current.modelDefault ?? current.model ?? undefined }, signal, current.sessionId, current.sessionId)
       })
     })
   return Object.freeze({
     listBindings,
+    setModel(owner: string, key: PluginModelBindingKey, model: PluginModelSelection | null, callerSignal: AbortSignal) {
+      const signal = managementSignal(callerSignal)
+      return serial(`binding:${keyOf(owner, key).id}`, signal, async () => {
+        const current = read(owner, key)
+        compareRevision(key.expectedRevision, current.row?.revision ?? null)
+        if (!current.value || !current.row) failure('PLUGIN_MODEL_BINDING_CONFLICT')
+        if (current.value.busy || isBusy(current.value.sessionId)) failure('PLUGIN_MODEL_SESSION_BUSY')
+        if (current.value.state !== 'ready') failure('PLUGIN_MODEL_EXECUTION_UNSETTLED')
+        assertSettled(current.value.sessionId)
+        const selected = model === null ? null : await selectModel(model, signal)
+        const previous = current.value, revision = current.row.revision
+        return options.withSessionLease(previous.sessionId, signal, async () => {
+          signal.throwIfAborted()
+          const latest = read(owner, key)
+          compareRevision(revision, latest.row?.revision ?? null)
+          assertSettled(previous.sessionId)
+          return write(current.id, { ...previous, modelOverride: selected,
+            modelDefault: previous.modelDefault === undefined ? previous.model : previous.modelDefault,
+            updatedAt: Date.now() }, revision)
+        })
+      })
+    },
     listManagedSessions(owner?: string): readonly PluginModelManagedSession[] {
       options.signal?.throwIfAborted()
       if (owner !== undefined) keyOf(owner)

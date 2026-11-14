@@ -742,7 +742,10 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
           try {
             const managed = readNativeSessionManagement({ directory, state: 'stopped', owner: access.value.owner,
               limit, ...(after === null ? {} : { after }) })
-            if (managed !== null) return { ...managed, deleteAvailable: false }
+            if (managed !== null) {
+              const models = await chatRuntime.sessionModelConfigurations(managed.sessions.map(item => item.key))
+              return { ...managed, sessions: managed.sessions.map(item => ({ ...item, ...(models[item.key] ? { modelConfiguration: models[item.key] } : {}) })), deleteAvailable: false }
+            }
           } catch (error) {
             if (error instanceof AdminRequestError) throw error
             requestError(503, 'native_history_unavailable')
@@ -798,7 +801,8 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
               bindingRevision: nativeSessionBindingRevision(entry), owner: entry.conversationId === `private:${owner}` }
           } catch { requestError(500, 'native_session_metadata_invalid') }
         })
-        return { ...page, sessions, revision: revision(Buffer.from(JSON.stringify({ sessions, items: page.items }))), deleteAvailable: false, resetAvailable: chatRuntime?.activity().state === 'running',
+        const models = await chatRuntime?.sessionModelConfigurations(sessions.map(item => String(item.key))) ?? {}
+        return { ...page, sessions: sessions.map(item => ({ ...item, ...(models[String(item.key)] ? { modelConfiguration: models[String(item.key)] } : {}) })), revision: revision(Buffer.from(JSON.stringify({ sessions, items: page.items }))), deleteAvailable: false, resetAvailable: chatRuntime?.activity().state === 'running',
           ...(!host ? { native: true, historyReadOnly: true } : {}) }
       }
     },
@@ -1041,6 +1045,7 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
     routes.push(...nativeChatControlRoutes(directory, chatRuntime, options.deploymentRuntime === undefined ? undefined : checkedNativeDeploymentRuntime(options.deploymentRuntime)))
     routes.push(...createNativeChatHealthRoutes(directory, chatRuntime, options.assistantTarget))
     routes.push(...createNativeSessionManagementRoutes({ directory, state: () => chatRuntime.activity().state,
+      setModel: (target, model, revision, signal) => chatRuntime.setSessionModel(target, model, revision, signal),
       unbind: target => chatRuntime.unbindSession(target), bind: (target, sessionId, signal) => chatRuntime.bindSession(target, sessionId, signal) })
       .map(route => ({ ...route, handle: (request: Parameters<AdminRoute['handle']>[0]) =>
         nativeControl(directory, async () => route.handle(request)) })))

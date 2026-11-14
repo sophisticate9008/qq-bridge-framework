@@ -1,5 +1,6 @@
 import type { MessageContent } from './messages.ts'
 import { isDshWorkProgress, type DshWorkProgress } from './dsh-work.ts'
+import { parsePluginModelSelection, type PluginModelSelection } from './plugin-model.ts'
 
 export interface NativeWorkBackendResult {
   readonly stopReason: string
@@ -17,6 +18,7 @@ export interface NativeWorkResultDelivery extends NativeWorkBackendResult {
 }
 
 export interface NativeWorkView {
+  readonly model?: PluginModelSelection
   readonly progress?: readonly DshWorkProgress[]
   readonly id: string
   readonly childId: string
@@ -91,7 +93,7 @@ export function parseNativeWorkBackendResult(input: unknown): NativeWorkBackendR
 export function parseNativeWorkView(input: unknown): NativeWorkView | null {
   if (!record(input) || !exact(input, ['id', 'childId', 'parentSessionId', 'conversationId', 'generation', 'createdAt', 'deadlineAt',
     'status', 'result', 'lateResult', 'delivery', 'lastError', 'resultId', 'deliveryId', 'deliveryMessageId', 'deliveryError', 'deliveryFileId',
-    ...(Object.hasOwn(input, 'progress') ? ['progress'] : [])])
+    ...(Object.hasOwn(input, 'progress') ? ['progress'] : []), ...(Object.hasOwn(input, 'model') ? ['model'] : [])])
     || Object.hasOwn(input, 'progress') && !isDshWorkProgress(input.progress)
     || !ref(input.id) || !ref(input.childId) || !ref(input.parentSessionId) || !ref(input.conversationId)
     || typeof input.generation !== 'number' || !Number.isSafeInteger(input.generation) || input.generation <= 0
@@ -105,7 +107,9 @@ export function parseNativeWorkView(input: unknown): NativeWorkView | null {
   const result = input.result === null ? null : parseNativeWorkBackendResult(input.result)
   const lateResult = input.lateResult === null ? null : parseNativeWorkBackendResult(input.lateResult)
   if (input.result !== null && result === null || input.lateResult !== null && lateResult === null) return null
-  return { ...(input.progress === undefined ? {} : { progress: input.progress as readonly DshWorkProgress[] }), id: input.id, childId: input.childId, parentSessionId: input.parentSessionId, conversationId: input.conversationId,
+  let model: PluginModelSelection | undefined
+  try { if (input.model !== undefined) model = parsePluginModelSelection(input.model) } catch { return null }
+  return { ...(model ? { model } : {}), ...(input.progress === undefined ? {} : { progress: input.progress as readonly DshWorkProgress[] }), id: input.id, childId: input.childId, parentSessionId: input.parentSessionId, conversationId: input.conversationId,
     generation: input.generation, createdAt: input.createdAt, deadlineAt: input.deadlineAt,
     status: input.status as NativeWorkView['status'], result, lateResult, delivery: input.delivery as NativeWorkView['delivery'],
     lastError: input.lastError as string | null, resultId: input.resultId as string | null, deliveryId: input.deliveryId as string | null,

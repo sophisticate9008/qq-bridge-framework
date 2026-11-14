@@ -4,6 +4,7 @@ import { buildChatSessionDefinition } from '../host/chat-plans.ts'
 import type { NativeDeploymentPresetBinding } from '../contracts/native-deployment.ts'
 import type { DshCreateSessionRequest, DshPortResult } from './dsh.ts'
 import { DshAdapterError } from './dsh.ts'
+import type { PluginModelSelection } from '../contracts/plugin-model.ts'
 
 function failure(code: string): DshAdapterError { return new DshAdapterError(code, 'DSH network operation did not complete safely.') }
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) }
@@ -71,13 +72,14 @@ export async function updateDshSessionModel(options: {
   readonly sessionId: string
   readonly definition: ChatSessionDefinition
   readonly externalProvider: string
+  readonly selection?: PluginModelSelection
   readonly signal: AbortSignal
   readonly rpc: (method: 'session/modelCatalog' | 'session/selectModel', input: JsonObject | undefined,
     signal: AbortSignal) => Promise<DshPortResult<JsonValue>>
 }): Promise<void> {
   const { sessionId, definition, externalProvider: provider, signal, rpc } = options
-  const model = definition.model.name
-  let reasoningEffort: string | undefined = definition.model.reasoningEffort
+  const model = options.selection?.model ?? definition.model.name
+  let reasoningEffort: string | undefined = options.selection ? options.selection.reasoningEffort : definition.model.reasoningEffort
   if (reasoningEffort === 'off') {
     const catalog = await rpc('session/modelCatalog', undefined, signal)
     if (!catalog.ok) throw failure('DSH_MODEL_CAPABILITIES_UNVERIFIED')

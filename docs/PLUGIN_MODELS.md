@@ -88,3 +88,9 @@ DSH 桥接插件在提交模型前拒绝请求时，分别返回会话读取或�
 `preparePluginModelSession` 只恢复原会话，不提交模型输入。桥接插件以实际会话 ID 合并并发恢复，各调用共享同一加载 Promise；加载完成后宿主才打开事件订阅。原生 `session/follow` 会后台激活冷会话，因此不能与插件直接恢复同时启动，否则两个恢复路径会争用同一持久写句柄，产生 `SessionAlreadyOwnedError`。其他入口正在激活时，插件等待其 `agent/created` 发布事件并复用已就绪实例，不反复申请写句柄；超时仍占用时返回 `PLUGIN_MODEL_SESSION_WRITER_HELD`。底层存储写锁继续保护会话文件。
 
 1.5.2 框架与同版桥接插件配套提供预加载机制。旧插件明确返回方法不存在时沿用原有行为；传输、鉴权或预加载失败不会当作旧插件降级，也不会提交模型请求。已确认拒绝的执行保留固定原因码，未知提交继续按原请求核对。
+
+## 按会话调整模型
+
+在“会话与日志 → 插件会话”找到用途对应的行，点击“调整模型”，可为此绑定指定供应商与模型。保存只修改后续调用的选择，不提交提示词、不创建会话、不删除历史。指定设置优先于插件每次调用的模型参数；选择“由插件选择（恢复默认）”后，恢复插件请求与原默认选择。模型列表来自当前 DSH 已登记目录。
+
+绑定的 `model` 表示创建时或最近完成调用的模型，`modelOverride` 是管理员为下次调用指定的模型，`modelDefault` 独立保存插件的偏好。后三者分别读取，不把“已保存”当作“已执行”。管理请求使用 `POST /api/chat/plugin-sessions`，`action: "model"`、`model: {provider, model, reasoningEffort?} | null`，以及原有 owner/name/conversationId/revision/confirm 字段。响应包含 `historyPreserved: true`、`appliesTo: "next-request"` 和最新绑定。绑定版本冲突、实际会话忙碌或执行未知时拒绝保存。

@@ -49,6 +49,37 @@ function fixture(t: TestContext) {
 
 const overflow = { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED' } } } as const
 
+test('session model override wins over plugin requests, preserves history and restores the plugin preference', async t => {
+  const f = fixture(t), signal = t.signal
+  const first = { provider: 'fixture', model: 'fixture' }, second = { provider: 'second', model: 'other' }
+  f.backend.models = async () => [first, second].map(model => ({ ...model, providerName: model.provider, modelName: model.model }))
+  const calls: Parameters<PluginModelBackend['start']>[0][] = []
+  const original = f.backend.start
+  f.backend.start = async request => { calls.push(request); return original(request) }
+  const binding = await f.client.create()
+  const changed = await f.service.setModel('fixture-plugin', { expectedRevision: binding.revision }, second, signal)
+  assert.equal(changed.sessionId, binding.sessionId)
+  assert.equal(f.counts().starts, 0, 'saving never invokes the model')
+  await assert.rejects(f.service.setModel('fixture-plugin', { expectedRevision: binding.revision }, null, signal), { code: 'PLUGIN_MODEL_BINDING_CONFLICT' })
+  const pending = f.client.run({ prompt: 'Keep this context', model: first })
+  await f.admitted
+  assert.deepEqual(calls[0]?.model, second)
+  await assert.rejects(f.service.setModel('fixture-plugin', { expectedRevision: changed.revision }, null, signal), { code: 'PLUGIN_MODEL_SESSION_BUSY' })
+  await f.complete('same context'); await pending
+  const latest = f.client.list()[0]!
+  assert.deepEqual(latest.modelDefault, first)
+  const cleared = await f.service.setModel('fixture-plugin', { expectedRevision: latest.revision }, null, signal)
+  assert.equal(cleared.sessionId, binding.sessionId)
+  const resumed = f.client.run({ prompt: 'Continue without an explicit model' })
+  while (f.counts().starts < 2) await nextTurn()
+  assert.deepEqual(calls[1]?.model, first)
+  await f.complete('continued'); await resumed
+  assert.equal(f.counts().created, 1)
+  const ready = f.client.list()[0]!
+  await assert.rejects(f.service.setModel('fixture-plugin', { expectedRevision: ready.revision }, { provider: 'missing', model: 'missing' }, signal), { code: 'PLUGIN_MODEL_UNAVAILABLE' })
+  assert.equal(f.client.list()[0]?.revision, ready.revision)
+})
+
 test('settled owned context overflow replaces the binding once, retains old evidence and resumes only pure generation', async t => {
   const f = fixture(t)
   f.backend.inspectRun = async () => ({ state: 'failed', idle: true, usage: overflow })

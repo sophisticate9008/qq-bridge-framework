@@ -19,6 +19,7 @@ export type PluginSessionManagementRequest = ManagementTarget & (
   | { readonly action: 'create'; readonly model?: PluginModelSelection }
   | { readonly action: 'unbind' }
   | { readonly action: 'reconcile' }
+  | { readonly action: 'model'; readonly model: PluginModelSelection | null }
 )
 const conversation = (value: unknown): value is string => typeof value === 'string' && /^(group|private):[1-9]\d{0,31}$/.test(value)
 const timestamp = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
@@ -31,6 +32,11 @@ export function parsePluginSessionManagementRequest(value: unknown): PluginSessi
   const base = { owner: value.owner, ...(value.name === undefined ? {} : { name: value.name }),
     ...(value.conversationId === undefined ? {} : { conversationId: value.conversationId }), revision: value.revision, confirm: true as const }
   const keys = ['action', 'owner', 'name', 'conversationId', 'revision', 'confirm']
+  if (value.action === 'model') {
+    if (value.revision === null || Object.keys(value).some(key => ![...keys, 'model'].includes(key)) || value.model === undefined) return null
+    try { return { ...base, action: 'model', model: value.model === null ? null : parsePluginModelSelection(value.model) } }
+    catch { return null }
+  }
   if (value.action === 'unbind' || value.action === 'reconcile') {
     return value.revision === null || Object.keys(value).some(key => !keys.includes(key)) ? null : { ...base, action: value.action }
   }
@@ -56,7 +62,10 @@ export function parsePluginSessionBinding(value: unknown): PluginModelBinding | 
     return { owner: value.owner, name: value.name, conversationId: value.conversationId, sessionId: value.sessionId,
       source: value.source, state: value.state as PluginModelBinding['state'], model: value.model === null ? null : parsePluginModelSelection(value.model),
       createdAt: value.createdAt, updatedAt: value.updatedAt, lastUsedAt: value.lastUsedAt, revision: value.revision,
-      busy: value.busy, ...(value.contextRestartedFrom === undefined ? {} : { contextRestartedFrom: value.contextRestartedFrom }) }
+      busy: value.busy,
+      ...(value.modelOverride === undefined ? {} : { modelOverride: value.modelOverride === null ? null : parsePluginModelSelection(value.modelOverride) }),
+      ...(value.modelDefault === undefined ? {} : { modelDefault: value.modelDefault === null ? null : parsePluginModelSelection(value.modelDefault) }),
+      ...(value.contextRestartedFrom === undefined ? {} : { contextRestartedFrom: value.contextRestartedFrom }) }
   } catch { return null }
 }
 export function parsePluginManagedSession(value: unknown): PluginModelManagedSession | null {

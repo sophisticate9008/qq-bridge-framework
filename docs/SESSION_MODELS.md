@@ -1,0 +1,17 @@
+# 会话供应商与模型
+
+供应商连接参数、凭据和模型目录在“模型服务”管理。具体会话使用哪个模型，在“会话与日志”调整。
+
+- **QQ 会话**：列表显示供应商、模型和设置来源。点击该行“调整模型”，选择后保存，从下次处理消息开始生效。选择“跟随聊天方案（恢复默认）”可撤销此会话的指定。调整保留会话 ID、聊天历史、人设和其他会话的设置。
+- **插件会话**：按插件和用途显示模型，可在同一行“调整模型”。指定模型优先于插件自身选择，恢复默认后由插件选择。列表区分最近完成的调用与后续调用设置，未取得模型证据时显示待确认。详见[插件模型](PLUGIN_MODELS.md)。
+- **助手工作**：相关记录中的“助手工作”页签提供后台助手模型设置，保存后用于新工作。每项工作的列表与详情显示创建时保留的供应商和模型；已有工作继续沿用自己的配置。旧记录没有模型证据时显示“旧记录未记载”。
+
+QQ 会话模型调整要求聊天正在运行，且目标会话已空闲、没有未核实执行。保存同时核验会话绑定版本与模型设置版本，冲突时刷新后重新选择。结果未知时先刷新查看，不自动重复提交。聊天停止时历史仍可读取，不把当前方案推定为旧会话的模型。
+
+## QQ 管理接口
+
+`GET /api/chat/sessions` 在运行时为每条绑定附加 `modelConfiguration`：包含 `revision`、`override`、`inherited`、`planName`、`providerName`、`modelName` 和 `lastApplied`。后者表示最近确认应用到 DSH 的选择，不证明该轮已成功生成或发往 QQ。模型目录复用 `GET /api/chat/plugin-sessions/models`，只包含供应商与模型名称、标识，不包含凭据。
+
+`POST /api/chat/sessions/model` 接受 `{key, sessionId, generation, bindingRevision, modelRevision, model, confirm: true}`。`modelRevision` 初始为 `null`；`model` 为 `{provider, model, reasoningEffort?}` 或 `null`（恢复聊天方案）。成功返回原 `sessionId`、新 `configuration`、`historyPreserved: true`、`appliesTo: "next-request"`。该接口只持久保存选择，不调用模型。下一轮持有实际会话队列后应用选择；QQ 与插件共享同一模型会话时，每个入口在自己的调用开始时应用自己的选择。
+
+设置保存在所属账号的运行数据库中。模型调整不新增访问权限、工具权限或自动发送资格，也不绕过未知执行隔离。

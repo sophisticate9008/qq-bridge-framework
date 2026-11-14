@@ -20,6 +20,7 @@ import { digest, json, object } from './data.ts'
 import { mapNativeExecutionObservation } from './native-event-mapping.ts'
 import { recordNativeExecutionInput } from './native-execution-summary.ts'
 import { readAgentPresentation } from './agent-presentation.ts'
+import { readSessionModelOverride, recordSessionModelApplied } from './session-model-configuration.ts'
 
 export interface NativeAgentResources {
   readonly lifetime: AbortController | undefined
@@ -57,7 +58,6 @@ export function createNativeAgentCoordinator(options: {
   const runtime = options.resources
   const { sourceAgent, dsh, store, controller, definition, configuration, identity, presetBindings,
     activity, bindingForSession, checkpoint, guard } = options
-  const configuredSessions = new Set<string>()
   const observedMessages = new Set<string>()
   function observeExecution(record: Parameters<typeof mapNativeExecutionObservation>[0]) {
     try { const event = mapNativeExecutionObservation(record); if (event) activity.observe(event) } catch {}
@@ -146,10 +146,16 @@ export function createNativeAgentCoordinator(options: {
               content: json(request.content) }, request.signal)
             await guard(binding.conversationId, request.signal, false, 'submit')
             if (!runtime.executions || !runtime.claims || !runtime.configuration || runtime.pluginEpoch === null) failure('NATIVE_CHAT_EXECUTION_UNAVAILABLE')
-            if (!configuredSessions.has(request.sessionId) && dsh.configureSession) {
+            if (dsh.configureSession) {
               if (runtime.executions.active().some(execution => execution.binding.sessionId === request.sessionId)) failure('NATIVE_CHAT_BUSY')
-              await dsh.configureSession({ sessionId: request.sessionId, conversationId: binding.conversationId, signal: request.signal })
-              configuredSessions.add(request.sessionId)
+              const selected = readSessionModelOverride(store, binding.conversationId).model
+              await dsh.configureSession({ sessionId: request.sessionId, conversationId: binding.conversationId,
+                ...(selected ? { model: selected } : {}), signal: request.signal })
+              const kind = binding.conversationId.startsWith('group:') ? 'group' : 'private'
+              const preset = presetBindings.find(item => item.conversationKind === undefined || item.conversationKind === kind)
+              recordSessionModelApplied(store, binding.conversationId, request.sessionId, selected ?? {
+                provider: preset?.externalProvider ?? definition.model.provider, model: definition.model.name,
+                reasoningEffort: definition.model.reasoningEffort })
             }
             phase('configuration-ready')
             let delegatesTools: boolean

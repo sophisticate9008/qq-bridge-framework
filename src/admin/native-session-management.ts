@@ -1,8 +1,11 @@
 import { FrameworkError, isRecord } from '../core/values.ts'
 import { resetNativeSessionContext, validNativeSessionResetTarget, type NativeSessionManagementState } from '../host/native-session-management.ts'
 import { AdminRequestError, type AdminRoute } from './server.ts'
+import { parsePluginModelSelection, type PluginModelSelection } from '../contracts/plugin-model.ts'
+import type { NativeSessionResetTarget } from '../host/native-session-management.ts'
 
 export function createNativeSessionManagementRoutes(options: {
+  readonly setModel?: (target: NativeSessionResetTarget, model: PluginModelSelection | null, revision: number | null, signal: AbortSignal) => Promise<unknown>
   readonly bind?: (target: import('../host/native-session-management.ts').NativeSessionResetTarget, targetSessionId: string, signal: AbortSignal) => unknown | Promise<unknown>
   readonly unbind?: (target: import('../host/native-session-management.ts').NativeSessionResetTarget) => unknown
   readonly directory: string
@@ -11,6 +14,31 @@ export function createNativeSessionManagementRoutes(options: {
 }): readonly AdminRoute[] {
   let pending = false
   return Object.freeze([Object.freeze({
+    method: 'POST' as const, pathname: '/api/chat/sessions/model',
+    async handle({ query, body, signal }: Parameters<AdminRoute['handle']>[0]) {
+      if (query.size || !isRecord(body) || Object.keys(body).length !== 7 || body.confirm !== true
+        || !validNativeSessionResetTarget(body) || body.modelRevision !== null && (!Number.isSafeInteger(body.modelRevision) || Number(body.modelRevision) < 1))
+        throw new AdminRequestError(400, 'invalid_session_model')
+      let model: PluginModelSelection | null
+      try { model = body.model === null ? null : parsePluginModelSelection(body.model) }
+      catch { throw new AdminRequestError(400, 'invalid_session_model') }
+      if (model?.contextWindow !== undefined) throw new AdminRequestError(400, 'invalid_session_model')
+      if (!options.setModel) throw new AdminRequestError(503, 'session_model_unavailable')
+      const setModel = options.setModel
+      if (pending) throw new AdminRequestError(409, 'session_model_busy')
+      pending = true
+      try {
+        const run = () => setModel({ key: body.key, sessionId: body.sessionId,
+          generation: body.generation, bindingRevision: body.bindingRevision }, model, body.modelRevision as number | null, signal)
+        return options.runExclusive ? await options.runExclusive(run) : await run()
+      } catch (error) {
+        if (error instanceof AdminRequestError) throw error
+        const code = isRecord(error) ? String(error.code ?? '') : ''
+        throw new AdminRequestError(/CONFLICT/.test(code) ? 409 : /BUSY|UNSETTLED|NOT_RUNNING/.test(code) ? 409 : /UNAVAILABLE/.test(code) ? 400 : 503,
+          /CONFLICT/.test(code) ? 'session_model_conflict' : /BUSY|UNSETTLED|NOT_RUNNING/.test(code) ? 'session_model_busy' : /UNAVAILABLE/.test(code) ? 'session_model_selection_unavailable' : 'session_model_unknown')
+      } finally { pending = false }
+    }
+  }), Object.freeze({
     method: 'POST' as const, pathname: '/api/chat/sessions/reset',
     async handle({ query, body, signal }: Parameters<AdminRoute['handle']>[0]) {
       if ([...query.keys()].length > 0) throw new AdminRequestError(400, 'invalid_query')

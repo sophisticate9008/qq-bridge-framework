@@ -109,7 +109,10 @@ function projection(record: StoredRecord): Readonly<NativeWorkView> {
   const delivery = value.delivery ?? 'unavailable'
   assert(value.progress === undefined || isDshWorkProgress(value.progress), 'INVALID_NATIVE_WORK_RECORD', 'Invalid work progress.')
   assert(deliveries.some(state => state === delivery), 'INVALID_NATIVE_WORK_RECORD', 'The work delivery state is invalid.')
-  return snapshot({ ...(value.progress === undefined ? {} : { progress: value.progress as readonly DshWorkProgress[] }), id: record.key, childId: String(value.childId), parentSessionId: value.parentSessionId,
+  const configuration = object(value.configuration)
+  return snapshot({ ...(typeof configuration.provider === 'string' && typeof configuration.model === 'string'
+    ? { model: { provider: configuration.provider, model: configuration.model } } : {}),
+    ...(value.progress === undefined ? {} : { progress: value.progress as readonly DshWorkProgress[] }), id: record.key, childId: String(value.childId), parentSessionId: value.parentSessionId,
     conversationId: value.conversationId, generation: Number(value.generation), createdAt: Number(value.createdAt), deadlineAt: value.deadlineAt === null ? null : Number(value.deadlineAt),
     status: value.status as NativeWorkView['status'], result: value.result == null ? null : validatedResult(value.result),
     lateResult: value.lateResult == null ? null : validatedResult(value.lateResult), delivery: delivery as NativeWorkView['delivery'],
