@@ -31,6 +31,7 @@ const MAX_ITEMS = 5000, MAX_EXTRA = 1000, MAX_RECORDS = 16000
 interface Entry {
   readonly id: string; readonly accountId: string; readonly md5: string | null; readonly url: string | null
   readonly account: OneBotSticker | null; readonly extra: boolean; readonly deleted: boolean
+  readonly deletionSource?: 'roster' | 'user'
   readonly annotation: StickerAnnotation | null; readonly createdAt: number; readonly state: 'ready' | 'unknown'
   readonly manualIdentity?: StickerCharacterIdentity | null
   readonly manualAnnotation?: StickerLibraryAnnotation
@@ -46,6 +47,7 @@ function parse(value: JsonValue): Entry {
   return { id: row.id, accountId: String(row.accountId), md5: typeof row.md5 === 'string' ? row.md5 : null,
     url: typeof row.url === 'string' ? row.url : null, account: isRecord(row.account) ? row.account as unknown as OneBotSticker : null,
     extra: row.extra === true, deleted: row.deleted === true, annotation: row.annotation ? validateStickerAnnotation(row.annotation) : null,
+    ...(row.deletionSource === 'roster' || row.deletionSource === 'user' ? { deletionSource: row.deletionSource } : {}),
     createdAt: Number(row.createdAt), state: row.state === 'unknown' ? 'unknown' : 'ready',
     ...(manualIdentity === undefined ? {} : { manualIdentity }), ...(manualAnnotation ? { manualAnnotation } : {}) }
 }
@@ -247,7 +249,12 @@ export function createStickerLibrary(options: {
         const md5 = suppliedMd5 ?? existing?.item.md5 ?? null
         const id = existing?.item.id ?? digest([options.accountId, md5 ?? account.url])
         present.add(id)
-        const item: Entry = { id, accountId: options.accountId, md5, url: account.url, account, extra: false, deleted: existing?.item.deleted ?? false,
+        // A missing roster entry is not a user deletion. Its return restores the
+        // existing image and labels, while explicit and legacy tombstones stay protected.
+        const deleted = existing?.item.deleted === true && existing.item.deletionSource !== 'roster'
+        const deletionSource = deleted || existing?.item.state === 'unknown' ? existing?.item.deletionSource : undefined
+        const item: Entry = { id, accountId: options.accountId, md5, url: account.url, account, extra: false, deleted,
+          ...(deletionSource ? { deletionSource } : {}),
           annotation: prior?.annotation ?? cachedAnnotation, createdAt: existing?.item.createdAt ?? Date.now(),
           ...(manualIdentity === undefined ? {} : { manualIdentity }), ...(manualAnnotation ? { manualAnnotation } : {}),
           state: existing?.item.state === 'unknown' ? 'unknown' : 'ready' }
@@ -268,7 +275,8 @@ export function createStickerLibrary(options: {
         if (existing?.item.extra) await rm(join(directory, id), { force: true })
       }
       if (!limited) for (const { item } of all()) if (item.account && !present.has(item.id)) {
-        save({ ...item, account: null, deleted: true, state: 'ready' })
+        save({ ...item, account: null, deleted: true, state: 'ready',
+          deletionSource: item.deletionSource === 'user' || item.deleted && item.deletionSource !== 'roster' ? 'user' : 'roster' })
         await disk.forget(item.id).catch(() => undefined)
       }
     }).finally(() => { refresh = undefined })
@@ -607,7 +615,9 @@ export function createStickerLibrary(options: {
         catch { result = { status: 'unknown' } }
       }
       const status = String(object(result).status)
-      save({ ...item, ...(status === 'confirmed' ? { deleted: true, extra: false, account: null } : {}), state: status === 'unknown' ? 'unknown' : 'ready' })
+      save({ ...item, ...(status === 'confirmed' ? { deleted: true, extra: false, account: null } : {}),
+        ...(status === 'confirmed' || status === 'unknown' ? { deletionSource: 'user' as const } : {}),
+        state: status === 'unknown' ? 'unknown' : 'ready' })
       options.store.write(WRITES, key, { fingerprint, action: 'delete', status, result }, { expectedRevision: prepared.revision })
       if (status === 'confirmed' && item.account) cache.forget(item.account)
       if (status === 'confirmed') { imageMetadata.forget(item.id); await disk.forget(item.id).catch(() => undefined) }

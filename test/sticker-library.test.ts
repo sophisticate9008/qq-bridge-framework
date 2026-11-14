@@ -65,6 +65,42 @@ async function fixture(t: TestContext, settings: { nearFull?: boolean; add?: 'fu
     seed() { const item = { id: 'known', stickerId: 'known', md5, url: 'https://media.example/image' }; roster = [item]; createStickerSemanticCache(store, '999').remember(item, annotation) } }
 }
 
+test('an account image returning after a missing roster restores its labels and stable identity without QQ writes', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+  const f = await fixture(t); f.seed()
+  const original = (await f.library.snapshot(signal())).items[0]!
+  await f.library.annotateIdentity(original.id, original.revision, { character: '已确认角色', aliases: ['别名'] }, signal())
+  f.setRoster([]); t.mock.timers.tick(60_001)
+  assert.equal((await f.library.snapshot(signal())).items.length, 0)
+  const missing = f.store.read('native-chat.sticker-library', original.id)!
+  assert(isRecord(missing.value)); assert.equal(missing.value.deletionSource, 'roster')
+  f.seed(); t.mock.timers.tick(60_001)
+  const restored = (await f.library.snapshot(signal())).items[0]!
+  assert.equal(restored.id, original.id); assert.equal(restored.createdAt, original.createdAt)
+  assert.equal(restored.description, original.description); assert.deepEqual(restored.tags, original.tags)
+  assert.equal(restored.identity?.character, '已确认角色'); assert.equal(restored.identity?.source, 'user')
+  assert.deepEqual(f.writes, [])
+})
+
+test('explicit deletions and unknown legacy tombstones stay hidden when a stale account roster returns them', async t => {
+  for (const legacy of [false, true]) {
+    const f = await fixture(t); f.seed()
+    const original = (await f.library.snapshot(signal())).items[0]!
+    if (legacy) {
+      const row = f.store.read('native-chat.sticker-library', original.id)!
+      assert(isRecord(row.value))
+      f.store.write(row.namespace, row.key, { ...row.value, deleted: true }, { expectedRevision: row.revision })
+      assert.equal((await f.library.snapshot(signal())).items.length, 0)
+    } else {
+      await f.library.remove(original.id, original.revision, 'explicit-delete-preserved', signal())
+      f.seed()
+      const snapshot = await f.library.snapshot(signal())
+      assert.equal(snapshot.capacity.count, 1); assert.equal(snapshot.items.length, 0)
+      assert.deepEqual(f.writes, ['delete:known'])
+    }
+  }
+})
+
 test('an account image discovered after tagging reuses collection and exposes its annotation through the existing sticker list', async t => {
   for (const sameContent of [true, false]) {
     const f = await fixture(t)
