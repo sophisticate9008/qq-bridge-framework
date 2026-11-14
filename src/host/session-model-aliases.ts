@@ -10,12 +10,14 @@ export interface SessionModelRouteAlias { readonly providerId: string; readonly 
 export async function identifySessionModelAliases(providers: readonly NativeModelProvider[], config: JsonObject,
   match: (candidates: readonly { readonly ref: string; readonly value: string }[]) => Promise<readonly { readonly ref: string; readonly matches: boolean }[]>): Promise<readonly SessionModelRouteAlias[]> {
   if (!isRecord(config.providers)) return []
+  const configuredIds = new Set(providers.map(provider => provider.id))
   const routes = Object.entries(config.providers).flatMap(([alias, value]) => isRecord(value)
+    && !configuredIds.has(alias)
     && typeof value.baseURL === 'string' && typeof value.api === 'string' && typeof value.apiKeyEnv === 'string'
     ? [{ alias, endpoint: value.baseURL, api: value.api, ref: value.apiKeyEnv }] : [])
   const found = new Map<string, Set<string>>()
   for (const provider of providers) {
-    const candidates = routes.filter(route => route.alias !== provider.id && route.endpoint === provider.baseUrl
+    const candidates = routes.filter(route => route.endpoint === provider.baseUrl
       && route.api === modelProviderApi(provider))
     if (!candidates.length || !provider.apiKey) continue
     const refs = [...new Set(candidates.map(route => route.ref))]

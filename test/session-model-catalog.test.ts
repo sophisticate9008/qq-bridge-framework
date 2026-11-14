@@ -69,6 +69,10 @@ test('historical supplier attribution checks endpoint, API and credential proven
   const aliases = await identifySessionModelAliases([base], config, match)
   assert.deepEqual(aliases, [{ alias: 'old-route', providerId: 'official' }])
   assert.deepEqual(await identifySessionModelAliases([base, { ...base, id: 'another' }], config, match), [])
+  assert.deepEqual(await identifySessionModelAliases([base, { ...base, id: 'another' }], { providers: {
+    official: { api: 'openai-completions', baseURL: base.baseUrl, apiKeyEnv: 'MATCHED' },
+    another: { api: 'openai-completions', baseURL: base.baseUrl, apiKeyEnv: 'MATCHED' },
+  } }, match), [], 'configured supplier IDs cannot become aliases of another supplier sharing credentials')
   const raw = [...live, { provider: 'old-route', model: 'chat', providerName: 'old-route', modelName: 'chat' }]
   const catalog = buildSessionModelCatalog(providers, bindings, raw, aliases)
   assert.equal(findSessionModel(catalog, { provider: 'old-route', model: 'chat' })?.providerName, '官方服务')
