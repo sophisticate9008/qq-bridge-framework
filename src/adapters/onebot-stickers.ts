@@ -131,7 +131,7 @@ export function createOneBotStickerPort(options: {
       return invoke('fetch_custom_face_detail', { count: request.limit }, request.signal, value => decode(value, request.limit));
     },
     async add(request) {
-      // NapCat's add_custom_face calls stat/readFile itself, so the protocol must share this host filesystem.
+      // The add_custom_face action reads the supplied file path, so the protocol must share this host filesystem.
       if (!['localhost', '127.0.0.1', '[::1]'].includes(base.hostname))
         return { status: 'rejected', code: 'ONEBOT_STICKER_ADD_REQUIRES_LOCAL_PROTOCOL' };
       if (request.signal.aborted) return { status: 'rejected', code: 'ONEBOT_STICKER_CANCELLED' };

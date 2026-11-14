@@ -108,7 +108,7 @@ const GENERAL_HELP = `QQ Bridge Framework 命令行
   qbf-cli restart [组件]
   qbf-cli stop [组件]
   qbf-cli logs [组件] [-f]
-  qbf-cli protocol [napcat|snowluma]
+  qbf-cli protocol [协议组标识]
   qbf-cli extensions init <目录> --id <标识>
   qbf-cli extensions install <目录> [--stage] [--config <管理配置>]
   qbf-cli extensions <enable|disable|remove> <标识> [--stage] [--config <管理配置>]

@@ -54,7 +54,7 @@ export function qzonePublishParams(request: QzonePublishRequest): JsonObject | n
   return Buffer.byteLength(JSON.stringify(result)) <= 16 * 1024 * 1024 ? result : null;
 }
 
-/** Shared NapCat/SnowLuma extension. No owner-message requirement, polling, retries or cookie storage. */
+/** OneBot Qzone extension. No owner-message requirement, polling, retries or cookie storage. */
 export function createOneBotQzonePort(options: OneBotQzoneOptions): QzonePort {
   const client = createOneBotQzoneClient(options);
   if (!Array.isArray(options.supportedActions) || options.supportedActions.some(action => !Object.hasOwn(actionNames, action))

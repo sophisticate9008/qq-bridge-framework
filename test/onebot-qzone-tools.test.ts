@@ -17,20 +17,20 @@ function fixture(data: unknown, actions?: readonly string[]) {
   return { port, calls };
 }
 
-test('capability discovery is read-only and recognizes only the NapCat version-backed extensions', async () => {
-  const { port, calls } = fixture({ app_name: 'NapCat.Onebot', app_version: '4.18.41' });
+test('capability discovery is read-only and uses declared actions before compatibility profiles', async () => {
+  const { port, calls } = fixture({ app_name: 'OneBot.Fixture', app_version: '4.18.41', supported_actions: ['send_qzone_msg', 'delete_qzone_msg'] });
   assert.equal(calls.length, 0);
   assert.equal(port.describe().state, 'unknown');
   const inventory = await port.inspect(signal());
-  assert.equal(inventory.source, 'version-map');
+  assert.equal(inventory.source, 'protocol-actions');
   assert.deepEqual(inventory.tools.map(tool => tool.name), ['send_qzone_msg', 'delete_qzone_msg']);
   assert.deepEqual(calls.map(call => call.action), ['/base/get_version_info']);
   assert.equal((await port.execute({ name: 'comment_qzone', input: { tid: 't1', content: 'text' }, signal: signal() })).status, 'rejected');
   assert.equal(calls.length, 1);
 });
 
-test('brand name alone, older versions and other implementations do not enable undeclared actions', async () => {
-  for (const data of [{ app_name: 'NapCat.Onebot', app_version: '4.18.13' }, { app_name: 'SnowLuma', app_version: '1.0.0' }, { app_name: 'Other', app_version: '99.0.0' }]) {
+test('unknown implementations do not enable undeclared actions regardless of version', async () => {
+  for (const data of [{ app_name: 'OneBot.Fixture', app_version: '4.18.13' }, { app_name: 'OneBot.Fixture', app_version: '4.18.41' }, { app_name: 'Other', app_version: '99.0.0' }]) {
     const { port, calls } = fixture(data);
     assert.equal((await port.inspect(signal())).tools.length, 0);
     assert.equal((await port.execute({ name: 'send_qzone_msg', input: { content: 'hello', ugc_right: 4 }, signal: signal() })).status, 'rejected');
@@ -112,7 +112,7 @@ test('legacy typed publication port retains normalized receipts through the shar
 });
 
 
-test('NapCat void handlers may omit data, while publishing still requires a real identifier', async () => {
+test('Protocol void handlers may omit data, while publishing still requires a real identifier', async () => {
   const port = createOneBotQzoneTools({ endpoint: 'http://protocol.invalid', supportedActions: ['delete_qzone_msg', 'send_qzone_msg'],
     fetch: async () => Response.json({ status: 'ok', retcode: 0 }) });
   assert.deepEqual(await port.execute({ name: 'delete_qzone_msg', input: { tid: 'real-post-id' }, signal: signal() }), { status: 'confirmed', data: null });

@@ -1,3 +1,4 @@
+import { inspectOneBotCompatibility } from './onebot-compatibility.ts';
 import type { JsonObject, JsonValue } from '../contracts/data.ts';
 import { QQ_CAPABILITIES, findQqCapability, type QqCapabilitiesInspection } from '../contracts/qq-capabilities.ts';
 import { decodeQqCapabilityInput, isBoundedQqJson } from '../contracts/qq-capability-input.ts';
@@ -18,9 +19,6 @@ export interface QqCapabilitiesPort {
 
 const RESPONSE_BYTES = 4 * 1024 * 1024;
 const STREAM_ACTIONS = new Set(QQ_CAPABILITIES.filter(capability => capability.transport === 'stream').map(capability => capability.id));
-const KNOWN_NAPCAT_VERSIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  '4.18.41': Object.freeze(QQ_CAPABILITIES.map(capability => capability.id)),
-});
 function waitFor<Value>(operation: Promise<Value>, signal: AbortSignal): Promise<Value> {
   if (signal.aborted) { void operation.catch(() => {}); return Promise.reject(signal.reason); }
   return new Promise((resolve, reject) => {
@@ -70,7 +68,7 @@ function decodeResponse(text: string, action: string): OneBotReadResult<JsonValu
   try { parsed = JSON.parse(text); }
   catch {
     if (!STREAM_ACTIONS.has(action)) return { status: 'unknown', code: 'QQ_CAPABILITY_INVALID_JSON' };
-    // NapCat HTTP stream actions send JSON envelopes separated by a blank line.
+    // HTTP stream actions send JSON envelopes separated by a blank line.
     const packets = text.trim().split(/\r?\n\s*\r?\n/);
     if (packets.length > 256) return { status: 'unknown', code: 'QQ_CAPABILITY_STREAM_LIMIT' };
     const events: JsonValue[] = [];
@@ -135,14 +133,13 @@ export function createOneBotCapabilitiesPort(options: OneBotCapabilitiesOptions)
     }
     const protocol = result.data.app_name;
     const version = typeof result.data.app_version === 'string' ? result.data.app_version : null;
-    const known = /^napcat(?:\.onebot)?$/i.test(protocol) && version !== null
-      && Object.hasOwn(KNOWN_NAPCAT_VERSIONS, version.replace(/^v/, ''))
-      ? KNOWN_NAPCAT_VERSIONS[version.replace(/^v/, '')] : undefined;
+    const known = inspectOneBotCompatibility(protocol, version).qqCatalog
+      ? QQ_CAPABILITIES.map(capability => capability.id) : undefined;
     const reported = result.data.supported_actions ?? result.data.actions;
     const reportedIds = Array.isArray(reported) && reported.length <= 1024 && reported.every(id => typeof id === 'string')
       ? QQ_CAPABILITIES.filter(capability => reported.includes(capability.id)).map(capability => capability.id) : null;
     inspection = Object.freeze({
-      protocol, version, source: reportedIds ? 'reported-actions' : known ? 'napcat-version-map' : 'unverified',
+      protocol, version, source: reportedIds ? 'reported-actions' : known ? 'version-map' : 'unverified',
       supportedIds: Object.freeze(reportedIds ?? known ?? ['get_version_info']),
     });
     return { status: 'confirmed', data: inspection };

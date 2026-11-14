@@ -478,7 +478,7 @@ export function AdapterManager({ api, connected, connect, setDirty, navigate, co
         setConnectionError(code === 'adapter_runtime_busy' ? '聊天正在启动或停止，请稍后重试。'
           : code === 'adapter_connected_chat_restore_failed' ? 'QQ 连接已恢复，但聊天未能启动。请查看首页的聊天状态。'
             : code === 'chat_revision_conflict' ? '连接设置已变化，请重新读取并应用已保存的设置。'
-              : `连接未恢复：${errorMessage(error)}。请确认 NapCat 或 SnowLuma 已登录，协议服务已启动。`);
+              : `连接未恢复：${errorMessage(error)}。请确认 OneBot 协议端已登录且服务已启动。`);
       }
     } finally {
       if (current()) { saveController.current = null; setControlling(false); }

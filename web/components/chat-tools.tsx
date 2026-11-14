@@ -21,7 +21,7 @@ function SourceModules({ source }: { readonly source: InventorySource }) {
 }
 const toolLabels: Readonly<Record<string, string>> = {
   generate_image: '生成图片', image_status: '图片任务状态', self_image: '自我形象与提示词', self_portrait: '自拍与换装',
-  snowluma_status: 'QQ 网关状态', qq_status: 'QQ 登录状态', qq_collect_sticker: '收藏表情',
+  qq_status: 'QQ 登录状态', qq_collect_sticker: '收藏表情',
   qq_get_active_members: '活跃成员', qq_get_forward_msg: '查看合并转发', qq_get_group_history: '群聊历史',
   qq_get_group_members: '群成员', qq_get_message_detail: '查看消息详情', qq_get_message_images: '查看消息图片',
   qq_get_my_recent_messages: '自己最近的消息', qq_get_prompt: '查看聊天设置', qq_get_recent_messages: '最近消息',

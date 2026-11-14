@@ -44,7 +44,7 @@ test('static templates round-trip through JSON without credentials or deployment
   assert.doesNotMatch(serialized, /provider|model|auth|token|secret|endpoint|activePlanId|enabled|capabilities|preferences/i)
   const text = [BUILTIN_WHALE_PERSONA.identity, BUILTIN_WHALE_PERSONA.style,
     BUILTIN_DAILY_CHAT_PLAN.description, BUILTIN_DAILY_CHAT_PLAN.instructions].join('\n')
-  assert.doesNotMatch(text, /\/(?:root|home|tmp|etc)\/|[A-Z]:\\|\b\d{5,}\b|mcp__|qq[_-]bridge|snowluma|GPT|DeepSeek/i)
+  assert.doesNotMatch(text, /\/(?:root|home|tmp|etc)\/|[A-Z]:\\|\b\d{5,}\b|mcp__|qq[_-]bridge|secondary|GPT|DeepSeek/i)
 })
 
 test('whale persona restores the humanoid image and independent, familiar character', () => {

@@ -19,7 +19,7 @@ test('installed extension tools are discovered on demand with owner checks and d
     receivedAt: 0, expiresAt: Date.now() + 10000, isOwner: owner, assurance: 'normalized-onebot-source-only',
     workIntentVerified: false, capabilityAuthorizationVerified: false, externalToolAuthorizationVerified: false })
   const directory = createNativeCapabilityDirectory({ store, selfId: 'bot', tools: registry.entries,
-    inventory: { protocol: 'napcat', version: 'fixture', source: 'reported-actions', supportedIds: QQ_CAPABILITIES.map(t => t.id) },
+    inventory: { protocol: 'primary', version: 'fixture', source: 'reported-actions', supportedIds: QQ_CAPABILITIES.map(t => t.id) },
     sources: () => ({ lookup: async () => source(), requireOwner: async () => { assert(owner, 'owner required'); return source() } }),
     authorize: async () => {}, port: { inspect: async () => ({ status: 'rejected', code: 'unused' }),
       call: async () => { throw Error('Protocol should not be called') } } })
@@ -66,7 +66,7 @@ test('chat directory cannot expose or invoke raw collection while the host proto
     receivedAt: 0, expiresAt: Date.now() + 10000, isOwner: true, assurance: 'normalized-onebot-source-only',
     workIntentVerified: false, capabilityAuthorizationVerified: false, externalToolAuthorizationVerified: false }
   const directory = createNativeCapabilityDirectory({ store, selfId: 'bot', tools: () => [],
-    inventory: { protocol: 'napcat', version: 'fixture', source: 'reported-actions', supportedIds: ['add_custom_face', 'fetch_custom_face_detail'] },
+    inventory: { protocol: 'primary', version: 'fixture', source: 'reported-actions', supportedIds: ['add_custom_face', 'fetch_custom_face_detail'] },
     sources: () => ({ lookup: async () => source, requireOwner: async () => source }), authorize: async () => {},
     port: { inspect: async () => ({ status: 'rejected', code: 'unused' }), call: async () => { protocolCalls++; return { status: 'confirmed', data: {} } } } })
   const request = (input: JsonValue): EffectRequest => ({ input, signal: new AbortController().signal,

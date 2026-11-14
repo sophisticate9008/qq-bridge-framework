@@ -1,3 +1,4 @@
+import { inspectOneBotCompatibility } from './onebot-compatibility.ts';
 import type { JsonObject, JsonValue } from '../contracts/data.ts';
 import type { QzoneToolDefinition, QzoneToolInventory, QzoneToolName, QzoneToolPort } from '../contracts/qzone-tools.ts';
 import { isRecord, snapshot } from '../core/values.ts';
@@ -107,12 +108,13 @@ export function createOneBotQzoneTools(options: OneBotQzoneToolsOptions): QzoneT
           current = snapshot({ schema: 1, state: 'unknown', source: 'none', implementation: null, tools: [], reason: result.status === 'confirmed' ? 'QZONE_INVALID_RESPONSE' : result.code });
         } else {
           const implementation = { name: result.data.app_name.slice(0, 128), version: result.data.app_version.slice(0, 128) };
-          const version = /^(\d+)\.(\d+)\.(\d+)$/.exec(implementation.version);
-          // NapCat introduced these two extensions in 4.18.14. Other actions require an explicit installation inventory.
-          const napcat = implementation.name === 'NapCat.Onebot' && version !== null
-            && (Number(version[1]) > 4 || Number(version[1]) === 4 && (Number(version[2]) > 18 || Number(version[2]) === 18 && Number(version[3]) >= 14));
-          current = inventory(napcat ? ['send_qzone_msg', 'delete_qzone_msg'] : [], implementation, napcat ? 'version-map' : 'none');
-          if (!napcat) current = snapshot({ ...current, state: 'unknown', reason: 'QZONE_ACTIONS_NOT_DECLARED' });
+          const reported = result.data.supported_actions ?? result.data.actions;
+          const declared = Array.isArray(reported) && reported.length <= 4096
+            && reported.every((action): action is string => typeof action === 'string' && action.length <= 128) ? reported : null;
+          const known = inspectOneBotCompatibility(implementation.name, implementation.version).qzone;
+          current = inventory(declared ?? (known ? ['send_qzone_msg', 'delete_qzone_msg'] : []), implementation,
+            declared ? 'protocol-actions' : known ? 'version-map' : 'none');
+          if (!declared && !known) current = snapshot({ ...current, state: 'unknown', reason: 'QZONE_ACTIONS_NOT_DECLARED' });
         }
       }
     } catch { current = snapshot({ schema: 1, state: 'unknown', source: 'none', implementation: null, tools: [], reason: signal.aborted ? 'QZONE_ABORTED' : 'QZONE_DISCOVERY_UNKNOWN' }); }

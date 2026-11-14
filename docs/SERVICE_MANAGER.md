@@ -17,8 +17,7 @@
 | `qbf-cli logs [组件] [-f]` | 最近 100 行日志，默认组件为 `framework-admin` |
 | `qbf-cli console` | 显示当前配置中的控制台地址 |
 | `qbf-cli protocol` | 显示当前协议选择 |
-| `qbf-cli protocol napcat` | 在已明确托管协议进程的部署中切换到 NapCat |
-| `qbf-cli protocol snowluma` | 在已明确托管协议进程的部署中切换到 SnowLuma |
+| `qbf-cli protocol <协议组标识>` | 在已明确托管协议进程的部署中切换到登记的协议组 |
 
 网页“一键恢复聊天”由固定内部恢复入口协调受管框架、DSH 与依赖，协议组始终排除。恢复独立进程使用分阶段运维锁，部分失败仍尝试恢复管理页面；具体语义见[恢复手册](RECOVERY.md#一键恢复聊天)。
 
@@ -43,7 +42,7 @@
 ```json
 {
   "schema": 1,
-  "activeProtocol": "napcat",
+  "activeProtocol": "onebot-primary",
   "dshHome": "/srv/dsh/home",
   "logDirectory": "/srv/qq-bridge-framework/data/logs",
   "lockFile": "/srv/qq-bridge-framework/data/live/service-control.lock",
@@ -66,7 +65,7 @@
 ```
 
 - `managed` 决定本机进程是否委托框架管理；非框架组件缺省为 `false`。以下分组与启用规则仅作用于受管条目。
-- `group` 为 `core`、`napcat`、`snowluma` 或 `optional`。受管条目中默认启动 core 与当前协议；optional 还需 `enabled: true`。`enabled: false` 排除默认启动，仍可显式管理受管条目。
+- `group` 为 `core`、`optional` 或自定义协议组标识（例如 `onebot-primary`）。受管条目中默认启动 core 与当前协议；optional 还需 `enabled: true`。`enabled: false` 排除默认启动，仍可显式管理受管条目。
 - `order` 决定启动顺序；未列出的服务按清单顺序追加，停止采用逆序。
 - `command`、`cwd`、`logFile` 为绝对路径；`args` 是参数数组，不执行 shell 表达式。`env` 只覆盖该服务的环境。
 - `screen` 是精确的会话名。`screenAliases` 可接管同一组件已有的历史名称；不同服务不能共享名称。不会按模糊进程名批量终止程序。

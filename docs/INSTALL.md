@@ -8,7 +8,7 @@
 | --- | --- |
 | Node.js | 24.12.0 或更新版本，附带 npm；框架使用 Node.js 原生 TypeScript 与 SQLite 能力 |
 | Git | 仅源码开发安装需要；使用完整框架包无需 Git |
-| QQ 协议端 | 已登录 QQ、提供 OneBot v11 HTTP API 与正向 WebSocket 的独立服务；可接入 NapCat 或 SnowLuma |
+| QQ 协议端 | 已登录 QQ、提供 OneBot v11 HTTP API 与正向 WebSocket 的独立服务 |
 | DSH | 独立运行的 DSH web 实例，桥接插件当前匹配 SDK `0.2.1-rc.2`、Cordis `4.0.5` |
 | 可选组件 | 视频观察需要 FFmpeg 和 FFprobe；语音转写、生图、搜索等按已安装扩展提供 |
 

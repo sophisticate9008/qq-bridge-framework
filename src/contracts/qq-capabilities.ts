@@ -16,7 +16,7 @@ export interface QqCapabilityDefinition {
 export interface QqCapabilitiesInspection {
   readonly protocol: string;
   readonly version: string | null;
-  readonly source: 'napcat-version-map' | 'reported-actions' | 'unverified';
+  readonly source: `${string}version-map` | 'reported-actions' | 'unverified';
   readonly supportedIds: readonly string[];
 }
 export const QQ_CAPABILITY_CATEGORIES = Object.freeze([
@@ -32,7 +32,7 @@ export const QQ_CAPABILITY_CATEGORIES = Object.freeze([
   { "id": "system", "label": "连接与运维", "description": "协议身份、凭据、诊断与运维" },
 ] as const);
 
-/** Payloads statically checked against the installed NapCat 4.18.41 action registry.
+/** Payloads statically checked against the supported OneBot extension action registry.
  * Handler defaults remain visible; handler-required alternatives are made explicit.
  * Test actions and generated async/rate-limited aliases are excluded. */
 const SCHEMA_0: JsonObject = {

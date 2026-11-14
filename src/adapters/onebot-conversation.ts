@@ -78,7 +78,7 @@ function privateMessage(value: unknown, peerId: string, selfId: string): OneBotC
     ...(displayName === undefined ? {} : { displayName }) };
 }
 
-/** Fixed basic QQ actions shared by installed NapCat and SnowLuma. No model-controlled action names. */
+/** Fixed basic QQ actions shared by OneBot protocol installations. No model-controlled action names. */
 export function createOneBotConversationPort(options: {
   readonly endpoint: string; readonly accessToken?: string; readonly timeoutMs?: number; readonly fetch?: typeof globalThis.fetch;
 }): OneBotConversationPort {

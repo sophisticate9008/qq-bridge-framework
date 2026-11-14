@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { selectServiceProcesses, type ServiceProcessIdentity as ProcessIdentity } from './service-processes.ts';
 import { runServiceLifecycle, serviceLifecycleTimeout } from './service-lifecycle.ts';
 
-type Protocol = 'napcat' | 'snowluma';
-type Group = 'core' | Protocol | 'optional';
+type Protocol = string;
+type Group = string;
+function protocolGroup(group: string): boolean { return group !== 'core' && group !== 'optional'; }
 interface Command { command: string; args: string[]; cwd?: string }
 type Ready = { kind: 'http'; url: string } | ({ kind: 'command' } & Command);
 interface Service {
@@ -74,7 +75,7 @@ function safeUrl(value: unknown, local: boolean): value is string {
   } catch { return false; }
 }
 function decode(value: unknown): Configuration {
-  if (!record(value) || value.schema !== 1 || !['napcat', 'snowluma'].includes(String(value.activeProtocol))
+  if (!record(value) || value.schema !== 1 || !string(value.activeProtocol, 64) || !identifier.test(value.activeProtocol) || !protocolGroup(value.activeProtocol)
     || !absolute(value.dshHome) || !absolute(value.logDirectory) || !absolute(value.lockFile)
     || !record(value.services) || Object.keys(value.services).length === 0 || Object.keys(value.services).length > 32
     || (value.accountCheck !== undefined && !command(value.accountCheck))) fail('服务配置格式无效。');
@@ -83,7 +84,7 @@ function decode(value: unknown): Configuration {
   for (const [id, service] of Object.entries(value.services)) {
     if (!identifier.test(id) || !record(service) || !command(service) || !absolute(service.cwd)
       || !string(service.screen, 64) || !identifier.test(service.screen)
-      || !['core', 'napcat', 'snowluma', 'optional'].includes(String(service.group))
+      || !string(service.group, 64) || !identifier.test(service.group)
       || (service.enabled !== undefined && typeof service.enabled !== 'boolean')
       || (service.managed !== undefined && typeof service.managed !== 'boolean')
       || (service.logFile !== undefined && !absolute(service.logFile))
@@ -232,7 +233,7 @@ function selected(config: Configuration, stop = false): string[] {
   return ordered(config).filter(id => {
     if (!managed(config, id)) return false;
     const service = config.services[id]!;
-    if (service.group === 'napcat' || service.group === 'snowluma') return stop || (service.group === config.activeProtocol && service.enabled !== false);
+    if (protocolGroup(service.group)) return stop || (service.group === config.activeProtocol && service.enabled !== false);
     return service.group === 'optional' ? service.enabled === true : service.enabled !== false;
   });
 }
@@ -247,11 +248,11 @@ function remaining(deadline: number, maximum: number): number {
   return Math.min(left, maximum);
 }
 async function ensureProtocol(config: Configuration, service: Service): Promise<void> {
-  if (service.group !== 'napcat' && service.group !== 'snowluma') return;
+  if (!protocolGroup(service.group)) return;
   if (service.group !== config.activeProtocol) fail('请使用 qbf-cli protocol 切换协议端。');
   for (const [id, other] of Object.entries(config.services)) {
     if (!managed(config, id)) continue;
-    if ((other.group === 'napcat' || other.group === 'snowluma') && other.group !== service.group
+    if (protocolGroup(other.group) && other.group !== service.group
       && ((await sessions(other)).length > 0 || await listening(other))) fail('另一协议端仍在运行，请使用 qbf-cli protocol 切换。');
   }
 }
@@ -361,7 +362,7 @@ async function validateLaunchFiles(id: string, service: Service): Promise<void> 
 }
 async function switchProtocol(config: Configuration, target: Protocol): Promise<void> {
   const previous = config.activeProtocol;
-  const protocolIds = ordered(config).filter(id => managed(config, id) && ['napcat', 'snowluma'].includes(config.services[id]!.group));
+  const protocolIds = ordered(config).filter(id => managed(config, id) && protocolGroup(config.services[id]!.group));
   const targets = protocolIds.filter(id => config.services[id]!.group === target && config.services[id]!.enabled !== false);
   if (targets.length === 0) fail('目标协议端未登记为框架受管组件，请在外部协议端管理连接。');
   for (const id of targets) await validateLaunchFiles(id, config.services[id]!);
@@ -449,7 +450,7 @@ status [组件] [--json]  分别查看受管进程与端口；不据此宣称健
 doctor [组件] [--json]  独立检查各服务；未配置健康检查时显示未核验
 logs [组件] [-f]   查看最近 100 行日志；默认 framework-admin
 console [组件]     显示配置中的控制台地址
-protocol [napcat|snowluma]  查看或切换协议端并保存选择
+protocol [协议组标识]  查看或切换协议端并保存选择
 extensions [list] 查看已登记插件的版本、调用与排空状态
 extensions reload <插件标识>  核对当前版本后重载指定插件
 maintenance [--apply]  预览存储回收；--apply 清理旧部署与过期模拟
@@ -507,7 +508,7 @@ async function main(): Promise<void> {
     const config = await load();
     for (const id of ['framework-admin']) {
       const service = component(config, id, true);
-      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
+      if (service.enabled === false || protocolGroup(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
     }
     const { runChatRepair } = await import('./chat-repair.ts');
     const command = async (value: string, restartDsh: boolean) => {
@@ -522,7 +523,7 @@ async function main(): Promise<void> {
     };
     const dsh = config.services.dsh;
     let dshTarget: { home: string; endpoint: string } | undefined;
-    if (dsh && managed(config, 'dsh') && dsh.enabled !== false && dsh.port && !['napcat', 'snowluma'].includes(dsh.group)) {
+    if (dsh && managed(config, 'dsh') && dsh.enabled !== false && dsh.port && !protocolGroup(dsh.group)) {
       try {
         if (dsh.env?.DSH_HOME && await realpath(dsh.env.DSH_HOME) === await realpath(config.dshHome)) {
           const host = dsh.port.host === '::1' ? '[::1]' : dsh.port.host;
@@ -549,7 +550,7 @@ async function main(): Promise<void> {
     const config = await load();
     for (const id of ['framework-admin']) {
       const service = component(config, id, true);
-      if (service.enabled === false || ['napcat', 'snowluma'].includes(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
+      if (service.enabled === false || protocolGroup(service.group)) fail('聊天恢复需要启用受管框架管理服务。');
     }
     if (process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') { await lockAndRun(config, argumentsList); return; }
     if (action === 'repair-services-rescue') process.env.QQ_BRIDGE_FRAMEWORK_REPAIR_RESCUE = argumentsList[1];
@@ -566,10 +567,10 @@ async function main(): Promise<void> {
     }
     if (restartDsh) {
       const dsh = component(config, 'dsh', true);
-      if (dsh.enabled === false || ['napcat', 'snowluma'].includes(dsh.group)) fail('聊天恢复需要已启用的受管 DSH。');
+      if (dsh.enabled === false || protocolGroup(dsh.group)) fail('聊天恢复需要已启用的受管 DSH。');
     }
-    const targets = chatRepairServiceIds(ordered(config), restartDsh).filter(id => managed(config, id) && !['napcat', 'snowluma'].includes(id)
-      && !['napcat', 'snowluma'].includes(config.services[id]!.group));
+    const targets = chatRepairServiceIds(ordered(config), restartDsh).filter(id => managed(config, id)
+      && !protocolGroup(config.services[id]!.group));
     if (action === 'repair-services-stop') {
       const deadline = Date.now() + 60_000;
       for (const id of targets.toReversed()) await stopOne(config, id, deadline);
@@ -613,7 +614,8 @@ async function main(): Promise<void> {
     return;
   }
   if (action === 'protocol' && rest.length === 0) { console.log(config.activeProtocol); return; }
-  if (action === 'protocol' && rest[0] !== 'napcat' && rest[0] !== 'snowluma') fail('协议端须为 napcat 或 snowluma。');
+  if (action === 'protocol' && (!rest[0] || !identifier.test(rest[0]) || !protocolGroup(rest[0])
+    || !Object.values(config.services).some(service => service.group === rest[0]))) fail('请选择已登记的协议组标识。');
   if (action === 'maintenance') {
     if (process.env.QQ_BRIDGE_FRAMEWORK_OPS_LOCKED !== '1') { await lockAndRun(config, argumentsList); return; }
     setPriority(19);

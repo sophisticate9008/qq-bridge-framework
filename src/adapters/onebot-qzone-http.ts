@@ -60,7 +60,7 @@ export function createOneBotQzoneClient(options: OneBotQzoneConnectionOptions) {
       const status = classifyOneBotResponse(body);
       if (status !== 'confirmed') return { status, code: 'QZONE_NOT_CONFIRMED' };
       if (isRecord(body) && Object.hasOwn(body, 'data')) return { status: 'confirmed', data: body.data as JsonValue };
-      // NapCat's void handlers serialize undefined by omitting data. Only known void actions accept that shape.
+      // Some protocol void handlers serialize undefined by omitting data. Only known void actions accept that shape.
       return ['delete_qzone_msg', 'like_qzone', 'unlike_qzone'].includes(action)
         ? { status: 'confirmed', data: null } : { status: 'unknown', code: 'QZONE_INVALID_RESPONSE' };
     } catch {

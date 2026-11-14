@@ -54,7 +54,7 @@ SOFTWARE.
 
 角色名称、别名、来源记录与可见外观分面同样由本框架独立建模。名称归一化用于本地检索，不代表取得第三方角色目录或识别服务。当前没有接入外部识图、反向图片搜索或网络角色数据库；索引中的“网页依据”只标记实际核对后保存的受限来源记录，不声称自动联网验证。
 
-QQ 收藏接口依据 NapCat 的 [CustomFace 动作实现](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/CustomFace.ts) 核对：读取明细、添加、删除与修改备注为不同动作，读取结果不提供账号总容量。实际支持范围由当前协议端决定。
+QQ 收藏接口的读取明细、添加、删除与修改备注为不同动作，读取结果不提供账号总容量。实际支持范围由当前 OneBot 协议端决定。
 
 ### 页面虚拟化
 
@@ -86,12 +86,9 @@ Markdown 正文的数学与通用符号使用未经修改的 Noto Sans Math、No
 
 ### OneBot 空间接口参考
 
-共享空间适配器依据以下项目公开的线格式接口独立实现，没有嵌入它们的客户端或网页认证实现：
+空间适配器通过 OneBot 扩展动作访问协议端，具体接口与行为见框架的空间适配文档：
 
 - [OneBot v11 标准 API](https://github.com/botuniverse/onebot-11/blob/master/api/public.md)：空间操作属于标准以外的扩展。
-- NapCat 的 [发布接口](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/SendQzoneMsg.ts) 与 [删除接口](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/DeleteQzoneMsg.ts)。
-- [NapCat v4.18.14 发布记录](https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.14)：引入发布、图片上传及删除。
-- SnowLuma 的 [发布参考](https://snowluma.github.io/zh/docs/api/qzone/send_qzone_msg)、[删除参考](https://snowluma.github.io/zh/docs/api/qzone/delete_qzone_msg) 与 [动作定义](https://github.com/SnowLuma/SnowLuma/blob/main/packages/onebot/src/actions/qzone.ts)。
 
 接口核对日期为 2026-10-27；实际可用性仍由已安装网关版本及已启用扩展决定。
 
@@ -107,7 +104,7 @@ Markdown 正文的数学与通用符号使用未经修改的 Noto Sans Math、No
 
 DSH 与官方 SDK 来自 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。桥接插件当前核对的是 SDK `0.2.1-rc.2` 与 Cordis `4.0.5`，实际接入条件见 [DSH 文档](https://github.com/sophisticate9008/qq-bridge-framework/blob/v1.0/docs/DSH.md)。
 
-本框架源码按 [LICENSE](https://github.com/sophisticate9008/qq-bridge-framework/blob/v1.0/LICENSE) 中的 MIT 许可分发。依赖及独立取得的协议网关、智能体运行时、模型和服务继续适用各自的许可与使用条款。本文不授予第三方软件的额外权利，也不表示与腾讯、QQ、DeepSeek、SnowLuma 或 qq-bridge 作者存在隶属或背书关系。
+本框架源码按 [LICENSE](https://github.com/sophisticate9008/qq-bridge-framework/blob/v1.0/LICENSE) 中的 MIT 许可分发。依赖及独立取得的协议网关、智能体运行时、模型和服务继续适用各自的许可与使用条款。本文不授予第三方软件的额外权利，也不表示与腾讯、QQ、DeepSeek 或 qq-bridge 作者存在隶属或背书关系。
 
 ### HTML 文档解析
 

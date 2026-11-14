@@ -36,7 +36,7 @@ function sourceFixture() {
   return { sources, lifetime, request };
 }
 
-test('NapCat face raw objects and nullable decorations survive history and get_msg while missing required IDs remain rejected', async () => {
+test('OneBot face raw objects and nullable decorations survive history and get_msg while missing required IDs remain rejected', async () => {
   let face: Record<string, unknown> = { id: '178', raw: { faceType: 1, faceIndex: 178 }, resultId: null, chainCount: null };
   const fetch: typeof globalThis.fetch = async input => {
     const message = { message_type: 'group', message_id: -16, group_id: 456, user_id: 123,
@@ -48,7 +48,7 @@ test('NapCat face raw objects and nullable decorations survive history and get_m
   const history = await conversation.groupHistory({ groupId: '456', limit: 10, signal: signal() });
   const message = await messages.getMessage({ messageId: '-16', conversationId: 'group:456', signal: signal() });
   assert.equal(history.status, 'confirmed'); assert.equal(message.status, 'confirmed');
-  if (history.status !== 'confirmed' || message.status !== 'confirmed') assert.fail('Actual NapCat decorations must be accepted');
+  if (history.status !== 'confirmed' || message.status !== 'confirmed') assert.fail('Actual OneBot decorations must be accepted');
   assert.deepEqual(message.data.message, [{ type: 'face', data: { id: '178' } }]);
   assert.deepEqual(await normalizeOneBotContent(history.data[0]!.message, {
     messageId: '-16', conversationId: 'group:456', signal: signal(),

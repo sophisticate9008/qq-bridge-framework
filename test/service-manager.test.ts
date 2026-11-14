@@ -24,13 +24,13 @@ function fixture() {
     group: 'core', ...extra,
   });
   const configuration = {
-    schema: 1, activeProtocol: 'napcat', dshHome: directory, logDirectory: directory,
+    schema: 1, activeProtocol: 'primary', dshHome: directory, logDirectory: directory,
     lockFile: join(directory, 'control.lock'), services: {
       'framework-admin': service('admin'),
       'framework-gateway': service('gateway'),
       dsh: service('dsh', { managed: true, env: { DSH_HOME: directory } }),
-      napcat: service('napcat', { group: 'napcat', enabled: true }),
-      snowluma: service('snowluma', { group: 'snowluma' }),
+      primary: service('primary', { group: 'primary', enabled: true }),
+      secondary: service('secondary', { group: 'secondary' }),
       auxiliary: service('auxiliary', { group: 'optional', enabled: true }),
       external: service('external', { enabled: true }),
     },
@@ -68,13 +68,13 @@ test('named lifecycle commands and protocol switching cannot take over external 
   const values = fixture();
   try {
     for (const action of ['start', 'stop', 'restart', 'run']) {
-      const result = values.run(action, 'napcat');
+      const result = values.run(action, 'primary');
       assert.equal(result.status, 1);
       assert.match(result.stderr, /外部服务.*未登记/);
       assert.equal(result.stdout, '');
     }
     // Skip flock so this rejection is portable and cannot depend on real processes.
-    const result = spawnSync(process.execPath, [join(values.directory, `scripts/service-manager.${extension}`), 'protocol', 'snowluma'], {
+    const result = spawnSync(process.execPath, [join(values.directory, `scripts/service-manager.${extension}`), 'protocol', 'secondary'], {
       encoding: 'utf8', timeout: 15_000, env: { ...process.env, QQ_BRIDGE_FRAMEWORK_OPS_LOCKED: '1' },
     });
     assert.equal(result.status, 1);
@@ -139,7 +139,7 @@ test('framework-only repair leaves a healthy DSH, protocol clients and auxiliary
     await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve));
     const address = external.address();
     assert(address && typeof address !== 'string');
-    for (const id of ['dsh', 'napcat', 'auxiliary'] as const) {
+    for (const id of ['dsh', 'primary', 'auxiliary'] as const) {
       Object.assign(values.configuration.services[id], { managed: true, port: { host: '127.0.0.1', port: address.port } });
     }
     values.save();
@@ -163,7 +163,7 @@ test('DSH recovery really cycles only the managed engine and framework, retainin
     await new Promise<void>(resolve => external.listen(0, '127.0.0.1', resolve));
     const address = external.address();
     assert(address && typeof address !== 'string');
-    for (const id of ['napcat', 'auxiliary'] as const) {
+    for (const id of ['primary', 'auxiliary'] as const) {
       Object.assign(values.configuration.services[id], { managed: true, port: { host: '127.0.0.1', port: address.port } });
     }
     const original = new Map<string, string>();
