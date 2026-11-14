@@ -76,7 +76,7 @@ test('actual SDK loads entry, authenticates owner calls, observes real inbox cla
       await ctx.typertGateway.invoke({ namespace: 'bridgePlugin', method, args, peer: currentPeer }) as PluginReplies[Method]
     const described = await invoke('describe')
     assert.equal(described.protocol, 'qq-bridge-framework.dsh-bridge/1')
-    assert.equal(described.pluginVersion, '2.0.1')
+    assert.equal(described.pluginVersion, '2.1.0')
     const nonOwner = new Peer(ctx, { principal: { kind: 'test-untrusted' }, interactions: 'none' })
     await assert.rejects(invoke('describe', {}, nonOwner))
     ctx.remoteAccess.registerPolicy('test-untrusted', { bindings: () => [{
