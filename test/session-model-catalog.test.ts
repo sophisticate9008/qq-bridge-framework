@@ -8,6 +8,7 @@ import { findSessionModel, sessionModelKey, sessionModelOptionValue } from '../w
 import { identifySessionModelAliases } from '../src/host/session-model-aliases.ts'
 import { createPluginSessionRoutes } from '../src/admin/plugin-sessions.ts'
 import type { NativeModelProvider } from '../src/host/model-providers.ts'
+import { parsePluginSessionModels } from '../src/contracts/plugin-sessions.ts'
 
 const definition = buildChatSessionDefinition({ id: 'daily', name: 'Daily', description: '', instructions: 'Test instructions', personaId: 'persona',
   provider: 'configured', model: 'chat', reasoningEffort: 'off' }, { id: 'persona', name: 'Persona', identity: 'Test identity', style: 'Test style' })
@@ -84,4 +85,14 @@ test('management model endpoint uses the supplier catalog and preserves verified
   const route = createPluginSessionRoutes({ getService: () => undefined, managementModels: async () => models })
     .find(route => route.method === 'GET' && route.pathname.endsWith('/models'))!
   assert.deepEqual(await route.handle({ query: new URLSearchParams(), body: null, signal: new AbortController().signal }), { schema: 1, models })
+})
+
+test('accumulated historical routes cannot exceed the management catalog alias budget', () => {
+  const aliases = Array.from({ length: 300 }, (_, index) => ({ providerId: 'configured', alias: `older-${index}` }))
+  const raw = [...live, ...aliases.map(item => ({ provider: item.alias, model: 'chat', providerName: item.alias, modelName: 'chat' }))]
+  const models = buildSessionModelCatalog(providers, bindings, raw, aliases)
+  assert.equal(models[1]!.aliases!.length, 256)
+  assert(models[1]!.aliases!.includes('generated-current-group'))
+  assert(models[1]!.aliases!.includes('generated-current-private'))
+  assert(parsePluginSessionModels({ schema: 1, models }))
 })

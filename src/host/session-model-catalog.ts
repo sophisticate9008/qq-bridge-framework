@@ -14,7 +14,7 @@ export function buildSessionModelCatalog(providers: readonly Pick<NativeModelPro
     const preferred = direct ? provider.id : (routes.find(binding => binding.conversationKind === 'private') ?? routes[0])?.externalProvider
     if (!preferred) return []
     const aliases = [...new Set([...(direct ? [provider.id] : []), ...routes.flatMap(binding => binding.externalProvider ? [binding.externalProvider] : []),
-      ...knownAliases.filter(item => item.providerId === provider.id && available.has(JSON.stringify([item.alias, model.id]))).map(item => item.alias)])]
+      ...knownAliases.filter(item => item.providerId === provider.id && available.has(JSON.stringify([item.alias, model.id]))).map(item => item.alias)])].slice(0, 256)
     return [{ provider: preferred, model: model.id, providerName: provider.name, modelName: model.name,
       ...(aliases.some(alias => alias !== preferred) ? { aliases } : {}) }]
   }))
