@@ -1011,6 +1011,7 @@ export function createNativeRuntimeRoutes(options: NativeRuntimeRouteOptions): r
   routes.push(...createManagedExtensionRoutes(chatRuntime))
   routes.push(...createSimulationSessionRoutes(directory))
   routes.push(...createPluginSessionRoutes({ getService: () => chatRuntime?.isClosed() ? undefined : chatRuntime?.pluginModelService(),
+    managementModels: signal => chatRuntime ? chatRuntime.sessionModelCatalog(signal) : Promise.resolve([]),
     async resolveQQ(conversationId, signal) {
       signal.throwIfAborted()
       if (chatRuntime?.isClosed()) requestError(503, 'plugin_sessions_unavailable')

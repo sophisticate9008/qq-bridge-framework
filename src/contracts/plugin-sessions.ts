@@ -104,11 +104,14 @@ export function parsePluginSessionModels(value: unknown): readonly PluginModelDe
   const models: PluginModelDescription[] = []
   for (const model of value.models) {
     if (!isRecord(model) || typeof model.providerName !== 'string' || model.providerName.length > 256
-      || typeof model.modelName !== 'string' || model.modelName.length > 256) return null
+      || typeof model.modelName !== 'string' || model.modelName.length > 256
+      || model.aliases !== undefined && (!Array.isArray(model.aliases) || model.aliases.length > 256
+        || !model.aliases.every(pluginModelIdentifier) || new Set(model.aliases).size !== model.aliases.length)) return null
     try {
       const selected = parsePluginModelSelection({ provider: model.provider, model: model.model,
         ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }) })
-      models.push({ ...selected, providerName: model.providerName, modelName: model.modelName })
+      models.push({ ...selected, providerName: model.providerName, modelName: model.modelName,
+        ...(model.aliases === undefined ? {} : { aliases: model.aliases as string[] }) })
     } catch { return null }
   }
   return models

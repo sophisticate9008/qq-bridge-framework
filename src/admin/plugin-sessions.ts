@@ -2,9 +2,11 @@ import { parsePluginSessionManagementRequest, parsePluginSessionSnapshot, parseP
 import type { PluginModelService } from '../host/plugin-model-service.ts'
 import { errorCode } from '../core/values.ts'
 import { AdminRequestError, type AdminRoute } from './server.ts'
+import type { PluginModelDescription } from '../contracts/plugin-model.ts'
 
 export function createPluginSessionRoutes(options: {
   readonly getService: () => PluginModelService | undefined
+  readonly managementModels?: (signal: AbortSignal) => Promise<readonly PluginModelDescription[]>
   readonly resolveQQ?: (conversationId: string, signal: AbortSignal) => Promise<{ readonly sessionId: string } | null>
 }): readonly AdminRoute[] {
   function service(): PluginModelService {
@@ -36,7 +38,7 @@ export function createPluginSessionRoutes(options: {
     async handle({ query, signal }) {
       if (query.size) throw new AdminRequestError(400, 'invalid_plugin_session_query')
       try {
-        const models = parsePluginSessionModels({ schema: 1, models: await service().models(signal) })
+        const models = parsePluginSessionModels({ schema: 1, models: await (options.managementModels ? options.managementModels(signal) : service().models(signal)) })
         if (!models) throw new AdminRequestError(503, 'plugin_models_invalid_response')
         return { schema: 1, models }
       } catch (error) { failed(error, signal) }

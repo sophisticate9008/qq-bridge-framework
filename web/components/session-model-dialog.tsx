@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { parsePluginSessionModels } from '../../src/contracts/plugin-sessions.ts';
 import { parseSessionModelConfiguration } from '../../src/contracts/session-model-configuration.ts';
-import type { PluginModelSelection } from '../../src/contracts/plugin-model.ts';
 import { ApiError, errorMessage, isRecord, type ApiClient } from '../lib/api.ts';
 import { hasSessionResetTarget, type ManagedSession } from '../lib/session-management.ts';
 import { useReadResource } from '../lib/use-read-resource.ts';
 import { writeResource } from '../lib/resource-reader.ts';
 import { Button } from './ui/button.tsx';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog.tsx';
+import { findSessionModel, sessionModelKey as key, sessionModelOptionValue } from '../lib/session-model-options.ts';
+import { SessionModelOptions } from './session-model-options.tsx';
 
-const key = (model: PluginModelSelection) => JSON.stringify([model.provider, model.model]);
 export function SessionModelDialog({ api, connected, target, onClose, onSaved }: {
   readonly api: ApiClient; readonly connected: boolean; readonly target: ManagedSession | null;
   readonly onClose: () => void; readonly onSaved: () => void;
@@ -29,12 +29,12 @@ export function SessionModelDialog({ api, connected, target, onClose, onSaved }:
   function close() { if (state === 'saving') return; if (state === 'blocked') onSaved(); onClose(); }
   async function save() {
     if (!target || !connected || !hasSessionResetTarget(target) || !target.modelConfiguration || request.current || state !== 'idle') return;
-    const selected = models.snapshot?.find(model => key(model) === choice);
+    const selected = findSessionModel(models.snapshot ?? [], choice);
     if (choice && !selected) { setError('请选择当前可用的模型。'); return; }
     const controller = new AbortController(); request.current = controller; setState('saving'); setError('');
     try {
       const model = selected ? { provider: selected.provider, model: selected.model,
-        ...((selected.reasoningEffort ?? (target.modelConfiguration.override && key(target.modelConfiguration.override) === key(selected) ? target.modelConfiguration.override.reasoningEffort : undefined)) ? { reasoningEffort: selected.reasoningEffort ?? target.modelConfiguration.override?.reasoningEffort } : {}) } : null;
+        ...((selected.reasoningEffort ?? (target.modelConfiguration.override && sessionModelOptionValue(models.snapshot ?? [], key(target.modelConfiguration.override)) === key(selected) ? target.modelConfiguration.override.reasoningEffort : undefined)) ? { reasoningEffort: selected.reasoningEffort ?? target.modelConfiguration.override?.reasoningEffort } : {}) } : null;
       const result = await writeResource(api, '/api/chat/sessions/model', { key: target.key, sessionId: target.sessionId,
         generation: target.generation, bindingRevision: target.bindingRevision, confirm: true,
         modelRevision: target.modelConfiguration.revision, model }, controller.signal);
@@ -53,13 +53,15 @@ export function SessionModelDialog({ api, connected, target, onClose, onSaved }:
     } finally { if (request.current === controller) request.current = null; }
   }
   const configuration = target?.modelConfiguration;
+  const currentDescriptor = configuration?.override ? findSessionModel(models.snapshot ?? [], configuration.override) : null;
+  const currentProviderName = configuration?.override ? currentDescriptor?.providerName ?? '历史供应商（未在当前目录登记）' : configuration?.providerName;
   const applied = configuration?.lastApplied;
-  const appliedDescriptor = applied && models.snapshot?.find(model => model.provider === applied.model.provider && model.model === applied.model.model);
+  const appliedDescriptor = applied && findSessionModel(models.snapshot ?? [], applied.model);
   return <Dialog open={target !== null} onOpenChange={open => { if (!open) close(); }}><DialogContent showCloseButton={state !== 'saving'}>
     <DialogHeader><DialogTitle>调整会话模型</DialogTitle><DialogDescription>选择这条 QQ 会话后续消息使用的供应商和模型，保留当前对话与历史。</DialogDescription></DialogHeader>
-    <div className="grid gap-3 text-xs"><p>{target?.key}</p><p className="text-muted-foreground">当前设置：{configuration?.providerName} / {configuration?.modelName} · {configuration?.override ? '本会话指定' : `跟随聊天方案「${configuration?.planName}」`}</p>
-      <p className="text-muted-foreground">最近应用：{applied ? `${appliedDescriptor?.providerName ?? applied.model.provider} / ${appliedDescriptor?.modelName ?? applied.model.model}` : '尚无应用记录'}</p><label className="grid gap-1">供应商与模型<select aria-label="会话供应商与模型" className="h-8 rounded border border-input bg-background px-2" value={choice} disabled={state !== 'idle' || models.loading || Boolean(models.error)} onChange={event => setChoice(event.target.value)}>
-        <option value="">跟随聊天方案（恢复默认）</option>{models.snapshot?.map(model => <option key={key(model)} value={key(model)}>{model.providerName} / {model.modelName}{model.reasoningEffort ? ` · ${model.reasoningEffort}` : ''}</option>)}
+    <div className="grid gap-3 text-xs"><p>{target?.key}</p><p className="text-muted-foreground">当前设置：{currentProviderName} / {currentDescriptor?.modelName ?? configuration?.modelName} · {configuration?.override ? '本会话指定' : `跟随聊天方案「${configuration?.planName}」`}</p>
+      <p className="text-muted-foreground">最近应用：{applied ? `${appliedDescriptor?.providerName ?? '历史供应商（未在当前目录登记）'} / ${appliedDescriptor?.modelName ?? applied.model.model}` : '尚无应用记录'}</p><label className="grid gap-1">供应商与模型<select aria-label="会话供应商与模型" className="h-8 rounded border border-input bg-background px-2" value={sessionModelOptionValue(models.snapshot ?? [], choice)} disabled={state !== 'idle' || models.loading || Boolean(models.error)} onChange={event => setChoice(event.target.value)}>
+        <option value="">跟随聊天方案（恢复默认）</option><SessionModelOptions models={models.snapshot ?? []} selectedValue={choice} />
       </select></label><p className="text-muted-foreground">保存后从下次处理消息开始使用。其他会话继续使用各自的设置。</p>
       {models.loading && <p>正在读取模型…</p>}{models.error && <p role="alert" className="text-destructive">模型目录读取失败。<Button variant="ghost" size="sm" onClick={models.refresh}>重新读取</Button></p>}
       {error && <p role="alert" className="text-destructive">{error}</p>}</div>

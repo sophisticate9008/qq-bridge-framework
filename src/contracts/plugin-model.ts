@@ -11,6 +11,8 @@ export interface PluginModelSelection {
 export interface PluginModelDescription extends PluginModelSelection {
   readonly providerName: string
   readonly modelName: string
+  /** Verified equivalent routes for resolving an existing session's selection in management views. */
+  readonly aliases?: readonly string[]
 }
 export interface PluginModelSessionKey {
   readonly name?: string

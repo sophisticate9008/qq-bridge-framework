@@ -16,6 +16,9 @@ import { recordNativeExecutionPhase } from './native-execution-diagnostics.ts'
 import { createExecutionRecoveryPoll } from './execution-recovery-poll.ts'
 import { createSessionTurnQueue } from './session-turns.ts'
 import { readSessionModelOverride, SESSION_MODELS, SESSION_MODEL_APPLIED } from './session-model-configuration.ts'
+import { buildSessionModelCatalog, sessionModelForConversation } from './session-model-catalog.ts'
+import { readSessionModelAliases } from './session-model-aliases.ts'
+import { createDshProfileFilePort } from '../adapters/dsh-profile-files.ts'
 import { parseSessionModelConfiguration, type SessionModelConfiguration } from '../contracts/session-model-configuration.ts'
 import { parsePluginModelSelection, type PluginModelSelection } from '../contracts/plugin-model.ts'
 import type { PluginRuntimeServices } from './plugin-runtime.ts'
@@ -2105,6 +2108,12 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
     },
     stickerLibrary: () => state === 'running' && !closed ? stickerLibrary : undefined,
     pluginModelService: () => state === 'running' && !closed ? pluginModels : undefined,
+    async sessionModelCatalog(signal: AbortSignal) {
+      if (closed || state !== 'running' || !dsh) failure('SESSION_MODEL_UNAVAILABLE')
+      const configuration = await options.loadConfiguration()
+      const aliases = await readSessionModelAliases(configuration, createDshProfileFilePort()).catch(() => [])
+      return buildSessionModelCatalog(configuration.providers, verifiedDeployment?.presetBindings ?? [], await dsh.pluginModels.models(signal), aliases)
+    },
     async sessionModelConfigurations(keys: readonly string[]): Promise<Readonly<Record<string, SessionModelConfiguration>>> {
       if (state !== 'running' || !active || closed) return {}
       const configuration = active
@@ -2138,11 +2147,15 @@ export function createNativeChatRuntime(options: NativeChatRuntimeOptions) {
       const combined = AbortSignal.any([signal, currentLifetime.signal, AbortSignal.timeout(15000)])
       runtime.assertSessionIdle(target)
       if (queue.isBusy(target.sessionId)) failure('SESSION_MANAGEMENT_BUSY')
-      const selected = model === null ? null : parsePluginModelSelection(model)
+      const selected = model === null ? null : sessionModelForConversation(parsePluginModelSelection(model), target.key, verifiedDeployment?.presetBindings ?? [])
       if (selected?.contextWindow !== undefined) failure('SESSION_MANAGEMENT_INVALID_TARGET')
       const catalog = selected === null ? [] : await dsh.pluginModels.models(combined)
-      const descriptor = selected && catalog.find(item => item.provider === selected.provider && item.model === selected.model)
-      if (selected && !descriptor) failure('SESSION_MODEL_UNAVAILABLE')
+      const liveDescriptor = selected && catalog.find(item => item.provider === selected.provider && item.model === selected.model)
+      if (selected && !liveDescriptor) failure('SESSION_MODEL_UNAVAILABLE')
+      const managementCatalog = selected ? buildSessionModelCatalog((await options.loadConfiguration()).providers,
+        verifiedDeployment?.presetBindings ?? [], catalog) : []
+      const descriptor = selected && managementCatalog.find(item => item.model === selected.model
+        && (item.provider === selected.provider || item.aliases?.includes(selected.provider))) || liveDescriptor
       const release = await queue.acquire(target.sessionId, combined)
       try {
         combined.throwIfAborted()
