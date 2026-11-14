@@ -54,7 +54,7 @@ export async function observeGif(input: { readonly data: Uint8Array; readonly si
     if (count === 1) return { status: 'static' }
     const delays = metadata.delay
     if (!Array.isArray(delays) || delays.length !== count
-      || !delays.every(value => Number.isSafeInteger(value) && value > 0 && value <= 655350)) return rejected('gif_timing_unavailable')
+      || !delays.every(value => Number.isSafeInteger(value) && value >= 0 && value <= 655350)) return rejected('gif_timing_unavailable')
     const loop = metadata.loop
     if (!Number.isSafeInteger(loop) || loop === undefined || loop < 0 || loop > 65535) return rejected('gif_loop_unavailable')
     const starts: number[] = []
